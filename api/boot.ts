@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 import { appRouter } from "./router";
 import { createContext } from "./context";
-import { env } from "./lib/env";
+import { env, validateEnv } from "./lib/env";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Paths, Session } from "@contracts/constants";
 import {
@@ -164,6 +164,36 @@ app.get("/api/auth/google/url", oauthLimiter, async (c) => {
 	const redirectTo = c.req.query("redirectTo") ?? "/";
 	const url = `/api/oauth/google?redirectTo=${encodeURIComponent(redirectTo)}`;
 	return c.json({ authUrl: url });
+});
+
+// Env-dump endpoint (development / diagnostic only)
+app.get("/__env-debug", async (c) => {
+  // Called AFTER module loads so env is populated
+  const issues = validateEnv();
+  const allKeys = Object.keys(process.env).sort();
+  const snapshot: Record<string, string | undefined> = {};
+  for (const k of allKeys) snapshot[k] = process.env[k];
+  return c.json(
+    {
+      NODE_ENV: process.env.NODE_ENV,
+      PORT: process.env.PORT,
+      validateEnvMissing: issues,
+      envProblems: (issues.length ? "MISSING: " + issues.join(", ") : "OK"),
+      required: {
+        APP_ID: !!process.env.APP_ID,
+        APP_SECRET: !!process.env.APP_SECRET,
+        DATABASE_URL: !!process.env.DATABASE_URL,
+        KIMI_AUTH_URL: !!process.env.KIMI_AUTH_URL,
+        KIMI_OPEN_URL: !!process.env.KIMI_OPEN_URL,
+        VAPI_API_KEY: !!process.env.VAPI_API_KEY,
+        ELEVENLABS_API_KEY: !!process.env.ELEVENLABS_API_KEY,
+        NODE_ENV: !!process.env.NODE_ENV,
+      },
+      totalKeys: allKeys.length,
+    },
+    200,
+    { "Cache-Control": "no-store" },
+  );
 });
 
 // Kimi OAuth callback

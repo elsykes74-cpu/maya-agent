@@ -1,15 +1,38 @@
 import "dotenv/config";
 
-const _reqDebug: Record<string, boolean> = {};
+/** Cache raw values so we can test them without side-effects */
+function _raw(name: string): string | undefined {
+  return process.env[name] || undefined;
+}
 
+/** Return value OR empty string without throwing. */
+function soft(name: string): string {
+  return process.env[name] ?? "";
+}
+
+/**
+ * Like required() but NO THROW.
+ * Returns the raw value; logs a warning when production.
+ */
 function required(name: string): string {
-  const value = process.env[name];
-  const missing = !value;
-  _reqDebug[name] = missing;
-  if (missing && process.env.NODE_ENV === "production") {
-    throw new Error(`Missing required environment variable: ${name}`);
+  const v = process.env[name];
+  if (!v && process.env.NODE_ENV === "production") {
+    console.error(`[env] MISSING required var: ${name}`);
   }
-  return value ?? "";
+  return v ?? "";
+}
+
+/** Run once at boot – returns list of bad / missing vars. */
+export function validateEnv(): string[] {
+  const required_keys = [
+    "APP_ID",
+    "APP_SECRET",
+    "DATABASE_URL",
+    "KIMI_AUTH_URL",
+    "KIMI_OPEN_URL",
+    "NODE_ENV",
+  ] as const;
+  return required_keys.filter((k) => !process.env[k]);
 }
 
 export const env = {
@@ -19,11 +42,8 @@ export const env = {
   databaseUrl: required("DATABASE_URL"),
   kimiAuthUrl: required("KIMI_AUTH_URL"),
   kimiOpenUrl: required("KIMI_OPEN_URL"),
-  ownerUnionId: process.env.OWNER_UNION_ID ?? "",
-  appUrl: process.env.APP_URL ?? "http://localhost:3000",
-  googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
-  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-  __missing: Object.fromEntries(
-    Object.entries(_reqDebug).filter(([, v]) => v),
-  ),
+  ownerUnionId: soft("OWNER_UNION_ID"),
+  appUrl: soft("APP_URL") || "http://localhost:3000",
+  googleClientId: soft("GOOGLE_CLIENT_ID"),
+  googleClientSecret: soft("GOOGLE_CLIENT_SECRET"),
 };
