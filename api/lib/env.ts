@@ -1,8 +1,12 @@
 import "dotenv/config";
 
+const _reqDebug: Record<string, boolean> = {};
+
 function required(name: string): string {
   const value = process.env[name];
-  if (!value && process.env.NODE_ENV === "production") {
+  const missing = !value;
+  _reqDebug[name] = missing;
+  if (missing && process.env.NODE_ENV === "production") {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value ?? "";
@@ -19,4 +23,7 @@ export const env = {
   appUrl: process.env.APP_URL ?? "http://localhost:3000",
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  __missing: Object.fromEntries(
+    Object.entries(_reqDebug).filter(([, v]) => v),
+  ),
 };

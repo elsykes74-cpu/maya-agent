@@ -211,17 +211,22 @@ app.notFound((c) => {
 // Production bootstrap
 // ---------------------------------------------------------------------------
 if (env.isProduction) {
-	if (!loadIndex()) {
-		throw new Error(
-			`Client build not found at ${CLIENT_DIST}. Run the client build before starting the server.`,
-		);
-	}
+  if (!loadIndex()) {
+    throw new Error(
+      `Client build not found at ${CLIENT_DIST}. Run the client build before starting the server.`,
+    );
+  }
 
-	const { serve } = await import("@hono/node-server");
-	const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-	serve({ fetch: app.fetch, port }, () => {
-		console.log(`[server] listening on port ${port}`);
-	});
+  try {
+    const { serve } = await import("@hono/node-server");
+    const port = Number.parseInt(process.env.PORT ?? "3000", 10);
+    serve({ fetch: app.fetch, port }, () => {
+      console.log(`[server] listening on port ${port}`);
+    });
+  } catch (err) {
+    console.error("[boot] FATAL:", err);
+    throw err;
+  }
 }
 
 export default app;
