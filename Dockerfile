@@ -1,19 +1,16 @@
-# syntax=docker/dockerfile:1
 FROM node:20-bookworm-slim
 
-# Install all deps including devDependencies for build tools
 WORKDIR /app
-COPY package.json package-lock.json* .npmrc ./
-RUN npm install --include=dev 2>&1 | tail -5
 
-# Copy source
+# Install ALL deps (dev + prod) so vite/esbuild run during build
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev: false 2>&1 | tail -8
+
 COPY . .
-
-# Build: vite + esbuild → dist/boot.js
 RUN npm run build 2>&1 | tail -20
 
-# Expose Railway's port
+# Railway passes PORT; listen on 8080
+ENV PORT=8080
 EXPOSE 8080
 
-# Zero-dep preflight entry: survives crashes, reports env/diagnostics
 CMD ["node", "preflight-server.js"]
