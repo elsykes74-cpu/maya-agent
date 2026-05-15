@@ -1,65 +1,66 @@
 "use strict";
-import "dotenv/config";
-import { Hono } from "hono";
-import { serve } from "@hono/node-server";
+// Rescues the dashboard when dist/boot.js is missing or crashes.
+// Zero runtime deps — only Node.js built-in http module.
+const http = require("http");
 
-const app = new Hono();
+const required = ["APP_ID", "APP_SECRET", "DATABASE_URL", "KIMI_AUTH_URL", "KIMI_OPEN_URL", "OWNER_UNION_ID"];
+const missing = required.filter((k) => !process.env[k]);
 
-// ─── Always-available diagnostic endpoints ───────────────────────────────────
-app.get("/__env-debug", (c) => {
-  const required = ["APP_ID", "APP_SECRET", "DATABASE_URL", "KIMI_AUTH_URL", "KIMI_OPEN_URL", "NODE_ENV"];
-  const missing = required.filter((k) => !process.env[k]);
-  return c.json({
-    phase: "preflight",
-    NODE_ENV: process.env.NODE_ENV,
-    PORT: process.env.PORT,
-    requiredMissing: missing,
-    envPresence: Object.fromEntries(required.map((k) => [k, !!process.env[k]])),
-    message: missing.length ? `Missing: ${missing.join(", ")}` : "All required vars present",
-  });
+const ENV_JSON = JSON.stringify({
+  phase: "preflight",
+  NODE_ENV: process.env.NODE_ENV,
+  PORT: process.env.PORT,
+  requiredMissing: missing,
+  envPresence: Object.fromEntries(required.map((k) => [k, !!process.env[k]])),
+  message: missing.length ? `Missing: ${missing.join(", ")}` : "All required vars present",
+}, null, 2);
+
+const HEALTH_JSON = JSON.stringify({
+  status: missing.length ? "degraded" : "preflight-ok",
+  uptime: process.uptime(),
+  envOk: missing.length === 0,
 });
 
-app.get("/__health", (c) => c.json({ status: "preflight", uptime: process.uptime() }));
+const server = http.createServer((req, res) => {
+  // CORS for browser-based probes
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  if (req.method === "OPTIONS") { res.writeHead(200); res.end(); return; }
 
-// ─── Try real app boot ───────────────────────────────────────────────────────
-import("./dist/boot.js")
-  .then((mod) => {
-    console.log("[preflight] dist/boot.js loaded OK — switching to real app");
-    // Serve only the real app from now on
-    const realApp = mod.default ?? mod;
-    const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-    serve({ fetch: realApp.fetch, port }, () => {
-      console.log(`[server] real app listening on port ${port}`);
-    });
-  })
-  .catch((err) => {
-    console.error("[preflight] dist/boot.js FAILED:", err.message);
-    console.error("[preflight] serving rescue page until fix is deployed");
+  if (req.url === "/__env-debug" || req.url === "/__env-debug/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(ENV_JSON);
+    return;
+  }
+  if (req.url === "/__health" || req.url === "/__health/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(HEALTH_JSON);
+    return;
+  }
 
-    app.all("*", (c) =>
-      c.html(
-        `<!DOCTYPE html><html><head><title>Maya AI — Start-up Error</title>
-         <meta name="viewport" content="width=device-width,initial-scale=1"/>
-         <style>
-           *{box-sizing:border-box;margin:0;padding:0}
-           body{background:#0f0f1a;color:#e0e0e0;font-family:system-ui,sans-serif;padding:1.5rem;line-height:1.6}
-           .err{color:#ff6b6b;font-weight:700}
-           code{background:#1e1e2e;padding:.1em .4em;border-radius:3px;color:#ff9f43;font-size:.9em}
-           a{color:#6bcfff}
-           .box{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:1.25rem;margin-top:1rem}
-         </style></head><body>
-         <h1 class="err">🚨 Maya AI — Start-up Failed</h1>
-         <p>The application crashed during boot.</p>
-         <div class="box"><strong>Error:</strong><br/><code>${err.message}</code></div>
-         <p>Next step: visit <a href="/__env-debug">/__env-debug</a> to check environment variables.</p>
-         <p style="margin-top:1rem;color:#888">This rescue page is served by <code>preflight-server.js</code>.
-            Replace this file with a production build once the underlying issue is fixed.</p>
-         </body></html>`,
-      ),
-    );
+  // Rescue page
+  res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(`<!DOCTYPE html><html><head><title>Maya AI — Start-up Error</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0f0f1a;color:#e0e0e0;font-family:system-ui,sans-serif;padding:1.5rem;line-height:1.6}
+.err{color:#ff6b6b;font-weight:700}
+code{background:#1e1e2e;padding:.1em .4em;border-radius:3px;color:#ff9f43;font-size:.9em}
+a{color:#6bcfff}
+.box{background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:1.25rem;margin:1rem 0}
+small{color:#666}
+</style></head><body>
+<h1 class="err">🚨 Maya AI — Start-up Failed</h1>
+<p>The app crashed before it could start. This rescue page is served by <code>preflight-server.js</code>.</p>
+<div class="box"><strong>Boot error:</strong><br/><code>dist/boot.js not found or crashed</code></div>
+<div class="box"><strong>Environment (${missing.length} missing):</strong><br/><pre>${ENV_JSON}</pre></div>
+<p>Next step: check <a href="https://docs.railway.com/observability/logs">Railway deploy logs</a> or fix the build and redeploy.</p>
+<p style="margin-top:1rem;color:#666;font-size:.85em">
+  Required vars missing: ${missing.join(", ") || "none"} — 
+  visit <a href="/__env-debug">/__env-debug</a> anytime.
+</p>
+</body></html>`);
+});
 
-    const port = Number.parseInt(process.env.PORT ?? "3000", 10);
-    serve({ fetch: app.fetch, port }, () => {
-      console.log(`[rescue] listening on port ${port}`);
-    });
-  });
+const port = Number.parseInt(process.env.PORT || "3000", 10);
+server.listen(port, () => console.log(`[preflight] listening on port ${port}`));
