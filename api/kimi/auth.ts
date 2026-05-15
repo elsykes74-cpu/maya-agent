@@ -37,13 +37,23 @@ async function exchangeAuthCode(
   return resp.json() as Promise<TokenResponse>;
 }
 
-const jwks = jose.createRemoteJWKSet(
-  new URL(`${env.kimiAuthUrl}/api/.well-known/jwks.json`),
-);
+/** Lazy JWK set – fetched on first use, not at module load time. */
+let _jwksPromise: Promise<jose.CognitoJWKSCreator<jose.Any> | jose.CertificateJWKSCreator> | null = null;
+function getJwks(): Promise<jose.CognitoJWKSCreator<jose.Any> | jose.CertificateJWKSCreator> {
+  if (!_jwksPromise) {
+    const base = env.kimiAuthUrl;
+    if (!base) throw new Error("kimiAuthUrl is empty – cannot fetch JWKS");
+    _jwksPromise = jose.createRemoteJWKSet(
+      new URL(`${base}/api/.well-known/jwks.json`),
+    );
+  }
+  return _jwksPromise;
+}
 
 async function verifyAccessToken(
   accessToken: string,
 ): Promise<{ userId: string; clientId: string }> {
+  const jwks = await getJwks();
   const { payload } = await jose.jwtVerify(accessToken, jwks);
   const userId = payload.user_id as string;
   const clientId = payload.client_id as string;
