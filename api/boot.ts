@@ -13,7 +13,7 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
 import { createOAuthCallbackHandler } from "./kimi/auth";
-import { Paths, Session } from "@contracts/constants";
+import { Session, Paths } from "../contracts/constants";
 import {
 	getGoogleAuthUrl,
 	exchangeGoogleCode,

@@ -1,0 +1,10 @@
+import { createConnection } from "mysql2/promise";
+import "dotenv/config";
+const c = await createConnection({ uri: process.env.DATABASE_URL });
+const [leadsRows] = await c.execute("SELECT id, seller_name, property_address FROM leads LIMIT 10");
+const [campRows]  = await c.execute("SELECT id, name FROM campaigns");
+console.log("=== leads ===");
+for (const r of leadsRows) console.log(`${r.id}: ${r.seller_name} | ${r.property_address}`);
+console.log("\n=== campaigns ===");
+for (const r of campRows) console.log(`${r.id}: ${r.name}`);
+await c.end();
