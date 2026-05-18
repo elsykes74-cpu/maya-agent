@@ -1,8 +1,18 @@
+process.on('uncaughtException', (err) => {
+  console.error('[fatal] uncaughtException:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal] unhandledRejection:', reason);
+  process.exit(1);
+});
+
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
+import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -248,7 +258,6 @@ if (env.isProduction) {
   }
 
   try {
-    const { serve } = await import("@hono/node-server");
     const port = Number.parseInt(process.env.PORT ?? "3000", 10);
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
