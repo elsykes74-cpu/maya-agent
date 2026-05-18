@@ -1,1 +1,1 @@
-web: node preflight-server.js
+web: node dist/boot.js

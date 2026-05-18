@@ -10,7 +10,9 @@ RUN NODE_ENV=development npm install 2>&1 | tail -8
 COPY . .
 RUN npm run build 2>&1 | tail -20
 
-ENV PORT=8080
+# Railway sets $PORT at runtime; Hono reads it in api/boot.ts:252
 EXPOSE 8080
 
-CMD ["node", "preflight-server.js"]
+# Before: "preflight-server.js" — this file never existed here.
+# Now: run the actual built API server entry point.
+CMD ["node", "dist/boot.js"]
