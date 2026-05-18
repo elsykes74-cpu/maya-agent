@@ -16,4 +16,5 @@ EXPOSE 8080
 # Before: "preflight-server.js" — this file never existed here.
 # Now: run the actual built API server entry point.
 # Use start.mjs wrapper for better error reporting on Railway
-CMD ["node", "start.mjs"]
+# Use debug wrapper — logs go to stdout for Railway runtime logs
+CMD ["node", "start-debug.mjs"]
