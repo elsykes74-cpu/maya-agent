@@ -41,10 +41,15 @@ export async function upsertUser(data: InsertUser) {
   await getDb()
     .insert(schema.users)
     .values(values)
-    .onDuplicateKeyUpdate({ set: updateSet });
+    .onConflictDoUpdate({ target: schema.users.unionId, set: updateSet });
 }
 
-export async function upsertGoogleUser(data: { googleId: string; name?: string | null; email?: string | null; avatar?: string | null }) {
+export async function upsertGoogleUser(data: {
+  googleId: string;
+  name?: string | null;
+  email?: string | null;
+  avatar?: string | null;
+}) {
   const existing = await findUserByGoogleId(data.googleId);
 
   if (existing) {
@@ -61,10 +66,11 @@ export async function upsertGoogleUser(data: { googleId: string; name?: string |
     return;
   }
 
+  const syntheticUnionId = `google_${data.googleId}`;
   await getDb()
     .insert(schema.users)
     .values({
-      unionId: `google_${data.googleId}`,
+      unionId: syntheticUnionId,
       googleId: data.googleId,
       name: data.name ?? null,
       email: data.email ?? null,
@@ -72,7 +78,8 @@ export async function upsertGoogleUser(data: { googleId: string; name?: string |
       role: "user",
       lastSignInAt: new Date(),
     })
-    .onDuplicateKeyUpdate({
+    .onConflictDoUpdate({
+      target: schema.users.unionId,
       set: {
         lastSignInAt: new Date(),
         name: data.name ?? undefined,
