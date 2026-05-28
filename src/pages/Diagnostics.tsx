@@ -1,0 +1,1 @@
+{'@/providers/trpc': 'xport default function Diagnostics() {\n  const { data', 'p>isLoading': {'p>error': {}}}
