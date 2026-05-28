@@ -250,7 +250,7 @@ app.notFound((c) => {
 // ---------------------------------------------------------------------------
 // Production bootstrap
 // ---------------------------------------------------------------------------
-if (env.isProduction) {
+if (env.isProduction && !process.env.VERCEL) {
   if (!loadIndex()) {
     throw new Error(
       `Client build not found at ${CLIENT_DIST}. Run the client build before starting the server.`,
