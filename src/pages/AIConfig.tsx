@@ -1,211 +1,122 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import {
-  Bot,
-  Save,
-  Plus,
-  Trash2,
-  Edit3,
-  Shield,
-  MessageSquare,
-  Phone,
-  ChevronRight,
-} from 'lucide-react'
+import { useState } from 'react';
+import { trpc } from '@/providers/trpc';
+import { ChevronLeft, Bot, Save, Volume2, Languages, Clock, Phone } from 'lucide-react';
+import { useNavigate } from 'react-router';
 
 export default function AIConfig() {
-  const [activeTab, setActiveTab] = useState('system')
-  const [editingScript, setEditingScript] = useState<string | null>(null)
-  const [newObjectionOpen, setNewObjectionOpen] = useState(false)
+  const navigate = useNavigate();
+  const utils = trpc.useUtils();
 
-  const { data: config, refetch: refetchConfig } = trpc.aiConfig.get.useQuery()
-  const { data: objections, refetch: refetchObjections } = trpc.aiConfig.objections.useQuery()
+  const { data: config, isLoading } = trpc.callingConfig.get.useQuery();
+  const [voiceName, setVoiceName] = useState(config?.voiceName ?? 'alloy');
+  const [language, setLanguage] = useState(config?.language ?? 'English');
+  const [greeting, setGreeting] = useState(config?.greetingScript ?? '');
+  const [transferNumber, setTransferNumber] = useState(config?.transferNumber ?? '');
+  const [maxDuration, setMaxDuration] = useState(config?.maxCallDuration?.toString() ?? '300');
 
-  const updateConfig = trpc.aiConfig.update.useMutation({ onSuccess: () => refetchConfig() })
-  const createObjection = trpc.aiConfig.createObjection.useMutation({ onSuccess: () => { refetchObjections(); setNewObjectionOpen(false) } })
-  const deleteObjection = trpc.aiConfig.deleteObjection.useMutation({ onSuccess: () => refetchObjections() })
+  const updateMutation = trpc.callingConfig.update.useMutation({
+    onSuccess: () => utils.callingConfig.get.invalidate(),
+  });
 
-  const scriptFields = [
-    { key: 'systemPrompt', label: 'System Prompt / Role', icon: Bot, description: 'Core AI personality and objective' },
-    { key: 'openerScript', label: 'Opening Script', icon: Phone, description: 'Pattern interrupt opener' },
-    { key: 'discoveryQuestions', label: 'Discovery Questions', icon: MessageSquare, description: 'Motivation extraction questions' },
-    { key: 'positioningScript', label: 'Psychological Positioning', icon: ChevronRight, description: 'Mirror pain, pivot to ease' },
-    { key: 'priceAnchorScript', label: 'Price Anchor Script', icon: ChevronRight, description: 'Soft price discussion' },
-    { key: 'closeScript', label: 'Appointment Close', icon: ChevronRight, description: 'Set the walkthrough appointment' },
-    { key: 'voicemailScript', label: 'Voicemail Script', icon: Phone, description: '20-second curiosity voicemail' },
-    { key: 'complianceDisclaimer', label: 'Compliance Disclaimer', icon: Shield, description: 'Legal positioning notes' },
-  ]
-
-  const handleSaveScript = (field: string, value: string) => {
-    if (!config) return
-    updateConfig.mutate({ id: config.id, [field]: value })
-    setEditingScript(null)
-  }
-
-  const handleNewObjection = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    createObjection.mutate({
-      objection: formData.get('objection') as string,
-      response: formData.get('response') as string,
-      category: formData.get('category') as string || undefined,
-      priority: Number(formData.get('priority')) || 0,
-    })
-  }
+  const handleSave = () => {
+    updateMutation.mutate({
+      voiceName,
+      language,
+      greetingScript: greeting,
+      transferNumber: transferNumber || undefined,
+      maxCallDuration: parseInt(maxDuration) || 300,
+    });
+  };
 
   return (
-    <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 lg:w-[300px]">
-          <TabsTrigger value="system">AI Scripts</TabsTrigger>
-          <TabsTrigger value="objections">Objections</TabsTrigger>
-        </TabsList>
+    <div className="min-h-full">
+      <div className="px-5 pt-4 pb-3">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
+            <ChevronLeft size={24} className="text-[#007AFF]" />
+          </button>
+          <h1 className="text-[22px] font-bold">AI Agent Config</h1>
+        </div>
+      </div>
 
-        <TabsContent value="system" className="space-y-4">
-          <div className="grid grid-cols-1 gap-4">
-            {scriptFields.map((field) => {
-              const Icon = field.icon
-              const value = (config as any)?.[field.key] || ''
-              const isEditing = editingScript === field.key
-
-              return (
-                <Card key={field.key} className="border-l-4 border-l-emerald-500">
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                      <CardTitle className="text-base flex items-center gap-2">
-                        <Icon className="w-4 h-4 text-emerald-600" />
-                        {field.label}
-                      </CardTitle>
-                      <p className="text-xs text-slate-500 mt-1">{field.description}</p>
-                    </div>
-                    {isEditing ? (
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="ghost" onClick={() => setEditingScript(null)}>Cancel</Button>
-                        <Button size="sm" className="bg-emerald-600" onClick={() => {
-                          const textarea = document.getElementById(`edit-${field.key}`) as HTMLTextAreaElement
-                          if (textarea) handleSaveScript(field.key, textarea.value)
-                        }}>
-                          <Save className="w-4 h-4 mr-1" /> Save
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button size="sm" variant="ghost" onClick={() => setEditingScript(field.key)}>
-                        <Edit3 className="w-4 h-4 mr-1" /> Edit
-                      </Button>
-                    )}
-                  </CardHeader>
-                  <CardContent>
-                    {isEditing ? (
-                      <Textarea
-                        id={`edit-${field.key}`}
-                        defaultValue={value}
-                        rows={8}
-                        className="font-mono text-sm"
-                      />
-                    ) : (
-                      <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-lg text-sm whitespace-pre-wrap font-mono leading-relaxed">
-                        {value || 'Not configured'}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              )
-            })}
+      <div className="px-5 mb-5">
+        <div className="ios-card p-5 text-center bg-gradient-to-br from-[#007AFF] to-[#5856D6]">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-white/20 flex items-center justify-center mb-3">
+            <Bot size={32} className="text-white" />
           </div>
-        </TabsContent>
+          <p className="text-[18px] font-bold text-white">AI Calling Agent</p>
+          <p className="text-[14px] text-white/70 mt-1">Western Massachusetts Real Estate</p>
+        </div>
+      </div>
 
-        <TabsContent value="objections" className="space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-lg font-semibold">Objection Handling Library</h3>
-            <Dialog open={newObjectionOpen} onOpenChange={setNewObjectionOpen}>
-              <DialogTrigger asChild>
-                <Button className="bg-emerald-600 hover:bg-emerald-700">
-                  <Plus className="w-4 h-4 mr-2" /> Add Objection
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>New Objection Response</DialogTitle>
-                </DialogHeader>
-                <form onSubmit={handleNewObjection} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Objection</Label>
-                    <Input name="objection" placeholder="e.g., I want full market value" required />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Response</Label>
-                    <Textarea name="response" placeholder="Your scripted response..." rows={3} required />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Category</Label>
-                      <Input name="category" placeholder="e.g., Price" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Input name="priority" type="number" defaultValue={0} />
-                    </div>
-                  </div>
-                  <Button type="submit" className="w-full bg-emerald-600">Add Response</Button>
-                </form>
-              </DialogContent>
-            </Dialog>
+      {isLoading ? (
+        <div className="py-20 text-center text-[#8E8E93] text-[17px]">Loading config...</div>
+      ) : (
+        <div className="px-5 space-y-5">
+          <div>
+            <p className="ios-subheader">Voice</p>
+            <div className="ios-list">
+              <div className="ios-list-item border-b border-[#E5E5EA]">
+                <Volume2 size={18} className="text-[#007AFF]" />
+                <span className="flex-1 text-[17px]">Voice</span>
+                <select value={voiceName} onChange={e => setVoiceName(e.target.value)} className="bg-[#F2F2F7] rounded-lg px-3 py-1.5 text-[15px] outline-none">
+                  <option value="alloy">Alloy (Neutral)</option>
+                  <option value="echo">Echo (Male)</option>
+                  <option value="fable">Fable (Male)</option>
+                  <option value="onyx">Onyx (Male)</option>
+                  <option value="nova">Nova (Female)</option>
+                  <option value="shimmer">Shimmer (Female)</option>
+                </select>
+              </div>
+              <div className="ios-list-item">
+                <Languages size={18} className="text-[#007AFF]" />
+                <span className="flex-1 text-[17px]">Language</span>
+                <select value={language} onChange={e => setLanguage(e.target.value)} className="bg-[#F2F2F7] rounded-lg px-3 py-1.5 text-[15px] outline-none">
+                  <option value="English">English</option>
+                  <option value="Spanish">Spanish</option>
+                  <option value="Portuguese">Portuguese</option>
+                </select>
+              </div>
+            </div>
           </div>
 
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Objection</TableHead>
-                    <TableHead>Response</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {objections?.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-slate-500 py-12">
-                        No objections configured yet.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {objections?.map((obj: any) => (
-                    <TableRow key={obj.id}>
-                      <TableCell className="font-medium text-sm">{obj.objection}</TableCell>
-                      <TableCell className="text-sm italic text-emerald-700 dark:text-emerald-300 max-w-[300px]">{obj.response}</TableCell>
-                      <TableCell>
-                        {obj.category && <Badge variant="outline">{obj.category}</Badge>}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-600"
-                          onClick={() => {
-                            if (confirm('Delete this objection?')) deleteObjection.mutate({ id: obj.id })
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <div>
+            <p className="ios-subheader">Call Settings</p>
+            <div className="ios-list">
+              <div className="ios-list-item border-b border-[#E5E5EA]">
+                <Clock size={18} className="text-[#007AFF]" />
+                <span className="flex-1 text-[17px]">Max Duration</span>
+                <div className="flex items-center gap-1">
+                  <input type="number" value={maxDuration} onChange={e => setMaxDuration(e.target.value)} className="w-16 bg-[#F2F2F7] rounded-lg px-2 py-1 text-[15px] text-right outline-none" />
+                  <span className="text-[15px] text-[#8E8E93]">sec</span>
+                </div>
+              </div>
+              <div className="ios-list-item">
+                <Phone size={18} className="text-[#007AFF]" />
+                <span className="flex-1 text-[17px]">Transfer Number</span>
+                <input type="tel" value={transferNumber} onChange={e => setTransferNumber(e.target.value)} placeholder="Optional" className="w-32 bg-[#F2F2F7] rounded-lg px-2 py-1 text-[15px] text-right outline-none" />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <p className="ios-subheader">Greeting Script</p>
+            <div className="ios-card p-4">
+              <textarea value={greeting} onChange={e => setGreeting(e.target.value)} placeholder="Hello, this is [Name] with [Company]. I'm calling about your property..." rows={5} className="w-full bg-transparent text-[17px] outline-none resize-none placeholder:text-[#C6C6C8]" />
+            </div>
+          </div>
+
+          <button onClick={handleSave} disabled={updateMutation.isPending} className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50">
+            <Save size={20} /> {updateMutation.isPending ? 'Saving...' : 'Save Configuration'}
+          </button>
+
+          {updateMutation.isSuccess && (
+            <p className="text-center text-[#34C759] text-[15px] font-medium">Configuration saved!</p>
+          )}
+        </div>
+      )}
+
+      <div className="h-4" />
     </div>
-  )
+  );
 }

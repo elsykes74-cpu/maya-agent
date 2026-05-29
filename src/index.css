@@ -4,72 +4,281 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 3.9%;
+    --ios-bg: #F2F2F7;
+    --ios-card: #FFFFFF;
+    --ios-blue: #007AFF;
+    --ios-green: #34C759;
+    --ios-red: #FF3B30;
+    --ios-orange: #FF9500;
+    --ios-purple: #AF52DE;
+    --ios-teal: #5AC8FA;
+    --ios-yellow: #FFCC00;
+    --ios-gray: #8E8E93;
+    --ios-light-gray: #E5E5EA;
+    --ios-dark: #1C1C1E;
+    --ios-separator: #C6C6C8;
+    --ios-grouped-bg: #F2F2F7;
+
+    --background: 0 0% 95%;
+    --foreground: 0 0% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 240 10% 3.9%;
+    --card-foreground: 0 0% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 4.8% 95.9%;
-    --secondary-foreground: 240 5.9% 10%;
-    --muted: 240 4.8% 95.9%;
-    --muted-foreground: 240 3.8% 46.1%;
-    --accent: 240 4.8% 95.9%;
-    --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 5.9% 90%;
-    --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
-    --radius: 0.625rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --popover-foreground: 0 0% 11%;
+    --primary: 211 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 6% 94%;
+    --secondary-foreground: 0 0% 11%;
+    --muted: 240 6% 94%;
+    --muted-foreground: 240 4% 46%;
+    --accent: 240 6% 94%;
+    --accent-foreground: 0 0% 11%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 6% 90%;
+    --input: 240 6% 90%;
+    --ring: 211 100% 50%;
+    --radius: 1rem;
   }
 
-  .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
-  }
   body {
-    @apply bg-background text-foreground;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--ios-bg);
+    color: var(--ios-dark);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
   }
 }
+
+/* Mobile viewport container */
+@layer components {
+  .app-shell {
+    max-width: 430px;
+    margin: 0 auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    position: relative;
+    background: var(--ios-bg);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* iOS Card */
+  .ios-card {
+    background: var(--ios-card);
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+
+  /* iOS List */
+  .ios-list {
+    background: var(--ios-card);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .ios-list-item {
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--ios-light-gray);
+    min-height: 56px;
+  }
+
+  .ios-list-item:last-child {
+    border-bottom: none;
+  }
+
+  /* iOS Button */
+  .ios-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 14px 24px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 17px;
+    min-height: 48px;
+    transition: all 0.15s ease;
+    -webkit-user-select: none;
+    user-select: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .ios-btn:active {
+    opacity: 0.7;
+    transform: scale(0.97);
+  }
+
+  .ios-btn-primary {
+    background: var(--ios-blue);
+    color: white;
+  }
+
+  .ios-btn-green {
+    background: var(--ios-green);
+    color: white;
+  }
+
+  .ios-btn-red {
+    background: var(--ios-red);
+    color: white;
+  }
+
+  .ios-btn-orange {
+    background: var(--ios-orange);
+    color: white;
+  }
+
+  .ios-btn-outline {
+    background: transparent;
+    border: 1.5px solid var(--ios-blue);
+    color: var(--ios-blue);
+  }
+
+  .ios-btn-gray {
+    background: var(--ios-light-gray);
+    color: var(--ios-dark);
+  }
+
+  /* Status badge */
+  .ios-badge {
+    padding: 4px 12px;
+    border-radius: 100px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .ios-badge-hot {
+    background: #FFE5E5;
+    color: var(--ios-red);
+  }
+
+  .ios-badge-warm {
+    background: #FFF4E5;
+    color: var(--ios-orange);
+  }
+
+  .ios-badge-cold {
+    background: #E5E5EA;
+    color: var(--ios-gray);
+  }
+
+  .ios-badge-green {
+    background: #E5F9ED;
+    color: var(--ios-green);
+  }
+
+  .ios-badge-blue {
+    background: #E5F0FF;
+    color: var(--ios-blue);
+  }
+
+  /* Section header */
+  .ios-section-header {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    padding: 0 20px;
+    margin-bottom: 12px;
+  }
+
+  .ios-subheader {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--ios-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0 20px;
+    margin-bottom: 8px;
+    margin-top: 24px;
+  }
+
+  /* Bottom sheet */
+  .bottom-sheet {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: white;
+    border-radius: 24px 24px 0 0;
+    z-index: 100;
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Bottom tab bar */
+  .tab-bar {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    max-width: 430px;
+    height: calc(64px + env(safe-area-inset-bottom));
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-top: 1px solid rgba(0,0,0,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 50;
+  }
+
+  .tab-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 12px;
+    color: var(--ios-gray);
+    transition: color 0.2s;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  .tab-item.active {
+    color: var(--ios-blue);
+  }
+
+  .tab-item svg {
+    width: 24px;
+    height: 24px;
+    stroke-width: 2;
+  }
+
+  .tab-item span {
+    font-size: 10px;
+    font-weight: 500;
+  }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Scrollbar hide */
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

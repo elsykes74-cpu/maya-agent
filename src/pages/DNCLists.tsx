@@ -1,334 +1,97 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Shield,
-  PhoneOff,
-  Ban,
-  AlertTriangle,
-  Trash2,
-  Upload,
-  Search,
-  Scale,
-  CheckCircle2
-} from 'lucide-react'
+import { useState } from 'react';
+import { trpc } from '@/providers/trpc';
+import { ChevronLeft, Shield, Plus, Phone, Trash2 } from 'lucide-react';
+import { useNavigate } from 'react-router';
 
 export default function DNCLists() {
-  const [activeTab, setActiveTab] = useState('dnc')
-  const [search, setSearch] = useState('')
-  const [newDncOpen, setNewDncOpen] = useState(false)
-  const [bulkImportOpen, setBulkImportOpen] = useState(false)
+  const navigate = useNavigate();
+  const utils = trpc.useUtils();
+  const [phoneInput, setPhoneInput] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
 
-  const { data: dncData, refetch: refetchDnc } = trpc.dnc.list.useQuery({
-    search: search || undefined,
-    limit: 50,
-  })
-  const { data: dncStats } = trpc.dnc.stats.useQuery()
-  const { data: scrubLists } = trpc.dnc.scrubLists.useQuery()
+  const { data } = trpc.dnc.list.useQuery({});
+  const dncEntries = data?.items ?? [];
 
-  const addDnc = trpc.dnc.add.useMutation({ onSuccess: () => { refetchDnc(); setNewDncOpen(false); } })
-  const removeDnc = trpc.dnc.remove.useMutation({ onSuccess: () => refetchDnc() })
-  const bulkImport = trpc.dnc.bulkImport.useMutation({
-    onSuccess: () => { refetchDnc(); setBulkImportOpen(false); }
-  })
+  const addMutation = trpc.dnc.add.useMutation({
+    onSuccess: () => { utils.dnc.list.invalidate(); setPhoneInput(''); setShowAdd(false); },
+  });
 
-  const handleNewDnc = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    addDnc.mutate({
-      phone: formData.get('phone') as string,
-      name: formData.get('name') as string || undefined,
-      reason: (formData.get('reason') as any) || 'manual',
-      source: formData.get('source') as string || undefined,
-      notes: formData.get('notes') as string || undefined,
-    })
-  }
-
-  const handleBulkImport = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    const rawText = formData.get('numbers') as string
-    const numbers = rawText.split(/\n|,|;/).map(n => n.trim()).filter(n => n.length >= 10)
-    bulkImport.mutate({
-      numbers,
-      reason: (formData.get('reason') as any) || 'manual',
-      source: formData.get('source') as string || undefined,
-    })
-  }
-
-  const getReasonBadge = (reason: string | null) => {
-    const colors: Record<string, string> = {
-      seller_request: 'bg-red-500',
-      national_registry: 'bg-orange-500',
-      litigant: 'bg-purple-500',
-      disconnected: 'bg-slate-500',
-      manual: 'bg-blue-500',
-    }
-    return <Badge className={colors[reason || 'manual'] || 'bg-slate-500'}>{(reason || 'manual').replace('_', ' ').toUpperCase()}</Badge>
-  }
+  const removeMutation = trpc.dnc.remove.useMutation({
+    onSuccess: () => utils.dnc.list.invalidate(),
+  });
 
   return (
-    <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-2 lg:w-[300px]">
-          <TabsTrigger value="dnc">DNC List</TabsTrigger>
-          <TabsTrigger value="scrub">Scrub Lists</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="dnc" className="space-y-4">
-          {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-3xl font-bold text-slate-900 dark:text-white">{dncStats?.total || 0}</div>
-                <p className="text-xs text-slate-500 mt-1">Total Blocked</p>
-              </CardContent>
-            </Card>
-            {dncStats?.byReason?.map((r: any) => (
-              <Card key={r.reason}>
-                <CardContent className="pt-6">
-                  <div className="text-2xl font-bold">{r.count}</div>
-                  <p className="text-xs text-slate-500 mt-1 capitalize">{r.reason?.replace('_', ' ')}</p>
-                </CardContent>
-              </Card>
-            ))}
+    <div className="min-h-full">
+      <div className="px-5 pt-4 pb-3">
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
+            <ChevronLeft size={24} className="text-[#007AFF]" />
+          </button>
+          <div className="flex-1">
+            <h1 className="text-[22px] font-bold">Do Not Call</h1>
+            <p className="text-[13px] text-[#8E8E93]">{dncEntries.length} numbers on list</p>
           </div>
+          <button onClick={() => setShowAdd(true)} className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white">
+            <Plus size={20} />
+          </button>
+        </div>
+      </div>
 
-          {/* Actions */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <Input
-                placeholder="Search phone or name..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <div className="flex gap-2">
-              <Dialog open={bulkImportOpen} onOpenChange={setBulkImportOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">
-                    <Upload className="w-4 h-4 mr-2" /> Bulk Import
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Bulk Import DNC Numbers</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleBulkImport} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Numbers (one per line, or comma-separated)</Label>
-                      <Textarea name="numbers" placeholder="4135550100&#10;4135550101&#10;4135550102" rows={6} required />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Reason</Label>
-                        <Select name="reason" defaultValue="manual">
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="seller_request">Seller Request</SelectItem>
-                            <SelectItem value="national_registry">National Registry</SelectItem>
-                            <SelectItem value="litigant">Litigant</SelectItem>
-                            <SelectItem value="disconnected">Disconnected</SelectItem>
-                            <SelectItem value="manual">Manual</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Source</Label>
-                        <Input name="source" placeholder="e.g., BatchLeads scrub" />
-                      </div>
-                    </div>
-                    <DialogFooter>
-                      <Button type="submit" className="bg-emerald-600">Import {dncStats?.total || 0} Numbers</Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-
-              <Dialog open={newDncOpen} onOpenChange={setNewDncOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-red-600 hover:bg-red-700">
-                    <PhoneOff className="w-4 h-4 mr-2" /> Add DNC
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add to Do Not Call List</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleNewDnc} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Phone Number</Label>
-                      <Input name="phone" placeholder="413-555-0100" required />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Name (optional)</Label>
-                      <Input name="name" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Reason</Label>
-                      <Select name="reason" defaultValue="seller_request">
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="seller_request">Seller Request</SelectItem>
-                          <SelectItem value="national_registry">National Registry</SelectItem>
-                          <SelectItem value="litigant">Known Litigant</SelectItem>
-                          <SelectItem value="disconnected">Disconnected</SelectItem>
-                          <SelectItem value="manual">Manual</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Notes</Label>
-                      <Textarea name="notes" placeholder="Why this number is blocked..." rows={2} />
-                    </div>
-                    <DialogFooter>
-                      <Button type="submit" className="bg-red-600 hover:bg-red-700">Add to DNC</Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
+      <div className="px-5 mb-4">
+        <div className="ios-card p-4 bg-gradient-to-r from-[#FF3B30]/10 to-transparent">
+          <div className="flex items-start gap-3">
+            <Shield size={20} className="text-[#FF3B30] mt-0.5" />
+            <div>
+              <p className="text-[15px] font-semibold text-[#1C1C1E]">TCPA Compliance</p>
+              <p className="text-[13px] text-[#8E8E93] mt-1">Numbers on this list are automatically scrubbed before every campaign. These leads will never be called by your AI agent.</p>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* DNC Table */}
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Reason</TableHead>
-                    <TableHead>Source</TableHead>
-                    <TableHead>Date Added</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {dncData?.items?.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center text-slate-500 py-12">
-                        No DNC entries. Add numbers to protect against TCPA violations.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {dncData?.items?.map((entry: any) => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="font-mono text-sm">{entry.phone}</TableCell>
-                      <TableCell className="text-sm">{entry.name || '-'}</TableCell>
-                      <TableCell>{getReasonBadge(entry.reason)}</TableCell>
-                      <TableCell className="text-sm">{entry.source || '-'}</TableCell>
-                      <TableCell className="text-sm">{new Date(entry.createdAt).toLocaleDateString()}</TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-red-600"
-                          onClick={() => {
-                            if (confirm('Remove from DNC?')) removeDnc.mutate({ id: entry.id })
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
+      <div className="px-5 space-y-2">
+        {dncEntries.length === 0 && (
+          <div className="py-16 text-center">
+            <Shield size={40} className="mx-auto text-[#C6C6C8]" />
+            <p className="text-[17px] text-[#8E8E93] mt-3">No DNC numbers yet</p>
+          </div>
+        )}
 
-        <TabsContent value="scrub" className="space-y-4">
-          <Card className="border-l-4 border-l-amber-500">
-            <CardHeader>
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Shield className="w-5 h-5 text-amber-600" />
-                Scrub List Management
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
-                Before any call campaign runs, numbers are automatically scrubbed against:
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Ban className="w-5 h-5 text-red-600" />
-                    <p className="font-semibold text-sm">DNC List</p>
-                  </div>
-                  <p className="text-xs text-slate-600">Internal Do Not Call registry. Sellers who explicitly requested no calls.</p>
-                </div>
-                <div className="p-4 bg-purple-50 dark:bg-purple-900/20 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Scale className="w-5 h-5 text-purple-600" />
-                    <p className="font-semibold text-sm">Litigant Scrub</p>
-                  </div>
-                  <p className="text-xs text-slate-600">Known TCPA litigants. Protect against lawsuit exposure.</p>
-                </div>
-                <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <AlertTriangle className="w-5 h-5 text-slate-600" />
-                    <p className="font-semibold text-sm">Disconnected</p>
-                  </div>
-                  <p className="text-xs text-slate-600">Known disconnected/wrong numbers from previous campaigns.</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {dncEntries.map((entry: any) => (
+          <div key={entry.id} className="ios-card p-4 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-[#FFE5E5] flex items-center justify-center">
+              <Phone size={16} className="text-[#FF3B30]" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[17px] font-semibold font-mono">{entry.phone}</p>
+              <p className="text-[13px] text-[#8E8E93]">Added {new Date(entry.createdAt).toLocaleDateString()}</p>
+            </div>
+            <button onClick={() => { if (confirm('Remove from DNC?')) removeMutation.mutate({ id: entry.id }); }} className="w-8 h-8 flex items-center justify-center">
+              <Trash2 size={16} className="text-[#C6C6C8]" />
+            </button>
+          </div>
+        ))}
+      </div>
 
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>List Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Entries</TableHead>
-                    <TableHead>Active</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {scrubLists?.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-slate-500 py-12">
-                        No scrub lists yet. Create lists for litigants and disconnected numbers.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {scrubLists?.map((list: any) => (
-                    <TableRow key={list.id}>
-                      <TableCell className="font-medium text-sm">{list.name}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="capitalize">{list.listType}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm">{list.entries?.length || 0} numbers</TableCell>
-                      <TableCell>
-                        {list.isActive ? (
-                          <Badge className="bg-emerald-500"><CheckCircle2 className="w-3 h-3 mr-1" /> Active</Badge>
-                        ) : (
-                          <Badge variant="outline">Inactive</Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {showAdd && (
+        <>
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowAdd(false)} />
+          <div className="bottom-sheet p-5 z-50">
+            <div className="w-10 h-1 bg-[#C6C6C8] rounded-full mx-auto mb-5" />
+            <h2 className="text-[22px] font-bold mb-4">Add DNC Number</h2>
+            <div className="mb-4">
+              <label className="text-[15px] font-medium mb-2 block">Phone Number</label>
+              <input type="tel" value={phoneInput} onChange={e => setPhoneInput(e.target.value)} placeholder="(413) 555-0123" className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]" />
+            </div>
+            <button onClick={() => { if (phoneInput.trim()) addMutation.mutate({ phone: phoneInput.trim() }); }} disabled={!phoneInput.trim() || addMutation.isPending} className="w-full ios-btn ios-btn-red text-[18px] py-4 disabled:opacity-50">
+              <Shield size={18} /> Add to DNC List
+            </button>
+            <button onClick={() => setShowAdd(false)} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">Cancel</button>
+          </div>
+        </>
+      )}
+
+      <div className="h-4" />
     </div>
-  )
+  );
 }

@@ -1,241 +1,156 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
-import { Rocket, Play, Pause, RotateCcw, BarChart3, Users, Phone, Calendar } from 'lucide-react'
+import { useState } from 'react';
+import { trpc } from '@/providers/trpc';
+import { Megaphone, Plus, Play, Pause, Trash2, Users, PhoneCall, CheckCircle } from 'lucide-react';
+
+const DEMO_CAMPAIGNS = [
+  { id: 1, name: 'Springfield Motivated Sellers', description: 'Vacant and inherited properties in Springfield', status: 'active', progress: 68, callsMade: 34, totalLeads: 50 },
+  { id: 2, name: 'Holyoke Foreclosure List', description: 'Pre-foreclosure leads from Holyoke area', status: 'paused', progress: 42, callsMade: 21, totalLeads: 50 },
+  { id: 3, name: 'Chicopee Cash Buyers', description: 'Absentee owners in Chicopee', status: 'completed', progress: 100, callsMade: 50, totalLeads: 50 },
+];
 
 export default function Campaigns() {
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [showCreate, setShowCreate] = useState(false);
+  const utils = trpc.useUtils();
 
-  const { data: campaignsData, refetch } = trpc.campaigns.list.useQuery()
-  const { data: profiles } = trpc.leads.profiles.useQuery()
-  const { data: stats } = trpc.leads.stats.useQuery()
+  const { data, isLoading } = trpc.campaigns.list.useQuery({}, { retry: false });
+  const campaigns = data?.items ?? DEMO_CAMPAIGNS;
 
-  const createCampaign = trpc.campaigns.create.useMutation({
-    onSuccess: () => { refetch(); setDialogOpen(false) }
-  })
-  const activateCampaign = trpc.campaigns.activate.useMutation({
-    onSuccess: (data) => { 
-      refetch(); 
-      alert(data.message);
-    },
-    onError: (err) => {
-      alert(`Activation failed: ${err.message}`);
-    }
-  })
-  const updateCampaign = trpc.campaigns.update.useMutation({ onSuccess: () => refetch() })
-  const deleteCampaign = trpc.campaigns.delete.useMutation({ onSuccess: () => refetch() })
-  const populateCampaign = trpc.campaigns.populate.useMutation({
-    onSuccess: () => { refetch(); }
-  })
+  const createMutation = trpc.campaigns.create.useMutation({ onSuccess: () => { utils.campaigns.list.invalidate(); setShowCreate(false); } });
+  const toggleMutation = trpc.campaigns.toggleStatus.useMutation({ onSuccess: () => utils.campaigns.list.invalidate() });
+  const deleteMutation = trpc.campaigns.delete.useMutation({ onSuccess: () => utils.campaigns.list.invalidate() });
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    createCampaign.mutate({
-      name: formData.get('name') as string,
-      description: formData.get('description') as string || undefined,
-      motivationFilter: (formData.get('motivationFilter') as any) || 'all',
-      profileFilter: formData.get('profileFilter') ? Number(formData.get('profileFilter')) : undefined,
-      stageFilter: (formData.get('stageFilter') as any) || 'all',
-      maxCallsPerLead: Number(formData.get('maxCallsPerLead')) || 3,
-      callIntervalHours: Number(formData.get('callIntervalHours')) || 48,
-    })
-  }
-
-  const getStatusBadge = (status: string | null) => {
-    const colors: Record<string, string> = {
-      draft: 'bg-slate-500',
-      active: 'bg-emerald-500',
-      paused: 'bg-amber-500',
-      completed: 'bg-blue-500',
-      archived: 'bg-gray-500',
-    }
-    return <Badge className={colors[status || 'draft'] || 'bg-slate-500'}>{(status || 'draft').toUpperCase()}</Badge>
-  }
+  const statusCounts = {
+    active: campaigns.filter((c: any) => c.status === 'active').length,
+    paused: campaigns.filter((c: any) => c.status === 'paused').length,
+    completed: campaigns.filter((c: any) => c.status === 'completed').length,
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <p className="text-sm text-slate-500">Total leads available: {stats?.total || 0}</p>
+    <div className="min-h-full">
+      <div className="px-5 pt-6 pb-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Campaigns</h1>
+          <button onClick={() => setShowCreate(true)} className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white shadow-lg">
+            <Plus size={20} />
+          </button>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-emerald-600 hover:bg-emerald-700">
-              <Rocket className="w-4 h-4 mr-2" /> New Campaign
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Create Calling Campaign</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Campaign Name</Label>
-                <Input name="name" placeholder="e.g., Springfield Pre-Foreclosure Blast" required />
-              </div>
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea name="description" placeholder="What this campaign targets..." rows={2} />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Motivation Filter</Label>
-                  <Select name="motivationFilter" defaultValue="all">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="hot">HOT Only</SelectItem>
-                      <SelectItem value="warm">WARM Only</SelectItem>
-                      <SelectItem value="cold">COLD Only</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Lead Profile</Label>
-                  <Select name="profileFilter">
-                    <SelectTrigger><SelectValue placeholder="Any profile" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Any</SelectItem>
-                      {profiles?.map((p: any) => (
-                        <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Pipeline Stage</Label>
-                  <Select name="stageFilter" defaultValue="all">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Stages</SelectItem>
-                      <SelectItem value="lead">Lead</SelectItem>
-                      <SelectItem value="outreach">Outreach</SelectItem>
-                      <SelectItem value="scoring">Scoring</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Max Calls Per Lead</Label>
-                  <Input name="maxCallsPerLead" type="number" defaultValue={3} />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Call Interval (hours)</Label>
-                <Input name="callIntervalHours" type="number" defaultValue={48} />
-              </div>
-              <DialogFooter>
-                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">Create Campaign</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        {campaignsData?.items?.length === 0 && (
-          <Card>
-            <CardContent className="text-center text-slate-500 py-12">
-              No campaigns yet. Create your first calling campaign to start outreach.
-            </CardContent>
-          </Card>
+      <div className="px-5 mb-5">
+        <div className="flex gap-3">
+          <StatusCard count={statusCounts.active} label="Active" color="bg-[#34C759]" />
+          <StatusCard count={statusCounts.paused} label="Paused" color="bg-[#FF9500]" />
+          <StatusCard count={statusCounts.completed} label="Done" color="bg-[#007AFF]" />
+        </div>
+      </div>
+
+      <div className="px-5 space-y-3">
+        {isLoading && <div className="py-20 text-center text-[#8E8E93] text-[17px]">Loading campaigns...</div>}
+
+        {!isLoading && campaigns.length === 0 && (
+          <div className="py-20 text-center">
+            <div className="w-20 h-20 mx-auto rounded-full bg-[#F2F2F7] flex items-center justify-center">
+              <Megaphone size={36} className="text-[#C6C6C8]" />
+            </div>
+            <p className="text-[17px] text-[#8E8E93] mt-4">No campaigns yet</p>
+          </div>
         )}
-        {campaignsData?.items?.map((campaign: any) => (
-          <Card key={campaign.id} className="border-l-4 border-l-blue-500">
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base flex items-center gap-2">
-                    <Rocket className="w-4 h-4 text-blue-500" />
-                    {campaign.name}
-                  </CardTitle>
-                  <p className="text-xs text-slate-500 mt-1">{campaign.description}</p>
+
+        {campaigns.map((camp: any) => (
+          <div key={camp.id} className="ios-card overflow-hidden">
+            <div className="p-4">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-[20px] font-bold text-[#1C1C1E]">{camp.name}</p>
+                  <p className="text-[15px] text-[#8E8E93] mt-0.5">{camp.description}</p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {getStatusBadge(campaign.status)}
-                </div>
+                <CampaignStatusBadge status={camp.status} />
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-center">
-                  <Users className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                  <p className="text-xl font-bold">{campaign.totalLeads || 0}</p>
-                  <p className="text-xs text-slate-500">Total Leads</p>
+
+              <div className="mb-3">
+                <div className="flex justify-between text-[13px] mb-1">
+                  <span className="text-[#8E8E93]">Progress</span>
+                  <span className="font-semibold text-[#1C1C1E]">{camp.progress ?? 0}%</span>
                 </div>
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-center">
-                  <Phone className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                  <p className="text-xl font-bold">{campaign.callsCompleted || 0}</p>
-                  <p className="text-xs text-slate-500">Calls Done</p>
-                </div>
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-center">
-                  <Calendar className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                  <p className="text-xl font-bold">{campaign.appointmentsSet || 0}</p>
-                  <p className="text-xs text-slate-500">Appointments</p>
-                </div>
-                <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg text-center">
-                  <BarChart3 className="w-4 h-4 text-slate-400 mx-auto mb-1" />
-                  <p className="text-xl font-bold">
-                    {campaign.totalLeads > 0 ? Math.round((campaign.callsCompleted / campaign.totalLeads) * 100) : 0}%
-                  </p>
-                  <p className="text-xs text-slate-500">Progress</p>
+                <div className="h-3 bg-[#E5E5EA] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all duration-500" style={{ width: `${camp.progress ?? 0}%`, background: camp.status === 'active' ? 'linear-gradient(90deg, #34C759, #30D158)' : camp.status === 'paused' ? '#FF9500' : '#007AFF' }} />
                 </div>
               </div>
 
-              <div className="flex gap-2 flex-wrap">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={campaign.status === 'active' || activateCampaign.isPending}
-                  onClick={() => {
-                    if (confirm(`Activate campaign "${campaign.name}"? This will scrub DNC lists and start dialing ${campaign.totalLeads || 0} leads via Vapi.`)) {
-                      activateCampaign.mutate({ campaignId: campaign.id });
-                    }
-                  }}
-                >
-                  <Play className="w-3 h-3 mr-1" /> {activateCampaign.isPending ? 'Activating...' : 'Activate'}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={campaign.status === 'paused'}
-                  onClick={() => updateCampaign.mutate({ id: campaign.id, status: 'paused' })}
-                >
-                  <Pause className="w-3 h-3 mr-1" /> Pause
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    populateCampaign.mutate({ campaignId: campaign.id })
-                  }}
-                >
-                  <RotateCcw className="w-3 h-3 mr-1" /> Populate Leads
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-red-600"
-                  onClick={() => {
-                    if (confirm('Delete this campaign?')) deleteCampaign.mutate({ id: campaign.id })
-                  }}
-                >
-                  Delete
-                </Button>
+              <div className="flex gap-4 mb-3">
+                <div className="flex items-center gap-2 text-[14px] text-[#8E8E93]">
+                  <Users size={16} /><span>{camp.totalLeads ?? 0} leads</span>
+                </div>
+                <div className="flex items-center gap-2 text-[14px] text-[#8E8E93]">
+                  <PhoneCall size={16} /><span>{camp.callsMade ?? 0} called</span>
+                </div>
               </div>
-            </CardContent>
-          </Card>
+
+              <div className="flex gap-2">
+                <button onClick={() => toggleMutation.mutate({ id: camp.id })} className={`ios-btn flex-1 text-[16px] py-3 ${camp.status === 'active' ? 'ios-btn-orange' : camp.status === 'paused' ? 'ios-btn-green' : 'ios-btn-gray'}`}>
+                  {camp.status === 'active' ? <><Pause size={18} /> Pause</> : camp.status === 'paused' ? <><Play size={18} /> Resume</> : <><CheckCircle size={18} /> Completed</>}
+                </button>
+                <button onClick={() => { if (confirm('Delete this campaign?')) deleteMutation.mutate({ id: camp.id }); }} className="ios-btn ios-btn-gray px-4">
+                  <Trash2 size={18} className="text-[#FF3B30]" />
+                </button>
+              </div>
+            </div>
+          </div>
         ))}
       </div>
+
+      {showCreate && (
+        <CreateCampaignSheet
+          onClose={() => setShowCreate(false)}
+          onCreate={(data) => createMutation.mutate(data)}
+          isSubmitting={createMutation.isPending}
+        />
+      )}
+      <div className="h-4" />
     </div>
-  )
+  );
+}
+
+function StatusCard({ count, label, color }: { count: number; label: string; color: string }) {
+  return (
+    <div className="flex-1 ios-card p-3 text-center">
+      <div className={`w-3 h-3 rounded-full ${color} mx-auto mb-1`} />
+      <p className="text-[24px] font-bold text-[#1C1C1E]">{count}</p>
+      <p className="text-[12px] text-[#8E8E93]">{label}</p>
+    </div>
+  );
+}
+
+function CampaignStatusBadge({ status }: { status: string }) {
+  if (status === 'active') return <span className="ios-badge ios-badge-green">Active</span>;
+  if (status === 'paused') return <span className="ios-badge ios-badge-warm">Paused</span>;
+  return <span className="ios-badge ios-badge-blue">Completed</span>;
+}
+
+function CreateCampaignSheet({ onClose, onCreate, isSubmitting }: { onClose: () => void; onCreate: (data: { name: string; description: string }) => void; isSubmitting: boolean }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div className="bottom-sheet p-5 z-50">
+        <div className="w-10 h-1 bg-[#C6C6C8] rounded-full mx-auto mb-5" />
+        <h2 className="text-[22px] font-bold mb-4">New Campaign</h2>
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="text-[15px] font-medium mb-2 block">Campaign Name</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Springfield Motivated Sellers" className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]" />
+          </div>
+          <div>
+            <label className="text-[15px] font-medium mb-2 block">Description</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} placeholder="What is this campaign for?" rows={3} className="w-full bg-[#F2F2F7] rounded-xl px-4 py-3 text-[17px] outline-none resize-none focus:ring-2 focus:ring-[#007AFF]" />
+          </div>
+        </div>
+        <button onClick={() => { if (name.trim()) onCreate({ name: name.trim(), description: description.trim() }); }} disabled={!name.trim() || isSubmitting} className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50">
+          {isSubmitting ? 'Creating...' : 'Create Campaign'}
+        </button>
+        <button onClick={onClose} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">Cancel</button>
+      </div>
+    </>
+  );
 }

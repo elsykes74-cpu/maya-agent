@@ -1,489 +1,171 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
+import { useState } from 'react';
+import { trpc } from '@/providers/trpc';
 import {
-  Search,
-  Plus,
-  Flame,
-  Thermometer,
-  Snowflake,
-  Phone,
-  MessageSquare,
-  Calendar,
-  MoreHorizontal,
-  Trash2,
-  Edit3,
-  Eye
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Link } from 'react-router'
+  PhoneCall, MapPin, Flame, Snowflake, Thermometer,
+  Plus, Search, Home, Wrench, Banknote, Clock
+} from 'lucide-react';
+
+const DEMO_LEADS = [
+  { id: 1, sellerName: 'Sarah Johnson', propertyAddress: '142 Maple St, Springfield, MA', phone: '(413) 555-0123', motivationLevel: 'hot', timeline: '30 days', askingPrice: '185000', arv: '280000', estimatedRepairs: '25000', beds: 3, baths: 1.5, condition: 'medium_rehab', keyPainPoints: 'Inherited property, lives out of state, wants quick cash sale' },
+  { id: 2, sellerName: 'Mike Chen', propertyAddress: '78 Oak Avenue, Holyoke, MA', phone: '(413) 555-0456', motivationLevel: 'hot', timeline: '2 weeks', askingPrice: '120000', arv: '195000', estimatedRepairs: '35000', beds: 2, baths: 1, condition: 'heavy_rehab', keyPainPoints: 'Behind on mortgage payments, facing foreclosure' },
+  { id: 3, sellerName: 'Emma Davis', propertyAddress: '256 Elm Street, Chicopee, MA', phone: '(413) 555-0789', motivationLevel: 'warm', timeline: '60 days', askingPrice: '220000', arv: '310000', estimatedRepairs: '15000', beds: 4, baths: 2, condition: 'light_rehab', keyPainPoints: 'Downsizing, already purchased new home' },
+  { id: 4, sellerName: 'Robert Wilson', propertyAddress: '89 Pine Road, Westfield, MA', phone: '(413) 555-0321', motivationLevel: 'cold', timeline: '6 months', askingPrice: '350000', arv: '420000', estimatedRepairs: '5000', beds: 4, baths: 2.5, condition: 'move_in_ready', keyPainPoints: 'Testing market, not urgent' },
+];
+
+type FilterTab = 'all' | 'hot' | 'warm' | 'cold';
 
 export default function Leads() {
-  const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState('all')
-  const [motivationFilter, setMotivationFilter] = useState('all')
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingLead, setEditingLead] = useState<any>(null)
-  const [detailLead, setDetailLead] = useState<any>(null)
+  const [filter, setFilter] = useState<FilterTab>('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: leadsData, refetch } = trpc.leads.list.useQuery({
-    search: search || undefined,
-    stage: stageFilter,
-    motivation: motivationFilter,
-    limit: 50,
-  })
+  const { data, isLoading } = trpc.leads.list.useQuery(
+    { motivationLevel: filter === 'all' ? undefined : filter },
+    { retry: false }
+  );
 
-  const { data: sources } = trpc.leads.sources.useQuery()
-  const { data: profiles } = trpc.leads.profiles.useQuery()
+  const leads = data?.items ?? DEMO_LEADS;
 
-  const createLead = trpc.leads.create.useMutation({ onSuccess: () => { refetch(); setDialogOpen(false) } })
-  const updateLead = trpc.leads.update.useMutation({ onSuccess: () => { refetch(); setDialogOpen(false); setEditingLead(null) } })
-  const deleteLead = trpc.leads.delete.useMutation({ onSuccess: () => refetch() })
+  const filteredLeads = searchQuery
+    ? leads.filter((l: any) =>
+        l.sellerName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        l.propertyAddress?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        l.phone?.includes(searchQuery)
+      )
+    : leads;
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    const data: any = {
-      sellerName: formData.get('sellerName') as string,
-      phone: formData.get('phone') as string,
-      email: formData.get('email') as string || undefined,
-      propertyAddress: formData.get('propertyAddress') as string,
-      city: formData.get('city') as string,
-      zipCode: formData.get('zipCode') as string,
-      motivationLevel: formData.get('motivationLevel') as any,
-      timeline: formData.get('timeline') as string,
-      occupancyStatus: formData.get('occupancyStatus') as any || undefined,
-      condition: formData.get('condition') as any || undefined,
-      estimatedRepairs: formData.get('estimatedRepairs') as string || undefined,
-      beds: formData.get('beds') ? Number(formData.get('beds')) : undefined,
-      baths: formData.get('baths') as string || undefined,
-      squareFootage: formData.get('squareFootage') ? Number(formData.get('squareFootage')) : undefined,
-      askingPrice: formData.get('askingPrice') as string || undefined,
-      arv: formData.get('arv') as string || undefined,
-      mao: formData.get('mao') as string || undefined,
-      notes: formData.get('notes') as string || undefined,
-      pipelineStage: formData.get('pipelineStage') as any || 'lead',
-      sourceId: formData.get('sourceId') ? Number(formData.get('sourceId')) : undefined,
-      profileId: formData.get('profileId') ? Number(formData.get('profileId')) : undefined,
-    }
-
-    if (editingLead) {
-      updateLead.mutate({ ...data, id: editingLead.id })
-    } else {
-      createLead.mutate(data)
-    }
-  }
-
-  const openEdit = (lead: any) => {
-    setEditingLead(lead)
-    setDialogOpen(true)
-  }
-
-  const openNew = () => {
-    setEditingLead(null)
-    setDialogOpen(true)
-  }
-
-  const getMotivationBadge = (level: string | null) => {
-    switch (level) {
-      case 'hot': return <Badge className="bg-red-500"><Flame className="w-3 h-3 mr-1" /> HOT</Badge>
-      case 'warm': return <Badge className="bg-amber-500"><Thermometer className="w-3 h-3 mr-1" /> WARM</Badge>
-      case 'cold': return <Badge className="bg-cyan-500"><Snowflake className="w-3 h-3 mr-1" /> COLD</Badge>
-      default: return <Badge variant="secondary">Unknown</Badge>
-    }
-  }
-
-  const getStageBadge = (stage: string | null) => {
-    const colors: Record<string, string> = {
-      lead: 'bg-slate-500',
-      outreach: 'bg-blue-500',
-      scoring: 'bg-indigo-500',
-      hot_routing: 'bg-red-500',
-      warm_nurture: 'bg-amber-500',
-      cold_drip: 'bg-cyan-500',
-      appointment: 'bg-emerald-500',
-      close: 'bg-green-600',
-    }
-    return <Badge className={colors[stage || 'lead'] || 'bg-slate-500'}>{(stage || 'lead').replace(/_/g, ' ').toUpperCase()}</Badge>
-  }
+  const tabs: { key: FilterTab; label: string; count: number }[] = [
+    { key: 'all', label: 'All', count: leads.length },
+    { key: 'hot', label: 'Hot', count: leads.filter((l: any) => l.motivationLevel === 'hot').length },
+    { key: 'warm', label: 'Warm', count: leads.filter((l: any) => l.motivationLevel === 'warm').length },
+    { key: 'cold', label: 'Cold', count: leads.filter((l: any) => l.motivationLevel === 'cold').length },
+  ];
 
   return (
-    <div className="space-y-6">
-      {/* Filters & Actions */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex flex-col sm:flex-row gap-3 flex-1 w-full sm:w-auto">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input
+    <div className="min-h-full">
+      <div className="px-5 pt-6 pb-3">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Leads</h1>
+          <button className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white shadow-lg">
+            <Plus size={20} />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 mb-4">
+          <div className="flex-1 h-11 bg-white rounded-xl flex items-center px-4 gap-2 shadow-sm">
+            <Search size={18} className="text-[#8E8E93]" />
+            <input
+              type="text"
               placeholder="Search leads..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
+              className="flex-1 bg-transparent text-[17px] outline-none placeholder:text-[#C6C6C8]"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
             />
           </div>
-          <Select value={stageFilter} onValueChange={setStageFilter}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="Pipeline Stage" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Stages</SelectItem>
-              <SelectItem value="lead">Lead</SelectItem>
-              <SelectItem value="outreach">Outreach</SelectItem>
-              <SelectItem value="scoring">Scoring</SelectItem>
-              <SelectItem value="hot_routing">Hot Routing</SelectItem>
-              <SelectItem value="warm_nurture">Warm Nurture</SelectItem>
-              <SelectItem value="cold_drip">Cold Drip</SelectItem>
-              <SelectItem value="appointment">Appointment</SelectItem>
-              <SelectItem value="close">Close</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={motivationFilter} onValueChange={setMotivationFilter}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="Motivation" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="hot">HOT</SelectItem>
-              <SelectItem value="warm">WARM</SelectItem>
-              <SelectItem value="cold">COLD</SelectItem>
-            </SelectContent>
-          </Select>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={openNew} className="bg-emerald-600 hover:bg-emerald-700">
-              <Plus className="w-4 h-4 mr-2" /> Add Lead
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editingLead ? 'Edit Lead' : 'Add New Lead'}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Seller Name *</Label>
-                  <Input name="sellerName" defaultValue={editingLead?.sellerName || ''} required />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input name="phone" defaultValue={editingLead?.phone || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input name="email" type="email" defaultValue={editingLead?.email || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Property Address *</Label>
-                  <Input name="propertyAddress" defaultValue={editingLead?.propertyAddress || ''} required />
-                </div>
-                <div className="space-y-2">
-                  <Label>City</Label>
-                  <Input name="city" defaultValue={editingLead?.city || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>ZIP Code</Label>
-                  <Input name="zipCode" defaultValue={editingLead?.zipCode || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Lead Source</Label>
-                  <Select name="sourceId" defaultValue={String(editingLead?.sourceId || '')}>
-                    <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {sources?.map((s: { id: number; name: string }) => (
-                        <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Lead Profile</Label>
-                  <Select name="profileId" defaultValue={String(editingLead?.profileId || '')}>
-                    <SelectTrigger><SelectValue placeholder="Select profile" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {profiles?.map((p: { id: number; name: string }) => (
-                        <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Motivation Level</Label>
-                  <Select name="motivationLevel" defaultValue={editingLead?.motivationLevel || 'cold'}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="hot">HOT</SelectItem>
-                      <SelectItem value="warm">WARM</SelectItem>
-                      <SelectItem value="cold">COLD</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Timeline</Label>
-                  <Input name="timeline" defaultValue={editingLead?.timeline || ''} placeholder="e.g., 30 days" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Occupancy</Label>
-                  <Select name="occupancyStatus" defaultValue={editingLead?.occupancyStatus || ''}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Unknown</SelectItem>
-                      <SelectItem value="owner_occupied">Owner Occupied</SelectItem>
-                      <SelectItem value="tenant">Tenant</SelectItem>
-                      <SelectItem value="vacant">Vacant</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Condition</Label>
-                  <Select name="condition" defaultValue={editingLead?.condition || ''}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Unknown</SelectItem>
-                      <SelectItem value="move_in_ready">Move-in Ready</SelectItem>
-                      <SelectItem value="light_rehab">Light Rehab</SelectItem>
-                      <SelectItem value="medium_rehab">Medium Rehab</SelectItem>
-                      <SelectItem value="heavy_rehab">Heavy Rehab</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Est. Repairs ($)</Label>
-                  <Input name="estimatedRepairs" defaultValue={editingLead?.estimatedRepairs || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Asking Price ($)</Label>
-                  <Input name="askingPrice" defaultValue={editingLead?.askingPrice || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>ARV ($)</Label>
-                  <Input name="arv" defaultValue={editingLead?.arv || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Beds</Label>
-                  <Input name="beds" defaultValue={editingLead?.beds || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Baths</Label>
-                  <Input name="baths" defaultValue={editingLead?.baths || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Sq. Ft.</Label>
-                  <Input name="squareFootage" defaultValue={editingLead?.squareFootage || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Pipeline Stage</Label>
-                  <Select name="pipelineStage" defaultValue={editingLead?.pipelineStage || 'lead'}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lead">Lead</SelectItem>
-                      <SelectItem value="outreach">Outreach</SelectItem>
-                      <SelectItem value="scoring">Scoring</SelectItem>
-                      <SelectItem value="hot_routing">Hot Routing</SelectItem>
-                      <SelectItem value="warm_nurture">Warm Nurture</SelectItem>
-                      <SelectItem value="cold_drip">Cold Drip</SelectItem>
-                      <SelectItem value="appointment">Appointment</SelectItem>
-                      <SelectItem value="close">Close</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Notes</Label>
-                <Textarea name="notes" defaultValue={editingLead?.notes || ''} rows={3} />
-              </div>
-              <DialogFooter>
-                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">
-                  {editingLead ? 'Update Lead' : 'Create Lead'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+
+        <div className="flex gap-2 overflow-x-auto hide-scrollbar">
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setFilter(tab.key)}
+              className={`px-4 py-2 rounded-full text-[15px] font-medium whitespace-nowrap transition-all ${
+                filter === tab.key ? 'bg-[#007AFF] text-white shadow-md' : 'bg-white text-[#8E8E93]'
+              }`}
+            >
+              {tab.label} ({tab.count})
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Leads Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Seller</TableHead>
-                <TableHead>Property</TableHead>
-                <TableHead>Motivation</TableHead>
-                <TableHead>Stage</TableHead>
-                <TableHead>Asking Price</TableHead>
-                <TableHead>ARV</TableHead>
-                <TableHead>Timeline</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {leadsData?.items?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-slate-500 py-12">
-                    No leads found. Add your first lead to get started.
-                  </TableCell>
-                </TableRow>
-              )}
-              {leadsData?.items?.map((lead: any) => (
-                <TableRow key={lead.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => setDetailLead(lead)}>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium text-sm">{lead.sellerName}</p>
-                      <p className="text-xs text-slate-500">{lead.phone}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm">{lead.propertyAddress}</p>
-                    <p className="text-xs text-slate-500">{lead.city}, {lead.state}</p>
-                  </TableCell>
-                  <TableCell>{getMotivationBadge(lead.motivationLevel)}</TableCell>
-                  <TableCell>{getStageBadge(lead.pipelineStage)}</TableCell>
-                  <TableCell>
-                    {lead.askingPrice ? `$${Number(lead.askingPrice).toLocaleString()}` : '-'}
-                  </TableCell>
-                  <TableCell>
-                    {lead.arv ? `$${Number(lead.arv).toLocaleString()}` : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm text-slate-600">{lead.timeline || '-'}</span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setDetailLead(lead)}>
-                          <Eye className="w-4 h-4 mr-2" /> View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => openEdit(lead)}>
-                          <Edit3 className="w-4 h-4 mr-2" /> Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link to={`/calls?leadId=${lead.id}`} className="flex items-center cursor-pointer">
-                            <Phone className="w-4 h-4 mr-2" /> Log Call
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link to={`/sms?leadId=${lead.id}`} className="flex items-center cursor-pointer">
-                            <MessageSquare className="w-4 h-4 mr-2" /> Send SMS
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link to={`/deals?leadId=${lead.id}`} className="flex items-center cursor-pointer">
-                            <Calendar className="w-4 h-4 mr-2" /> Analyze Deal
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-red-600"
-                          onClick={() => {
-                            if (confirm('Delete this lead?')) deleteLead.mutate({ id: lead.id })
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="px-5 space-y-3 mt-2">
+        {isLoading && <div className="py-20 text-center text-[#8E8E93] text-[17px]">Loading leads...</div>}
 
-      {/* Lead Detail Dialog */}
-      <Dialog open={!!detailLead} onOpenChange={() => setDetailLead(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {detailLead?.sellerName}
-              {detailLead?.motivationLevel && getMotivationBadge(detailLead.motivationLevel)}
-            </DialogTitle>
-          </DialogHeader>
-          {detailLead && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-slate-500">Property</p>
-                  <p className="font-medium">{detailLead.propertyAddress}</p>
-                  <p>{detailLead.city}, {detailLead.state} {detailLead.zipCode}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Contact</p>
-                  <p className="font-medium">{detailLead.phone}</p>
-                  <p>{detailLead.email}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Timeline</p>
-                  <p className="font-medium">{detailLead.timeline || 'Not specified'}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Occupancy</p>
-                  <p className="font-medium capitalize">{(detailLead.occupancyStatus || 'unknown').replace('_', ' ')}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Condition</p>
-                  <p className="font-medium capitalize">{(detailLead.condition || 'unknown').replace('_', ' ')}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Est. Repairs</p>
-                  <p className="font-medium">{detailLead.estimatedRepairs ? `$${Number(detailLead.estimatedRepairs).toLocaleString()}` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Asking Price</p>
-                  <p className="font-medium">{detailLead.askingPrice ? `$${Number(detailLead.askingPrice).toLocaleString()}` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">ARV</p>
-                  <p className="font-medium">{detailLead.arv ? `$${Number(detailLead.arv).toLocaleString()}` : '-'}</p>
-                </div>
-              </div>
-              {detailLead.keyPainPoints && (
-                <div>
-                  <p className="text-slate-500 text-sm">Pain Points</p>
-                  <p className="text-sm bg-slate-50 dark:bg-slate-800 p-2 rounded">{detailLead.keyPainPoints}</p>
-                </div>
-              )}
-              {detailLead.notes && (
-                <div>
-                  <p className="text-slate-500 text-sm">Notes</p>
-                  <p className="text-sm bg-slate-50 dark:bg-slate-800 p-2 rounded">{detailLead.notes}</p>
-                </div>
-              )}
-              <div className="flex gap-2 pt-2">
-                <Link to={`/calls?leadId=${detailLead.id}`}>
-                  <Button size="sm" variant="outline"><Phone className="w-4 h-4 mr-1" /> Log Call</Button>
-                </Link>
-                <Link to={`/sms?leadId=${detailLead.id}`}>
-                  <Button size="sm" variant="outline"><MessageSquare className="w-4 h-4 mr-1" /> SMS</Button>
-                </Link>
-                <Link to={`/deals?leadId=${detailLead.id}`}>
-                  <Button size="sm" variant="outline"><Calendar className="w-4 h-4 mr-1" /> Deal Analysis</Button>
-                </Link>
-              </div>
+        {!isLoading && filteredLeads.length === 0 && (
+          <div className="py-20 text-center">
+            <div className="w-20 h-20 mx-auto rounded-full bg-[#F2F2F7] flex items-center justify-center">
+              <UsersIcon />
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+            <p className="text-[17px] text-[#8E8E93] mt-4">No leads found</p>
+          </div>
+        )}
+
+        {filteredLeads.map((lead: any) => (
+          <div key={lead.id} className="ios-card overflow-hidden">
+            <div className="p-4 pb-3">
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex-1">
+                  <p className="text-[20px] font-bold text-[#1C1C1E]">{lead.sellerName}</p>
+                  <div className="flex items-center gap-1 mt-1 text-[#8E8E93]">
+                    <MapPin size={14} />
+                    <p className="text-[15px] truncate max-w-[260px]">{lead.propertyAddress}</p>
+                  </div>
+                </div>
+                <MotivationBadge level={lead.motivationLevel} />
+              </div>
+
+              {lead.phone && (
+                <div className="flex items-center gap-2 mt-3 text-[15px] text-[#007AFF]">
+                  <div className="w-8 h-8 rounded-full bg-[#E5F0FF] flex items-center justify-center">
+                    <PhoneCall size={14} />
+                  </div>
+                  <span className="font-medium">{lead.phone}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 pb-4">
+              <div className="grid grid-cols-2 gap-2">
+                {lead.timeline && <QualTag icon={<Clock size={14} />} label="Timeline" value={lead.timeline} />}
+                {lead.askingPrice && <QualTag icon={<Banknote size={14} />} label="Asking" value={`$${Number(lead.askingPrice).toLocaleString()}`} />}
+                {lead.arv && <QualTag icon={<Home size={14} />} label="ARV" value={`$${Number(lead.arv).toLocaleString()}`} />}
+                {lead.estimatedRepairs && Number(lead.estimatedRepairs) > 0 && <QualTag icon={<Wrench size={14} />} label="Repairs" value={`$${Number(lead.estimatedRepairs).toLocaleString()}`} />}
+                {lead.beds && <QualTag icon={<Home size={14} />} label="Bed/Bath" value={`${lead.beds}bd/${lead.baths ?? '?'}ba`} />}
+                {lead.condition && <QualTag icon={<Thermometer size={14} />} label="Condition" value={lead.condition.replace(/_/g, ' ')} />}
+              </div>
+
+              {lead.keyPainPoints && (
+                <div className="mt-3 p-3 bg-[#FFF9E5] rounded-xl">
+                  <p className="text-[13px] font-semibold text-[#FF9500] mb-1">Motivation</p>
+                  <p className="text-[15px] text-[#1C1C1E]">{lead.keyPainPoints}</p>
+                </div>
+              )}
+
+              <button className="ios-btn ios-btn-green w-full mt-3 text-[16px] py-3">
+                <PhoneCall size={18} /> Call Now
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="h-4" />
     </div>
-  )
+  );
+}
+
+function MotivationBadge({ level }: { level: string | null }) {
+  if (level === 'hot') return <span className="ios-badge ios-badge-hot flex items-center gap-1"><Flame size={12} /> HOT</span>;
+  if (level === 'warm') return <span className="ios-badge ios-badge-warm flex items-center gap-1"><Thermometer size={12} /> WARM</span>;
+  return <span className="ios-badge ios-badge-cold flex items-center gap-1"><Snowflake size={12} /> COLD</span>;
+}
+
+function QualTag({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2 p-2 bg-[#F2F2F7] rounded-lg">
+      <span className="text-[#8E8E93]">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[11px] text-[#8E8E93] uppercase tracking-wide">{label}</p>
+        <p className="text-[14px] font-semibold text-[#1C1C1E] truncate capitalize">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#C6C6C8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
 }

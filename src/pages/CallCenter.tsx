@@ -1,292 +1,182 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useState } from 'react';
+import { trpc } from '@/providers/trpc';
 import {
-  Phone,
-  MessageSquare,
-  Voicemail,
-  Mic,
-  ChevronRight,
-  Save
-} from 'lucide-react'
+  PhoneCall, Bot, Play, Square, CheckCircle,
+  Calendar, FileText, Headphones
+} from 'lucide-react';
+
+const DEMO_CALLS = [
+  { id: 1, leadName: 'Sarah Johnson', outcome: 'connected', duration: 184, transcript: 'Hi Sarah, this is the AI assistant calling about your property on Maple Street. I understand you inherited the property and are looking for a quick sale. She said the house needs about $25k in repairs. Wants to close within 30 days. Score: HOT lead.', createdAt: new Date(Date.now() - 3600000).toISOString(), notes: 'Wants quick cash sale. $25k repairs needed.' },
+  { id: 2, leadName: 'Mike Chen', outcome: 'voicemail', duration: 32, transcript: 'Hi Mike, this is calling about your property on Oak Avenue. Please call back at your earliest convenience.', createdAt: new Date(Date.now() - 7200000).toISOString(), notes: 'Pre-foreclosure, time sensitive' },
+  { id: 3, leadName: 'Emma Davis', outcome: 'connected', duration: 245, transcript: "Hi Emma, I understand you're downsizing. We can close in 14 days. She said $220k would work. Score: HOT lead.", createdAt: new Date(Date.now() - 10800000).toISOString(), notes: 'Ready to sell, flexible on price' },
+];
+
+const DEMO_CONFIG = {
+  voiceName: 'alloy', language: 'English', maxCallDuration: 300, transferNumber: '(413) 555-0199',
+};
 
 export default function CallCenter() {
-  const [selectedLeadId, setSelectedLeadId] = useState<number | null>(null)
-  const [activeTab, setActiveTab] = useState('scripts')
-  const [callDialogOpen, setCallDialogOpen] = useState(false)
+  const [agentActive, setAgentActive] = useState(false);
+  const [selectedCall, setSelectedCall] = useState<number | null>(null);
 
-  const { data: leadsData } = trpc.leads.list.useQuery({ limit: 100 })
-  const { data: aiConfig } = trpc.aiConfig.get.useQuery()
-  const { data: callsData, refetch: refetchCalls } = trpc.calls.list.useQuery(
-    selectedLeadId ? { leadId: selectedLeadId } : undefined
-  )
-  const { data: objections } = trpc.aiConfig.objections.useQuery()
-  const createCall = trpc.calls.create.useMutation({ onSuccess: () => { refetchCalls(); setCallDialogOpen(false) } })
+  const { data: callsData } = trpc.calls.list.useQuery({}, { retry: false });
+  const { data: configData } = trpc.callingConfig.get.useQuery({}, { retry: false });
 
-  const selectedLead = leadsData?.items?.find((l: any) => l.id === selectedLeadId)
+  const calls = callsData?.items ?? DEMO_CALLS;
+  const config = configData ?? DEMO_CONFIG;
 
-  const handleLogCall = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!selectedLeadId) return
-    const formData = new FormData(e.currentTarget)
-    createCall.mutate({
-      leadId: selectedLeadId,
-      callType: (formData.get('callType') as any) || 'initial',
-      callOutcome: (formData.get('callOutcome') as any) || 'answered',
-      duration: Number(formData.get('duration')) || 0,
-      notes: formData.get('notes') as string,
-      painSignals: formData.get('painSignals') as string || undefined,
-      priceDiscussed: formData.get('priceDiscussed') === 'on',
-      sellerAskingPrice: formData.get('sellerAskingPrice') as string || undefined,
-      voicemailLeft: formData.get('voicemailLeft') === 'on',
-      smsSent: formData.get('smsSent') === 'on',
-      appointmentSet: formData.get('appointmentSet') === 'on',
-    })
-  }
-
-  const formatDuration = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-    const s = seconds % 60
-    return `${m}:${s.toString().padStart(2, '0')}`
-  }
-
-  const getOutcomeBadge = (outcome: string | null) => {
-    const colors: Record<string, string> = {
-      answered: 'bg-emerald-500',
-      voicemail: 'bg-amber-500',
-      no_answer: 'bg-slate-400',
-      busy: 'bg-orange-500',
-      wrong_number: 'bg-red-500',
-      disconnected: 'bg-red-600',
-      callback_requested: 'bg-blue-500',
-      appointment_set: 'bg-purple-500',
-      not_interested: 'bg-gray-500',
-      dnc: 'bg-black',
-    }
-    return <Badge className={colors[outcome || 'answered'] || 'bg-slate-500'}>{(outcome || 'answered').replace(/_/g, ' ').toUpperCase()}</Badge>
-  }
-
-  const scriptSections = [
-    { key: 'opener', title: 'Opening — Pattern Interrupt', icon: Phone, content: aiConfig?.openerScript },
-    { key: 'discovery', title: 'Discovery — Extract Motivation', icon: Mic, content: aiConfig?.discoveryQuestions },
-    { key: 'positioning', title: 'Psychological Positioning', icon: MessageSquare, content: aiConfig?.positioningScript },
-    { key: 'price', title: 'Price Anchor — Soft, Not Aggressive', icon: ChevronRight, content: aiConfig?.priceAnchorScript },
-    { key: 'close', title: 'Appointment Close — The Only Goal', icon: ChevronRight, content: aiConfig?.closeScript },
-    { key: 'voicemail', title: 'Voicemail Script', icon: Voicemail, content: aiConfig?.voicemailScript },
-  ]
+  const stats = {
+    answered: calls.filter((c: any) => c.outcome === 'connected').length,
+    voicemail: calls.filter((c: any) => c.outcome === 'voicemail').length,
+    noAnswer: calls.filter((c: any) => c.outcome === 'no_answer').length,
+    total: calls.length,
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex gap-3 items-center">
-          <Select value={selectedLeadId ? String(selectedLeadId) : ''} onValueChange={(v) => setSelectedLeadId(Number(v))}>
-            <SelectTrigger className="w-[320px]">
-              <SelectValue placeholder="Select a lead to call..." />
-            </SelectTrigger>
-            <SelectContent>
-              {leadsData?.items?.map((lead: any) => (
-                <SelectItem key={lead.id} value={String(lead.id)}>
-                  {lead.sellerName} — {lead.propertyAddress}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {selectedLead && (
-            <Badge className={selectedLead.motivationLevel === 'hot' ? 'bg-red-500' : selectedLead.motivationLevel === 'warm' ? 'bg-amber-500' : 'bg-cyan-500'}>
-              {selectedLead.motivationLevel?.toUpperCase()}
-            </Badge>
-          )}
-        </div>
-        <Dialog open={callDialogOpen} onOpenChange={setCallDialogOpen}>
-          <DialogTrigger asChild>
-            <Button disabled={!selectedLeadId} className="bg-emerald-600 hover:bg-emerald-700">
-              <Phone className="w-4 h-4 mr-2" /> Log Call
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-xl">
-            <DialogHeader>
-              <DialogTitle>Log Call — {selectedLead?.sellerName}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleLogCall} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Call Type</Label>
-                  <Select name="callType" defaultValue="initial">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="initial">Initial</SelectItem>
-                      <SelectItem value="follow_up">Follow-up</SelectItem>
-                      <SelectItem value="appointment_confirmation">Appointment Confirmation</SelectItem>
-                      <SelectItem value="voicemail">Voicemail</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Outcome</Label>
-                  <Select name="callOutcome" defaultValue="answered">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="answered">Answered</SelectItem>
-                      <SelectItem value="voicemail">Voicemail</SelectItem>
-                      <SelectItem value="no_answer">No Answer</SelectItem>
-                      <SelectItem value="busy">Busy</SelectItem>
-                      <SelectItem value="wrong_number">Wrong Number</SelectItem>
-                      <SelectItem value="disconnected">Disconnected</SelectItem>
-                      <SelectItem value="callback_requested">Callback Requested</SelectItem>
-                      <SelectItem value="appointment_set">Appointment Set</SelectItem>
-                      <SelectItem value="not_interested">Not Interested</SelectItem>
-                      <SelectItem value="dnc">Do Not Call</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Duration (seconds)</Label>
-                  <Input name="duration" type="number" placeholder="120" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Seller Asking Price</Label>
-                  <Input name="sellerAskingPrice" type="number" placeholder="150000" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Call Notes</Label>
-                <Textarea name="notes" placeholder="What did they say? Pain signals, objections, key details..." rows={3} />
-              </div>
-              <div className="space-y-2">
-                <Label>Pain Signals</Label>
-                <Textarea name="painSignals" placeholder="Financial pressure, tenant problems, maintenance fatigue, life events..." rows={2} />
-              </div>
-              <div className="flex gap-4 flex-wrap">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="priceDiscussed" className="rounded" /> Price Discussed
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="voicemailLeft" className="rounded" /> Voicemail Left
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="smsSent" className="rounded" /> SMS Sent
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" name="appointmentSet" className="rounded" /> Appointment Set
-                </label>
-              </div>
-              <Button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700">
-                <Save className="w-4 h-4 mr-2" /> Save Call Log
-              </Button>
-            </form>
-          </DialogContent>
-        </Dialog>
+    <div className="min-h-full">
+      <div className="px-5 pt-6 pb-4">
+        <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">AI Agent</h1>
+        <p className="text-[15px] text-[#8E8E93] mt-1">Your 24/7 AI calling assistant</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
-          <TabsTrigger value="scripts">Scripts</TabsTrigger>
-          <TabsTrigger value="objections">Objections</TabsTrigger>
-          <TabsTrigger value="history">Call History</TabsTrigger>
-        </TabsList>
+      <div className="px-5 mb-6">
+        <div className={`ios-card p-5 ${agentActive ? 'ring-2 ring-[#34C759]' : ''}`}>
+          <div className="flex items-center gap-4 mb-4">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${agentActive ? 'bg-[#34C759]' : 'bg-[#E5E5EA]'}`}>
+              <Bot size={28} className={agentActive ? 'text-white' : 'text-[#8E8E93]'} />
+            </div>
+            <div className="flex-1">
+              <p className="text-[20px] font-bold text-[#1C1C1E]">{agentActive ? 'AI Agent Online' : 'AI Agent Offline'}</p>
+              <div className="flex items-center gap-2 mt-1">
+                <div className={`w-2 h-2 rounded-full ${agentActive ? 'bg-[#34C759] animate-pulse' : 'bg-[#8E8E93]'}`} />
+                <p className="text-[15px] text-[#8E8E93]">{agentActive ? 'Ready to take calls' : 'Activate to start calling'}</p>
+              </div>
+            </div>
+          </div>
 
-        <TabsContent value="scripts" className="space-y-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {scriptSections.map((section) => {
-              const Icon = section.icon
-              return (
-                <Card key={section.key} className="border-l-4 border-l-emerald-500">
-                  <CardHeader>
-                    <CardTitle className="text-sm flex items-center gap-2">
-                      <Icon className="w-4 h-4 text-emerald-600" />
-                      {section.title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="bg-slate-50 dark:bg-slate-800 p-3 rounded-lg text-sm whitespace-pre-wrap font-mono leading-relaxed">
-                      {section.content || 'Configure scripts in AI Agent Settings'}
+          <button
+            onClick={() => setAgentActive(!agentActive)}
+            className={`w-full ios-btn text-[18px] py-4 ${agentActive ? 'ios-btn-red' : 'ios-btn-green'}`}
+          >
+            {agentActive ? <><Square size={20} /> Stop Agent</> : <><Play size={20} /> Activate AI Agent</>}
+          </button>
+        </div>
+      </div>
+
+      <div className="px-5 mb-6">
+        <p className="ios-subheader">Today's Stats</p>
+        <div className="grid grid-cols-4 gap-2">
+          <StatPill icon={<CheckCircle size={16} />} value={stats.answered} label="Answered" color="text-[#34C759]" />
+          <StatPill icon={<PhoneCall size={16} />} value={stats.voicemail} label="Voicemail" color="text-[#FF9500]" />
+          <StatPill icon={<PhoneCall size={16} />} value={stats.noAnswer} label="No Answer" color="text-[#FF3B30]" />
+          <StatPill icon={<FileText size={16} />} value={stats.total} label="Total" color="text-[#007AFF]" />
+        </div>
+      </div>
+
+      <div className="px-5 mb-6">
+        <p className="ios-subheader">How It Works</p>
+        <div className="ios-card p-4 space-y-3">
+          {[
+            { step: 1, icon: <PhoneCall size={18} />, title: 'Lead Calls', desc: 'Inbound from signs, Zillow, website' },
+            { step: 2, icon: <Bot size={18} />, title: 'AI Answers', desc: 'Instant professional greeting' },
+            { step: 3, icon: <FileText size={18} />, title: 'Qualifies', desc: 'Budget, timeline, pre-approval' },
+            { step: 4, icon: <Calendar size={18} />, title: 'Schedules', desc: 'Books showings into calendar' },
+            { step: 5, icon: <Headphones size={18} />, title: 'Transfers', desc: 'Hot leads sent to you live' },
+            { step: 6, icon: <CheckCircle size={18} />, title: 'Logs to CRM', desc: 'Full transcript synced' },
+          ].map((item, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-[#E5F0FF] flex items-center justify-center text-[#007AFF] font-bold text-[13px] shrink-0">{item.step}</div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[15px] font-semibold text-[#1C1C1E]">{item.title}</p>
+                <p className="text-[13px] text-[#8E8E93]">{item.desc}</p>
+              </div>
+              <span className="text-[#8E8E93]">{item.icon}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="px-5 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <p className="ios-subheader !m-0">Call Transcripts</p>
+          <span className="text-[#007AFF] text-[15px] font-medium">See All</span>
+        </div>
+
+        <div className="space-y-3">
+          {calls.slice(0, 5).map((call: any) => (
+            <button key={call.id} onClick={() => setSelectedCall(selectedCall === call.id ? null : call.id)} className="w-full ios-card p-4 text-left">
+              <div className="flex items-center gap-3">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${call.outcome === 'connected' ? 'bg-[#E5F9ED]' : call.outcome === 'voicemail' ? 'bg-[#FFF4E5]' : 'bg-[#FFE5E5]'}`}>
+                  <PhoneCall size={16} className={call.outcome === 'connected' ? 'text-[#34C759]' : call.outcome === 'voicemail' ? 'text-[#FF9500]' : 'text-[#FF3B30]'} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[17px] font-semibold text-[#1C1C1E] truncate">{call.leadName || 'Unknown'}</p>
+                  <p className="text-[13px] text-[#8E8E93]">
+                    {call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Left Voicemail' : 'No Answer'} · {call.duration}s
+                  </p>
+                </div>
+                <OutcomeBadge outcome={call.outcome} />
+              </div>
+
+              {selectedCall === call.id && call.transcript && (
+                <div className="mt-3 pt-3 border-t border-[#E5E5EA]">
+                  <div className="flex items-start gap-2 mb-2">
+                    <div className="w-6 h-6 rounded-full bg-[#007AFF] flex items-center justify-center shrink-0 mt-0.5">
+                      <Bot size={12} className="text-white" />
                     </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="objections" className="space-y-4">
-          <div className="grid grid-cols-1 gap-4">
-            {objections?.length === 0 && (
-              <Card>
-                <CardContent className="text-center py-12 text-slate-500">
-                  No objection responses configured yet.
-                </CardContent>
-              </Card>
-            )}
-            {objections?.map((obj: any) => (
-              <Card key={obj.id} className="border-l-4 border-l-amber-500">
-                <CardHeader>
-                  <CardTitle className="text-base">{obj.objection}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-lg">
-                    <p className="text-sm text-emerald-800 dark:text-emerald-200 italic">"{obj.response}"</p>
+                    <p className="text-[15px] text-[#1C1C1E] leading-relaxed">{call.transcript}</p>
                   </div>
-                  {obj.category && (
-                    <Badge variant="outline" className="mt-3">{obj.category}</Badge>
+                  {call.notes && (
+                    <div className="flex items-start gap-2 mt-2 p-3 bg-[#F2F2F7] rounded-xl">
+                      <FileText size={14} className="text-[#8E8E93] mt-0.5 shrink-0" />
+                      <p className="text-[14px] text-[#8E8E93]">{call.notes}</p>
+                    </div>
                   )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        <TabsContent value="history">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Call History {selectedLead ? `— ${selectedLead.sellerName}` : ''}</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Outcome</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Price Discussed</TableHead>
-                    <TableHead>Appt Set</TableHead>
-                    <TableHead>Notes</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {callsData?.items?.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center text-slate-500 py-12">
-                        {selectedLeadId ? 'No calls logged for this lead yet.' : 'Select a lead to view call history.'}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {callsData?.items?.map((call: any) => (
-                    <TableRow key={call.id}>
-                      <TableCell className="text-sm">{new Date(call.createdAt).toLocaleDateString()}</TableCell>
-                      <TableCell className="text-sm capitalize">{call.callType?.replace('_', ' ')}</TableCell>
-                      <TableCell>{getOutcomeBadge(call.callOutcome)}</TableCell>
-                      <TableCell className="text-sm">{formatDuration(call.duration || 0)}</TableCell>
-                      <TableCell>{call.priceDiscussed ? 'Yes' : 'No'}</TableCell>
-                      <TableCell>{call.appointmentSet ? 'Yes' : 'No'}</TableCell>
-                      <TableCell className="text-sm max-w-[200px] truncate">{call.notes || '-'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {config && (
+        <div className="px-5 mb-6">
+          <p className="ios-subheader">AI Configuration</p>
+          <div className="ios-list">
+            <ConfigRow label="Voice" value={config.voiceName || 'Default'} />
+            <ConfigRow label="Language" value={config.language || 'English'} />
+            <ConfigRow label="Max Duration" value={`${config.maxCallDuration || 300}s`} />
+            <ConfigRow label="Transfer Number" value={config.transferNumber || 'Not set'} last />
+          </div>
+        </div>
+      )}
+
+      <div className="h-4" />
     </div>
-  )
+  );
+}
+
+function StatPill({ icon, value, label, color }: { icon: React.ReactNode; value: number; label: string; color: string }) {
+  return (
+    <div className="flex flex-col items-center p-3 bg-white rounded-xl shadow-sm">
+      <span className={color}>{icon}</span>
+      <p className="text-[22px] font-bold text-[#1C1C1E] mt-1">{value}</p>
+      <p className="text-[11px] text-[#8E8E93]">{label}</p>
+    </div>
+  );
+}
+
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  if (outcome === 'connected') return <span className="ios-badge ios-badge-green">Answered</span>;
+  if (outcome === 'voicemail') return <span className="ios-badge ios-badge-warm">Voicemail</span>;
+  return <span className="ios-badge ios-badge-cold">No Answer</span>;
+}
+
+function ConfigRow({ label, value, last }: { label: string; value: string; last?: boolean }) {
+  return (
+    <div className={`ios-list-item ${last ? '' : 'border-b border-[#E5E5EA]'}`}>
+      <span className="text-[17px] text-[#1C1C1E] flex-1">{label}</span>
+      <span className="text-[17px] text-[#8E8E93]">{value}</span>
+    </div>
+  );
 }

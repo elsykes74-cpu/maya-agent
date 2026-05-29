@@ -1,244 +1,104 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
-import { Calendar as CalendarIcon, Clock, CheckCircle2, XCircle } from 'lucide-react'
+import { trpc } from '@/providers/trpc';
+import { Calendar, Clock, MapPin, User, ChevronLeft, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { useState } from 'react';
 
 export default function Appointments() {
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedLeadId, setSelectedLeadId] = useState('')
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState<'upcoming' | 'today' | 'past'>('today');
 
-  const { data: appointmentsData, refetch } = trpc.appointments.list.useQuery(
-    statusFilter !== 'all' ? { status: statusFilter } : undefined
-  )
-  const { data: leadsData } = trpc.leads.list.useQuery({ limit: 100, motivation: 'all' })
-  const { data: stats } = trpc.appointments.stats.useQuery()
+  const { data } = trpc.appointments.list.useQuery({});
+  const appointments = data?.items ?? [];
 
-  const createAppointment = trpc.appointments.create.useMutation({
-    onSuccess: () => { refetch(); setDialogOpen(false) }
-  })
-  const updateAppointment = trpc.appointments.update.useMutation({ onSuccess: () => refetch() })
+  const filtered = appointments.filter((a: any) => {
+    const d = new Date(a.scheduledDate);
+    const now = new Date();
+    if (filter === 'today') return d.toDateString() === now.toDateString();
+    if (filter === 'upcoming') return d > now;
+    return d < now;
+  });
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    createAppointment.mutate({
-      leadId: Number(formData.get('leadId')),
-      scheduledDate: new Date(formData.get('scheduledDate') as string),
-      scheduledTime: formData.get('scheduledTime') as string,
-      duration: Number(formData.get('duration')) || 30,
-      appointmentType: (formData.get('appointmentType') as any) || 'walkthrough',
-      notes: formData.get('notes') as string || undefined,
-    })
-  }
-
-  const getStatusBadge = (status: string | null) => {
-    const colors: Record<string, string> = {
-      scheduled: 'bg-blue-500',
-      confirmed: 'bg-indigo-500',
-      completed: 'bg-emerald-500',
-      cancelled: 'bg-red-500',
-      no_show: 'bg-orange-500',
-    }
-    return <Badge className={colors[status || 'scheduled'] || 'bg-slate-500'}>{(status || 'scheduled').toUpperCase()}</Badge>
-  }
-
-  const hotLeads = leadsData?.items?.filter((l: any) => l.motivationLevel === 'hot' && !l.appointmentSet) || []
+  const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
-    <div className="space-y-6">
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.total || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Total Appointments</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-3xl font-bold text-blue-600">{stats?.scheduled || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Scheduled</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-3xl font-bold text-emerald-600">{stats?.completed || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Completed</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-3xl font-bold text-green-600">{stats?.contracts || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Contracts Signed</p>
-          </CardContent>
-        </Card>
+    <div className="min-h-full">
+      <div className="sticky top-0 bg-[#F2F2F7] z-10 px-5 pt-4 pb-3">
+        <div className="flex items-center gap-3 mb-3">
+          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
+            <ChevronLeft size={24} className="text-[#007AFF]" />
+          </button>
+          <h1 className="text-[22px] font-bold">Appointments</h1>
+          <div className="flex-1" />
+          <button className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white">
+            <Plus size={20} />
+          </button>
+        </div>
+        <p className="text-[15px] text-[#8E8E93] pl-11">{todayStr}</p>
+
+        <div className="flex gap-2 mt-3 pl-11">
+          {(['today', 'upcoming', 'past'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setFilter(tab)}
+              className={`px-4 py-2 rounded-full text-[15px] font-medium capitalize transition-all ${
+                filter === tab ? 'bg-[#007AFF] text-white' : 'bg-white text-[#8E8E93]'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Filters & Add */}
-      <div className="flex flex-col sm:flex-row gap-4 items-center justify-between">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Filter by status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="scheduled">Scheduled</SelectItem>
-            <SelectItem value="confirmed">Confirmed</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-            <SelectItem value="no_show">No Show</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="px-5 space-y-3 mt-3">
+        {filtered.length === 0 && (
+          <div className="py-16 text-center">
+            <div className="w-16 h-16 mx-auto rounded-full bg-[#F2F2F7] flex items-center justify-center">
+              <Calendar size={28} className="text-[#C6C6C8]" />
+            </div>
+            <p className="text-[17px] text-[#8E8E93] mt-3">No appointments</p>
+          </div>
+        )}
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-emerald-600 hover:bg-emerald-700">
-              <CalendarIcon className="w-4 h-4 mr-2" /> Schedule Appointment
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>Schedule Walkthrough</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label>Lead</Label>
-                <Select name="leadId" value={selectedLeadId} onValueChange={setSelectedLeadId}>
-                  <SelectTrigger><SelectValue placeholder="Select a lead" /></SelectTrigger>
-                  <SelectContent>
-                    {hotLeads.map((lead: any) => (
-                      <SelectItem key={lead.id} value={String(lead.id)}>
-                        {lead.sellerName} — {lead.propertyAddress}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+        {filtered.map((apt: any) => (
+          <div key={apt.id} className="ios-card p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#007AFF] to-[#5856D6] flex flex-col items-center justify-center text-white shrink-0">
+                <span className="text-[20px] font-bold leading-none">
+                  {new Date(apt.scheduledDate).getDate()}
+                </span>
+                <span className="text-[10px] uppercase">
+                  {new Date(apt.scheduledDate).toLocaleDateString('en-US', { month: 'short' })}
+                </span>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Date</Label>
-                  <Input name="scheduledDate" type="date" required />
+              <div className="flex-1 min-w-0">
+                <p className="text-[18px] font-bold text-[#1C1C1E]">{apt.title}</p>
+                {apt.leadName && (
+                  <p className="text-[15px] text-[#8E8E93] flex items-center gap-1 mt-1">
+                    <User size={14} /> {apt.leadName}
+                  </p>
+                )}
+                <div className="flex items-center gap-3 mt-2 text-[14px] text-[#8E8E93]">
+                  <span className="flex items-center gap-1">
+                    <Clock size={14} />
+                    {new Date(apt.scheduledDate).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                  {apt.location && (
+                    <span className="flex items-center gap-1">
+                      <MapPin size={14} /> {apt.location}
+                    </span>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  <Label>Time</Label>
-                  <Input name="scheduledTime" type="time" required />
-                </div>
+                {apt.notes && (
+                  <p className="text-[14px] text-[#8E8E93] mt-2 bg-[#F2F2F7] rounded-lg p-2">{apt.notes}</p>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Duration (min)</Label>
-                  <Input name="duration" type="number" defaultValue={30} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Type</Label>
-                  <Select name="appointmentType" defaultValue="walkthrough">
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="walkthrough">Walkthrough</SelectItem>
-                      <SelectItem value="phone_call">Phone Call</SelectItem>
-                      <SelectItem value="video_call">Video Call</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Notes</Label>
-                <Textarea name="notes" placeholder="Any specific details for the appointment..." rows={2} />
-              </div>
-              <DialogFooter>
-                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">Schedule</Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* Appointments Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Date & Time</TableHead>
-                <TableHead>Lead</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>MAO Presented</TableHead>
-                <TableHead>Contract</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {appointmentsData?.items?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center text-slate-500 py-12">
-                    No appointments scheduled yet.
-                  </TableCell>
-                </TableRow>
-              )}
-              {appointmentsData?.items?.map((appt: any) => {
-                const lead = leadsData?.items?.find((l: any) => l.id === appt.leadId)
-                return (
-                  <TableRow key={appt.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <CalendarIcon className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm">{new Date(appt.scheduledDate).toLocaleDateString()}</span>
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Clock className="w-4 h-4 text-slate-400" />
-                        <span className="text-sm text-slate-500">{appt.scheduledTime}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm font-medium">{lead?.sellerName || 'Unknown'}</p>
-                      <p className="text-xs text-slate-500">{lead?.propertyAddress}</p>
-                    </TableCell>
-                    <TableCell className="text-sm capitalize">{appt.appointmentType?.replace('_', ' ')}</TableCell>
-                    <TableCell>{getStatusBadge(appt.status)}</TableCell>
-                    <TableCell>
-                      {appt.maoPresented ? `$${Number(appt.maoPresented).toLocaleString()}` : '-'}
-                    </TableCell>
-                    <TableCell>
-                      {appt.contractSigned ? (
-                        <Badge className="bg-green-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Signed</Badge>
-                      ) : (
-                        <Badge variant="outline"><XCircle className="w-3 h-3 mr-1" /> Pending</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Select
-                        value={appt.status}
-                        onValueChange={(val) => updateAppointment.mutate({ id: appt.id, status: val as any })}
-                      >
-                        <SelectTrigger className="w-[140px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="scheduled">Scheduled</SelectItem>
-                          <SelectItem value="confirmed">Confirmed</SelectItem>
-                          <SelectItem value="completed">Completed</SelectItem>
-                          <SelectItem value="cancelled">Cancelled</SelectItem>
-                          <SelectItem value="no_show">No Show</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="h-4" />
     </div>
-  )
+  );
 }

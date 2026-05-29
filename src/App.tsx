@@ -11,7 +11,7 @@ import SMSSequences from './pages/SMSSequences'
 import Settings from './pages/Settings'
 import Campaigns from './pages/Campaigns'
 import DNCLists from './pages/DNCLists'
-import CallQueue from './pages/CallQueue'
+import More from './pages/More'
 import Layout from './components/Layout'
 
 export default function App() {
@@ -23,8 +23,8 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/leads" element={<Leads />} />
         <Route path="/campaigns" element={<Campaigns />} />
-        <Route path="/call-queue" element={<CallQueue />} />
         <Route path="/calls" element={<CallCenter />} />
+        <Route path="/more" element={<More />} />
         <Route path="/appointments" element={<Appointments />} />
         <Route path="/deals" element={<DealAnalysis />} />
         <Route path="/ai-config" element={<AIConfig />} />

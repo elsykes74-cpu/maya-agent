@@ -1,241 +1,187 @@
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
-import {
-  Flame,
-  Thermometer,
-  Snowflake,
-  Phone,
-  CalendarCheck,
-  TrendingUp,
-  ArrowRight,
-  DollarSign,
-  CheckCircle2
-} from 'lucide-react'
-import { Link } from 'react-router'
+import { useState } from 'react';
+import { PhoneCall, Users, Zap, Calendar, Flame, Clock } from 'lucide-react';
+import { trpc } from '@/providers/trpc';
+
+const DEMO_LEADS = [
+  { id: 1, sellerName: 'Sarah Johnson', propertyAddress: '142 Maple St, Springfield, MA', phone: '(413) 555-0123', motivationLevel: 'hot', timeline: '30 days', keyPainPoints: 'Inherited property, lives out of state, wants quick cash sale' },
+  { id: 2, sellerName: 'Mike Chen', propertyAddress: '78 Oak Avenue, Holyoke, MA', phone: '(413) 555-0456', motivationLevel: 'hot', timeline: '2 weeks', keyPainPoints: 'Behind on mortgage payments, facing foreclosure' },
+  { id: 3, sellerName: 'Emma Davis', propertyAddress: '256 Elm Street, Chicopee, MA', phone: '(413) 555-0789', motivationLevel: 'warm', timeline: '60 days', keyPainPoints: 'Downsizing, already purchased new home' },
+];
+
+const DEMO_CALLS = [
+  { id: 1, leadName: 'Sarah Johnson', outcome: 'connected', duration: 184, createdAt: new Date(Date.now() - 3600000).toISOString() },
+  { id: 2, leadName: 'Mike Chen', outcome: 'voicemail', duration: 32, createdAt: new Date(Date.now() - 7200000).toISOString() },
+  { id: 3, leadName: 'Emma Davis', outcome: 'connected', duration: 245, createdAt: new Date(Date.now() - 10800000).toISOString() },
+];
+
+const DEMO_CAMPAIGNS = [
+  { id: 1, name: 'Springfield Motivated Sellers', status: 'active', progress: 68, callsMade: 34, totalLeads: 50 },
+];
 
 export default function Home() {
-  const { data: stats, isLoading: statsLoading } = trpc.leads.stats.useQuery()
-  const { data: callStats } = trpc.calls.stats.useQuery()
-  const { data: apptStats } = trpc.appointments.stats.useQuery()
-  const { data: leadsData } = trpc.leads.list.useQuery({ limit: 5, motivation: 'hot' })
+  const [greeting] = useState(() => {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good Morning';
+    if (h < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  });
 
-  const pipelineStages = [
-    { stage: 'lead', label: 'Lead Source', color: 'bg-slate-500' },
-    { stage: 'outreach', label: 'Outreach', color: 'bg-blue-500' },
-    { stage: 'scoring', label: 'Scoring', color: 'bg-indigo-500' },
-    { stage: 'hot_routing', label: 'Hot Routing', color: 'bg-red-500' },
-    { stage: 'warm_nurture', label: 'Warm Nurture', color: 'bg-amber-500' },
-    { stage: 'cold_drip', label: 'Cold Drip', color: 'bg-cyan-500' },
-    { stage: 'appointment', label: 'Appointment', color: 'bg-emerald-500' },
-    { stage: 'close', label: 'Close', color: 'bg-green-600' },
-  ]
+  const { data: leadsData } = trpc.leads.list.useQuery({ limit: 10 }, { retry: false });
+  const { data: callsData } = trpc.calls.list.useQuery({}, { retry: false });
+  const { data: campaignsData } = trpc.campaigns.list.useQuery({}, { retry: false });
 
-  if (statsLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {[1,2,3,4].map(i => (
-            <Card key={i} className="animate-pulse"><CardContent className="h-32 bg-slate-200 dark:bg-slate-800 rounded" /></Card>
+  const leads = leadsData?.items ?? DEMO_LEADS;
+  const calls = callsData?.items ?? DEMO_CALLS;
+  const campaigns = campaignsData?.items ?? DEMO_CAMPAIGNS;
+
+  const hotLeads = leads.filter((l: any) => l.motivationLevel === 'hot').length;
+  const todayCalls = calls.length;
+  const activeCampaigns = campaigns.filter((c: any) => c.status === 'active').length;
+  const todayAppointments = 2;
+
+  return (
+    <div className="min-h-full">
+      <div className="px-5 pt-6 pb-4">
+        <p className="text-[15px] text-[#8E8E93]">{greeting}</p>
+        <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Dashboard</h1>
+      </div>
+
+      <div className="px-5 grid grid-cols-2 gap-3 mb-6">
+        <div className="ios-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><Users size={22} className="text-[#FF3B30]" /></div>
+            <span className="ios-badge ios-badge-hot">HOT</span>
+          </div>
+          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{hotLeads}</p>
+          <p className="text-[13px] text-[#8E8E93] mt-1">Hot Leads</p>
+        </div>
+        <div className="ios-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><PhoneCall size={22} className="text-[#007AFF]" /></div>
+            <span className="ios-badge ios-badge-blue">TODAY</span>
+          </div>
+          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{todayCalls}</p>
+          <p className="text-[13px] text-[#8E8E93] mt-1">Calls Today</p>
+        </div>
+        <div className="ios-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><Zap size={22} className="text-[#FF9500]" /></div>
+            <span className="ios-badge ios-badge-warm">LIVE</span>
+          </div>
+          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{activeCampaigns}</p>
+          <p className="text-[13px] text-[#8E8E93] mt-1">Active Campaigns</p>
+        </div>
+        <div className="ios-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><Calendar size={22} className="text-[#34C759]" /></div>
+            <span className="ios-badge ios-badge-green">TODAY</span>
+          </div>
+          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{todayAppointments}</p>
+          <p className="text-[13px] text-[#8E8E93] mt-1">Appointments</p>
+        </div>
+      </div>
+
+      <div className="px-5 mb-6">
+        <p className="ios-subheader">Quick Actions</p>
+        <div className="flex gap-3 overflow-x-auto hide-scrollbar snap-x snap-mandatory pb-1">
+          {[
+            { icon: <PhoneCall size={28} />, label: 'Start Calling', color: 'bg-[#007AFF]' },
+            { icon: <Users size={28} />, label: 'Add Lead', color: 'bg-[#34C759]' },
+            { icon: <MegaphoneIcon />, label: 'New Campaign', color: 'bg-[#FF9500]' },
+            { icon: <Calendar size={28} />, label: 'Schedule', color: 'bg-[#AF52DE]' },
+          ].map((item, i) => (
+            <button key={i} className="snap-start flex flex-col items-center gap-2 min-w-[80px]">
+              <div className={`w-16 h-16 ${item.color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>{item.icon}</div>
+              <span className="text-[12px] font-medium text-[#1C1C1E]">{item.label}</span>
+            </button>
           ))}
         </div>
       </div>
-    )
-  }
 
-  return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-red-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <Flame className="w-4 h-4 text-red-500" /> HOT Leads
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.hot || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Motivated, timeline &lt;30 days</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-amber-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <Thermometer className="w-4 h-4 text-amber-500" /> WARM Leads
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.warm || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">1-6 month timeline</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-cyan-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <Snowflake className="w-4 h-4 text-cyan-500" /> COLD Leads
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.cold || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">No urgency, retail expectations</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-emerald-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <CalendarCheck className="w-4 h-4 text-emerald-500" /> Appointments
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.appointments || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Walkthroughs scheduled</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Pipeline Overview */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-emerald-600" />
-            Pipeline Overview
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {pipelineStages.map((stage) => {
-              const count = stats?.byStage?.find((s: { stage: string | null; count: number }) => s.stage === stage.stage)?.count || 0
-              const total = stats?.total || 1
-              const pct = Math.round((count / total) * 100)
-              return (
-                <div key={stage.stage} className="flex items-center gap-4">
-                  <div className="w-28 text-sm font-medium text-slate-700 dark:text-slate-300">{stage.label}</div>
-                  <div className="flex-1">
-                    <Progress value={pct} className="h-2" />
-                  </div>
-                  <div className="w-16 text-right text-sm font-semibold text-slate-900 dark:text-white">{count}</div>
-                  <div className="w-12 text-right text-xs text-slate-500">{pct}%</div>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Bottom Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Hot Leads */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Flame className="w-5 h-5 text-red-500" />
-              HOT Leads — Erick Calls Same Day
-            </CardTitle>
-            <Link to="/leads?motivation=hot">
-              <Button variant="ghost" size="sm" className="text-emerald-600">
-                View All <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {leadsData?.items?.length === 0 && (
-                <p className="text-sm text-slate-500 text-center py-8">No hot leads yet. Import leads to get started.</p>
-              )}
-              {leadsData?.items?.map((lead: { id: number; sellerName: string; propertyAddress: string; timeline: string | null; askingPrice: string | null; phone: string | null }) => (
-                <div key={lead.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <div>
-                    <p className="font-medium text-sm text-slate-900 dark:text-white">{lead.sellerName}</p>
-                    <p className="text-xs text-slate-500">{lead.propertyAddress}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">HOT</span>
-                      {lead.timeline && <span className="text-xs text-slate-500">{lead.timeline}</span>}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {lead.askingPrice && (
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                        ${Number(lead.askingPrice).toLocaleString()}
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-500">{lead.phone}</p>
-                  </div>
-                </div>
-              ))}
+      <div className="px-5 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <p className="ios-subheader !m-0">Recent Calls</p>
+          <span className="text-[#007AFF] text-[15px] font-medium">See All</span>
+        </div>
+        <div className="ios-card divide-y divide-[#E5E5EA]">
+          {calls.slice(0, 3).map((call: any) => (
+            <div key={call.id} className="flex items-center gap-4 p-4">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${call.outcome === 'connected' ? 'bg-[#E5F9ED]' : 'bg-[#FFE5E5]'}`}>
+                <PhoneCall size={18} className={call.outcome === 'connected' ? 'text-[#34C759]' : 'text-[#FF3B30]'} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[17px] font-medium text-[#1C1C1E] truncate">{call.leadName}</p>
+                <p className="text-[13px] text-[#8E8E93]">{call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer'} · {new Date(call.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</p>
+              </div>
+              <span className="text-[13px] text-[#8E8E93]">{call.duration}s</span>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Quick Stats */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Phone className="w-5 h-5 text-blue-600" />
-                Call Performance
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{callStats?.total || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Total Calls</p>
-                </div>
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-emerald-600">{callStats?.answered || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Answered</p>
-                </div>
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-amber-600">{callStats?.voicemail || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Voicemails</p>
-                </div>
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-purple-600">{callStats?.appointments || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Appts Set</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <DollarSign className="w-5 h-5 text-emerald-600" />
-                Deal Progress
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CalendarCheck className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">Scheduled</span>
-                  </div>
-                  <span className="text-sm font-semibold">{apptStats?.scheduled || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">Completed</span>
-                  </div>
-                  <span className="text-sm font-semibold">{apptStats?.completed || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-600" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">Contracts Signed</span>
-                  </div>
-                  <span className="text-sm font-semibold">{apptStats?.contracts || 0}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          ))}
         </div>
       </div>
+
+      <div className="px-5 mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <p className="ios-subheader !m-0 flex items-center gap-1"><Flame size={14} className="text-[#FF3B30]" /> Hot Leads</p>
+          <span className="text-[#007AFF] text-[15px] font-medium">See All</span>
+        </div>
+        <div className="space-y-3">
+          {leads.filter((l: any) => l.motivationLevel === 'hot').map((lead: any) => (
+            <div key={lead.id} className="ios-card p-4">
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <p className="text-[17px] font-semibold text-[#1C1C1E]">{lead.sellerName}</p>
+                  <p className="text-[13px] text-[#8E8E93] truncate max-w-[240px]">{lead.propertyAddress}</p>
+                </div>
+                <span className="ios-badge ios-badge-hot">HOT</span>
+              </div>
+              <div className="flex items-center gap-4 text-[13px] text-[#8E8E93]">
+                <span className="flex items-center gap-1"><PhoneCall size={12} /> {lead.phone}</span>
+                {lead.timeline && <span className="flex items-center gap-1"><Clock size={12} /> {lead.timeline}</span>}
+              </div>
+              {lead.keyPainPoints && (
+                <div className="mt-2 p-2 bg-[#FFF9E5] rounded-lg">
+                  <p className="text-[13px] text-[#FF9500] font-medium">Motivation</p>
+                  <p className="text-[14px] text-[#1C1C1E] mt-0.5">{lead.keyPainPoints}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {campaigns.filter((c: any) => c.status === 'active').length > 0 && (
+        <div className="px-5 mb-6">
+          <p className="ios-subheader">Active Campaigns</p>
+          {campaigns.filter((c: any) => c.status === 'active').map((camp: any) => (
+            <div key={camp.id} className="ios-card p-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[17px] font-semibold">{camp.name}</p>
+                <div className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-[#34C759] animate-pulse" />
+                  <span className="ios-badge ios-badge-green">Live</span>
+                </div>
+              </div>
+              <div className="h-2 bg-[#E5E5EA] rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-[#34C759] to-[#30D158] rounded-full" style={{ width: `${camp.progress ?? 0}%` }} />
+              </div>
+              <div className="flex justify-between mt-2 text-[13px] text-[#8E8E93]">
+                <span>{camp.callsMade ?? 0} calls made</span>
+                <span>{camp.totalLeads ?? 0} total leads</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="h-4" />
     </div>
-  )
+  );
+}
+
+function MegaphoneIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m3 11 18-5v12L3 13v-2z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+    </svg>
+  );
 }
