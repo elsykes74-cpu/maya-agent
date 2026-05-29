@@ -35,9 +35,14 @@ export default function Login() {
   };
 
   return (
-    <div className="app-shell bg-white">
+    <div className="app-shell" style={{ background: 'linear-gradient(180deg,#EAEAF2 0%,#F0F0F8 100%)' }}>
       <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-16">
-        <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-[#007AFF] to-[#5856D6] flex items-center justify-center shadow-xl mb-6">
+        <div className="w-24 h-24 rounded-3xl flex items-center justify-center mb-6"
+          style={{
+            background: 'linear-gradient(160deg,#3395FF 0%,#5856D6 100%)',
+            boxShadow: '0 16px 40px rgba(0,122,255,0.45), 0 4px 12px rgba(88,86,214,0.30), inset 0 1px 0 rgba(255,255,255,0.30)',
+          }}
+        >
           <Bot size={48} className="text-white" />
         </div>
 
@@ -88,9 +93,11 @@ export default function Login() {
 
 function FeaturePill({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F2F2F7] rounded-full">
+    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+      style={{ background: 'rgba(255,255,255,0.75)', boxShadow: '0 2px 10px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)' }}
+    >
       <span className="text-[#007AFF]">{icon}</span>
-      <span className="text-[13px] font-medium text-[#1C1C1E]">{label}</span>
+      <span className="text-[13px] font-semibold text-[#1C1C1E]">{label}</span>
     </div>
   );
 }
