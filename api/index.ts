@@ -12,6 +12,6 @@
 // and the dist/** files are included in the Lambda package via includeFiles.
 
 // @ts-ignore — dist/boot.js is esbuild output, not a TS source file
-import app from "../dist/boot.js";
+import app from "./boot.js";
 
 export default app;

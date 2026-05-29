@@ -23,6 +23,8 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
 import { createOAuthCallbackHandler } from "./kimi/auth";
+import { handleTelegramWebhook } from "./lib/telegram-webhook";
+import { registerWebhook } from "./lib/telegram";
 import { Session, Paths } from "../contracts/constants";
 import {
 	getGoogleAuthUrl,
@@ -220,6 +222,23 @@ app.all("/api/trpc/*", trpcBodyLimit, async (c) =>
 		createContext,
 	}),
 );
+
+// ---------------------------------------------------------------------------
+// Telegram webhook + setup
+// ---------------------------------------------------------------------------
+app.post("/api/telegram/webhook", handleTelegramWebhook);
+
+app.get("/api/telegram/setup", async (c) => {
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "";
+  const proto = c.req.header("x-forwarded-proto") ?? "https";
+  const webhookUrl = `${proto}://${host}/api/telegram/webhook`;
+  try {
+    await registerWebhook(webhookUrl);
+    return c.json({ ok: true, webhookUrl });
+  } catch (err: any) {
+    return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  }
+});
 
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
