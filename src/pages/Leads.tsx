@@ -21,7 +21,8 @@ import {
   MoreHorizontal,
   Trash2,
   Edit3,
-  Eye
+  Eye,
+  Target,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -77,6 +78,26 @@ export default function Leads() {
       pipelineStage: formData.get('pipelineStage') as any || 'lead',
       sourceId: formData.get('sourceId') ? Number(formData.get('sourceId')) : undefined,
       profileId: formData.get('profileId') ? Number(formData.get('profileId')) : undefined,
+      // Lead Finder fields
+      leadType: formData.get('leadType') as any || 'other',
+      ownerMailingAddress: formData.get('ownerMailingAddress') as string || undefined,
+      county: formData.get('county') as string || undefined,
+      yearBuilt: formData.get('yearBuilt') ? Number(formData.get('yearBuilt')) : undefined,
+      assessedValue: formData.get('assessedValue') as string || undefined,
+      estimatedValue: formData.get('estimatedValue') as string || undefined,
+      ownershipYears: formData.get('ownershipYears') ? Number(formData.get('ownershipYears')) : undefined,
+      taxStatus: formData.get('taxStatus') as string || undefined,
+      isVacant: formData.get('isVacant') === 'on',
+      isAbsentee: formData.get('isAbsentee') === 'on',
+      isProbate: formData.get('isProbate') === 'on',
+      hasTaxDelinquency: formData.get('hasTaxDelinquency') === 'on',
+      isPreForeclosure: formData.get('isPreForeclosure') === 'on',
+      hasCodeViolations: formData.get('hasCodeViolations') === 'on',
+      isExpiredListing: formData.get('isExpiredListing') === 'on',
+      isFsbo: formData.get('isFsbo') === 'on',
+      isOutOfState: formData.get('isOutOfState') === 'on',
+      isMultifamilyLandlord: formData.get('isMultifamilyLandlord') === 'on',
+      hasVisibleDistress: formData.get('hasVisibleDistress') === 'on',
     }
 
     if (editingLead) {
@@ -94,6 +115,32 @@ export default function Leads() {
   const openNew = () => {
     setEditingLead(null)
     setDialogOpen(true)
+  }
+
+  const LEAD_TYPE_LABELS: Record<string, string> = {
+    vacant: 'Vacant',
+    absentee_owner: 'Absentee',
+    probate: 'Probate',
+    tax_delinquent: 'Tax Delinquent',
+    pre_foreclosure: 'Pre-Foreclosure',
+    tired_landlord: 'Tired Landlord',
+    code_violation: 'Code Violation',
+    expired_listing: 'Expired Listing',
+    fsbo: 'FSBO',
+    high_equity: 'High Equity',
+    inherited: 'Inherited',
+    fire_damaged: 'Fire Damaged',
+    long_term_owner: 'Long-Term Owner',
+    other: 'Other',
+  }
+
+  const getScoreBadge = (score: number | null) => {
+    const s = score ?? 0
+    if (s >= 80) return <Badge className="bg-red-500 text-white text-xs px-1.5 py-0"><Flame className="w-2.5 h-2.5 mr-0.5 inline" />{s}</Badge>
+    if (s >= 60) return <Badge className="bg-amber-500 text-white text-xs px-1.5 py-0">{s}</Badge>
+    if (s >= 40) return <Badge className="bg-blue-500 text-white text-xs px-1.5 py-0">{s}</Badge>
+    if (s > 0)  return <Badge variant="secondary" className="text-xs px-1.5 py-0">{s}</Badge>
+    return null
   }
 
   const getMotivationBadge = (level: string | null) => {
@@ -302,6 +349,90 @@ export default function Leads() {
                   </Select>
                 </div>
               </div>
+              {/* Lead Finder: Lead Type + Motivation Indicators */}
+              <div className="border-t pt-4 mt-2">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
+                  <Target className="w-4 h-4 text-emerald-600" /> Lead Finder — Motivation Indicators
+                </p>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="space-y-2">
+                    <Label>Lead Type</Label>
+                    <Select name="leadType" defaultValue={editingLead?.leadType || 'other'}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="other">Other / Unknown</SelectItem>
+                        <SelectItem value="vacant">Vacant Property</SelectItem>
+                        <SelectItem value="absentee_owner">Absentee Owner</SelectItem>
+                        <SelectItem value="probate">Probate / Estate</SelectItem>
+                        <SelectItem value="tax_delinquent">Tax Delinquent</SelectItem>
+                        <SelectItem value="pre_foreclosure">Pre-Foreclosure</SelectItem>
+                        <SelectItem value="tired_landlord">Tired Landlord</SelectItem>
+                        <SelectItem value="code_violation">Code Violation</SelectItem>
+                        <SelectItem value="expired_listing">Expired Listing</SelectItem>
+                        <SelectItem value="fsbo">FSBO</SelectItem>
+                        <SelectItem value="high_equity">High Equity</SelectItem>
+                        <SelectItem value="inherited">Inherited</SelectItem>
+                        <SelectItem value="fire_damaged">Fire Damaged</SelectItem>
+                        <SelectItem value="long_term_owner">Long-Term Owner</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Ownership Years</Label>
+                    <Input name="ownershipYears" type="number" defaultValue={editingLead?.ownershipYears || ''} placeholder="e.g. 18" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>County</Label>
+                    <Input name="county" defaultValue={editingLead?.county || ''} placeholder="Hampden, Hampshire…" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Year Built</Label>
+                    <Input name="yearBuilt" type="number" defaultValue={editingLead?.yearBuilt || ''} placeholder="e.g. 1965" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Assessed Value ($)</Label>
+                    <Input name="assessedValue" type="number" defaultValue={editingLead?.assessedValue || ''} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Est. Value ($)</Label>
+                    <Input name="estimatedValue" type="number" defaultValue={editingLead?.estimatedValue || ''} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Owner Mailing Address</Label>
+                    <Input name="ownerMailingAddress" defaultValue={editingLead?.ownerMailingAddress || ''} placeholder="If different from property" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Tax / Foreclosure Status</Label>
+                    <Input name="taxStatus" defaultValue={editingLead?.taxStatus || ''} placeholder="e.g. 2 years delinquent" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4">
+                  {[
+                    { name: 'isVacant', label: 'Vacant (+20)' },
+                    { name: 'isAbsentee', label: 'Absentee Owner (+15)' },
+                    { name: 'isProbate', label: 'Probate / Estate (+20)' },
+                    { name: 'hasTaxDelinquency', label: 'Tax Delinquent (+20)' },
+                    { name: 'isPreForeclosure', label: 'Pre-Foreclosure (+25)' },
+                    { name: 'hasCodeViolations', label: 'Code Violations (+15)' },
+                    { name: 'isExpiredListing', label: 'Expired Listing (+15)' },
+                    { name: 'isFsbo', label: 'FSBO (+10)' },
+                    { name: 'isOutOfState', label: 'Out-of-State Owner (+10)' },
+                    { name: 'isMultifamilyLandlord', label: 'Multifamily Landlord (+10)' },
+                    { name: 'hasVisibleDistress', label: 'Visible Distress (+10)' },
+                  ].map(({ name, label }) => (
+                    <label key={name} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        name={name}
+                        defaultChecked={!!editingLead?.[name]}
+                        className="w-4 h-4 rounded accent-emerald-600"
+                      />
+                      <span className="text-xs text-slate-600 dark:text-slate-400">{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <Label>Notes</Label>
                 <Textarea name="notes" defaultValue={editingLead?.notes || ''} rows={3} />
@@ -324,11 +455,12 @@ export default function Leads() {
               <TableRow>
                 <TableHead>Seller</TableHead>
                 <TableHead>Property</TableHead>
+                <TableHead>Score</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Motivation</TableHead>
                 <TableHead>Stage</TableHead>
                 <TableHead>Asking Price</TableHead>
                 <TableHead>ARV</TableHead>
-                <TableHead>Timeline</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -352,6 +484,16 @@ export default function Leads() {
                     <p className="text-sm">{lead.propertyAddress}</p>
                     <p className="text-xs text-slate-500">{lead.city}, {lead.state}</p>
                   </TableCell>
+                  <TableCell>{getScoreBadge(lead.leadScore)}</TableCell>
+                  <TableCell>
+                    {lead.leadType && lead.leadType !== 'other' ? (
+                      <span className="text-xs text-slate-600 dark:text-slate-400">
+                        {LEAD_TYPE_LABELS[lead.leadType] ?? lead.leadType}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-slate-300">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>{getMotivationBadge(lead.motivationLevel)}</TableCell>
                   <TableCell>{getStageBadge(lead.pipelineStage)}</TableCell>
                   <TableCell>
@@ -359,9 +501,6 @@ export default function Leads() {
                   </TableCell>
                   <TableCell>
                     {lead.arv ? `$${Number(lead.arv).toLocaleString()}` : '-'}
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-sm text-slate-600">{lead.timeline || '-'}</span>
                   </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
@@ -478,6 +617,9 @@ export default function Leads() {
                 </Link>
                 <Link to={`/deals?leadId=${detailLead.id}`}>
                   <Button size="sm" variant="outline"><Calendar className="w-4 h-4 mr-1" /> Deal Analysis</Button>
+                </Link>
+                <Link to={`/lead-finder`}>
+                  <Button size="sm" variant="outline"><Target className="w-4 h-4 mr-1" /> Lead Finder</Button>
                 </Link>
               </div>
             </div>

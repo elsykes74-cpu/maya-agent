@@ -17,13 +17,15 @@ import {
   Rocket,
   Shield,
   Radio,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Target,
 } from 'lucide-react'
 import { useState } from 'react'
 
 const navItems = [
   { path: '/', label: 'Dashboard', icon: Home },
   { path: '/leads', label: 'Leads', icon: Users },
+  { path: '/lead-finder', label: 'Lead Finder Bot', icon: Target },
   { path: '/campaigns', label: 'Campaigns', icon: Rocket },
   { path: '/call-queue', label: 'Live Monitor', icon: Radio },
   { path: '/calls', label: 'Call Center', icon: Phone },
