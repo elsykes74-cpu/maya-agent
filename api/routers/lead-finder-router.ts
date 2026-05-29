@@ -10,6 +10,7 @@ import {
   generateSMSOpener,
   generateOutreachAngle,
 } from "../lib/lead-scorer";
+import { sendAlert, formatLeadCard } from "../lib/telegram";
 
 export const leadFinderRouter = createRouter({
   getStats: publicQuery.query(async () => {
@@ -103,12 +104,21 @@ export const leadFinderRouter = createRouter({
         .set({ leadScore: score, motivationLevel: motivation })
         .where(eq(leads.id, input.id));
 
+      if (score >= 80) {
+        const updated = await db.query.leads.findFirst({ where: eq(leads.id, input.id) });
+        if (updated) {
+          sendAlert(`🔥 <b>HOT LEAD SCORED</b>\n\n${formatLeadCard(updated)}`).catch(() => {});
+        }
+      }
+
       return { id: input.id, score, motivation };
     }),
 
   recomputeAllScores: publicQuery.mutation(async () => {
     const db = getDb();
     const allLeads = await db.query.leads.findMany();
+    let hotCount = 0;
+    let warmCount = 0;
 
     for (const lead of allLeads) {
       const score = computeLeadScore(lead);
@@ -117,6 +127,14 @@ export const leadFinderRouter = createRouter({
         .update(leads)
         .set({ leadScore: score, motivationLevel: motivation })
         .where(eq(leads.id, lead.id));
+      if (score >= 80) hotCount++;
+      else if (score >= 60) warmCount++;
+    }
+
+    if (allLeads.length > 0) {
+      sendAlert(
+        `🔄 <b>Re-scored ${allLeads.length} leads</b>\n🔥 HOT: ${hotCount}  ⚡ WARM: ${warmCount}`
+      ).catch(() => {});
     }
 
     return { updated: allLeads.length };

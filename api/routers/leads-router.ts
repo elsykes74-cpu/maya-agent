@@ -4,6 +4,7 @@ import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { leads, leadSources, leadProfiles } from "../../db/schema";
 import { computeLeadScore, scoreToMotivation } from "../lib/lead-scorer";
+import { sendAlert, formatLeadCard } from "../lib/telegram";
 
 const LEAD_TYPES = [
   "vacant", "absentee_owner", "probate", "tax_delinquent", "pre_foreclosure",
@@ -144,7 +145,22 @@ export const leadsRouter = createRouter({
         callCount: 0,
         smsCount: 0,
       });
-      return { id: Number((result as any)[0]?.insertId ?? 0), success: true };
+      const newId = Number((result as any)[0]?.insertId ?? 0);
+
+      if (score >= 80) {
+        const preview = {
+          id: newId, sellerName: input.sellerName,
+          propertyAddress: input.propertyAddress, city: input.city,
+          phone: input.phone, leadScore: score, leadType: input.leadType,
+          isPreForeclosure: input.isPreForeclosure, hasTaxDelinquency: input.hasTaxDelinquency,
+          isProbate: input.isProbate, isVacant: input.isVacant,
+          isAbsentee: input.isAbsentee, hasCodeViolations: input.hasCodeViolations,
+          isExpiredListing: input.isExpiredListing, isOutOfState: input.isOutOfState,
+        };
+        sendAlert(`🔥 <b>NEW HOT LEAD</b>\n\n${formatLeadCard(preview)}`).catch(() => {});
+      }
+
+      return { id: newId, success: true };
     }),
 
   update: publicQuery
