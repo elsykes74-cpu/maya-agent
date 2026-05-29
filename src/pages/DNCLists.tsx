@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { trpc } from '@/providers/trpc';
 import { ChevronLeft, Shield, Plus, Phone, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import ConfirmSheet from '@/components/ConfirmSheet';
 
 export default function DNCLists() {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
   const [phoneInput, setPhoneInput] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [removeId, setRemoveId] = useState<string | null>(null);
 
   const { data } = trpc.dnc.list.useQuery({});
   const dncEntries = data?.items ?? [];
@@ -17,7 +19,7 @@ export default function DNCLists() {
   });
 
   const removeMutation = trpc.dnc.remove.useMutation({
-    onSuccess: () => utils.dnc.list.invalidate(),
+    onSuccess: () => { utils.dnc.list.invalidate(); setRemoveId(null); },
   });
 
   return (
@@ -66,7 +68,11 @@ export default function DNCLists() {
               <p className="text-[17px] font-semibold font-mono">{entry.phone}</p>
               <p className="text-[13px] text-[#8E8E93]">Added {new Date(entry.createdAt).toLocaleDateString()}</p>
             </div>
-            <button onClick={() => { if (confirm('Remove from DNC?')) removeMutation.mutate({ id: entry.id }); }} className="w-8 h-8 flex items-center justify-center">
+            <button
+              onClick={() => setRemoveId(entry.id)}
+              aria-label="Remove from DNC"
+              className="w-8 h-8 flex items-center justify-center active:scale-90 transition-transform"
+            >
               <Trash2 size={16} className="text-[#C6C6C8]" />
             </button>
           </div>
@@ -89,6 +95,17 @@ export default function DNCLists() {
             <button onClick={() => setShowAdd(false)} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">Cancel</button>
           </div>
         </>
+      )}
+
+      {removeId !== null && (
+        <ConfirmSheet
+          title="Remove Number"
+          message="Remove this number from the DNC list? They may be called again."
+          confirmLabel="Remove"
+          danger
+          onConfirm={() => removeMutation.mutate({ id: removeId })}
+          onCancel={() => setRemoveId(null)}
+        />
       )}
 
       <div className="h-4" />

@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { trpc } from '@/providers/trpc';
 import { ChevronLeft, MessageSquare, Plus, Send, Clock, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import ConfirmSheet from '@/components/ConfirmSheet';
 
 export default function SMSSequences() {
   const navigate = useNavigate();
   const utils = trpc.useUtils();
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [body, setBody] = useState('');
 
@@ -18,7 +20,7 @@ export default function SMSSequences() {
   });
 
   const deleteMutation = trpc.sms.deleteTemplate.useMutation({
-    onSuccess: () => utils.sms.listTemplates.invalidate(),
+    onSuccess: () => { utils.sms.listTemplates.invalidate(); setDeleteId(null); },
   });
 
   return (
@@ -50,7 +52,11 @@ export default function SMSSequences() {
             <div className="p-4">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-[18px] font-bold text-[#1C1C1E]">{tpl.name}</p>
-                <button onClick={() => { if (confirm('Delete?')) deleteMutation.mutate({ id: tpl.id }); }} className="w-8 h-8 flex items-center justify-center">
+                <button
+                  onClick={() => setDeleteId(tpl.id)}
+                  aria-label="Delete template"
+                  className="w-8 h-8 flex items-center justify-center active:scale-90 transition-transform"
+                >
                   <Trash2 size={16} className="text-[#C6C6C8]" />
                 </button>
               </div>
@@ -89,6 +95,17 @@ export default function SMSSequences() {
             <button onClick={() => setShowCreate(false)} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">Cancel</button>
           </div>
         </>
+      )}
+
+      {deleteId !== null && (
+        <ConfirmSheet
+          title="Delete Template"
+          message="This SMS template will be permanently deleted."
+          confirmLabel="Delete Template"
+          danger
+          onConfirm={() => deleteMutation.mutate({ id: deleteId })}
+          onCancel={() => setDeleteId(null)}
+        />
       )}
 
       <div className="h-4" />

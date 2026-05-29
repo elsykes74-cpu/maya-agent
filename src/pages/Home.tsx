@@ -1,24 +1,12 @@
 import { useState } from 'react';
-import { PhoneCall, Users, Zap, Calendar, Flame, Clock } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { PhoneCall, Users, Zap, Calendar, Flame, Clock, Megaphone } from 'lucide-react';
 import { trpc } from '@/providers/trpc';
-
-const DEMO_LEADS = [
-  { id: 1, sellerName: 'Sarah Johnson', propertyAddress: '142 Maple St, Springfield, MA', phone: '(413) 555-0123', motivationLevel: 'hot', timeline: '30 days', keyPainPoints: 'Inherited property, lives out of state, wants quick cash sale' },
-  { id: 2, sellerName: 'Mike Chen', propertyAddress: '78 Oak Avenue, Holyoke, MA', phone: '(413) 555-0456', motivationLevel: 'hot', timeline: '2 weeks', keyPainPoints: 'Behind on mortgage payments, facing foreclosure' },
-  { id: 3, sellerName: 'Emma Davis', propertyAddress: '256 Elm Street, Chicopee, MA', phone: '(413) 555-0789', motivationLevel: 'warm', timeline: '60 days', keyPainPoints: 'Downsizing, already purchased new home' },
-];
-
-const DEMO_CALLS = [
-  { id: 1, leadName: 'Sarah Johnson', outcome: 'connected', duration: 184, createdAt: new Date(Date.now() - 3600000).toISOString() },
-  { id: 2, leadName: 'Mike Chen', outcome: 'voicemail', duration: 32, createdAt: new Date(Date.now() - 7200000).toISOString() },
-  { id: 3, leadName: 'Emma Davis', outcome: 'connected', duration: 245, createdAt: new Date(Date.now() - 10800000).toISOString() },
-];
-
-const DEMO_CAMPAIGNS = [
-  { id: 1, name: 'Springfield Motivated Sellers', status: 'active', progress: 68, callsMade: 34, totalLeads: 50 },
-];
+import { DEMO_LEADS, DEMO_CALLS, DEMO_CAMPAIGNS } from '@/data/demo';
 
 export default function Home() {
+  const navigate = useNavigate();
+
   const [greeting] = useState(() => {
     const h = new Date().getHours();
     if (h < 12) return 'Good Morning';
@@ -37,7 +25,13 @@ export default function Home() {
   const hotLeads = leads.filter((l: any) => l.motivationLevel === 'hot').length;
   const todayCalls = calls.length;
   const activeCampaigns = campaigns.filter((c: any) => c.status === 'active').length;
-  const todayAppointments = 2;
+
+  const QUICK_ACTIONS = [
+    { icon: <PhoneCall size={28} />, label: 'Start Calling', color: 'bg-[#007AFF]', to: '/calls' },
+    { icon: <Users size={28} />, label: 'Add Lead', color: 'bg-[#34C759]', to: '/leads' },
+    { icon: <Megaphone size={28} />, label: 'New Campaign', color: 'bg-[#FF9500]', to: '/campaigns' },
+    { icon: <Calendar size={28} />, label: 'Schedule', color: 'bg-[#AF52DE]', to: '/appointments' },
+  ];
 
   return (
     <div className="min-h-full">
@@ -46,62 +40,80 @@ export default function Home() {
         <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Dashboard</h1>
       </div>
 
+      {/* KPI grid */}
       <div className="px-5 grid grid-cols-2 gap-3 mb-6">
-        <div className="ios-card p-4">
+        <button onClick={() => navigate('/leads')} className="ios-card p-4 text-left active:scale-95 transition-transform">
           <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><Users size={22} className="text-[#FF3B30]" /></div>
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
+              <Users size={22} className="text-[#FF3B30]" />
+            </div>
             <span className="ios-badge ios-badge-hot">HOT</span>
           </div>
           <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{hotLeads}</p>
           <p className="text-[13px] text-[#8E8E93] mt-1">Hot Leads</p>
-        </div>
-        <div className="ios-card p-4">
+        </button>
+
+        <button onClick={() => navigate('/calls')} className="ios-card p-4 text-left active:scale-95 transition-transform">
           <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><PhoneCall size={22} className="text-[#007AFF]" /></div>
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
+              <PhoneCall size={22} className="text-[#007AFF]" />
+            </div>
             <span className="ios-badge ios-badge-blue">TODAY</span>
           </div>
           <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{todayCalls}</p>
           <p className="text-[13px] text-[#8E8E93] mt-1">Calls Today</p>
-        </div>
-        <div className="ios-card p-4">
+        </button>
+
+        <button onClick={() => navigate('/campaigns')} className="ios-card p-4 text-left active:scale-95 transition-transform">
           <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><Zap size={22} className="text-[#FF9500]" /></div>
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
+              <Zap size={22} className="text-[#FF9500]" />
+            </div>
             <span className="ios-badge ios-badge-warm">LIVE</span>
           </div>
           <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{activeCampaigns}</p>
           <p className="text-[13px] text-[#8E8E93] mt-1">Active Campaigns</p>
-        </div>
-        <div className="ios-card p-4">
+        </button>
+
+        <button onClick={() => navigate('/appointments')} className="ios-card p-4 text-left active:scale-95 transition-transform">
           <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center"><Calendar size={22} className="text-[#34C759]" /></div>
+            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
+              <Calendar size={22} className="text-[#34C759]" />
+            </div>
             <span className="ios-badge ios-badge-green">TODAY</span>
           </div>
-          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{todayAppointments}</p>
+          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">2</p>
           <p className="text-[13px] text-[#8E8E93] mt-1">Appointments</p>
-        </div>
+        </button>
       </div>
 
+      {/* Quick Actions */}
       <div className="px-5 mb-6">
         <p className="ios-subheader">Quick Actions</p>
         <div className="flex gap-3 overflow-x-auto hide-scrollbar snap-x snap-mandatory pb-1">
-          {[
-            { icon: <PhoneCall size={28} />, label: 'Start Calling', color: 'bg-[#007AFF]' },
-            { icon: <Users size={28} />, label: 'Add Lead', color: 'bg-[#34C759]' },
-            { icon: <MegaphoneIcon />, label: 'New Campaign', color: 'bg-[#FF9500]' },
-            { icon: <Calendar size={28} />, label: 'Schedule', color: 'bg-[#AF52DE]' },
-          ].map((item, i) => (
-            <button key={i} className="snap-start flex flex-col items-center gap-2 min-w-[80px]">
-              <div className={`w-16 h-16 ${item.color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>{item.icon}</div>
+          {QUICK_ACTIONS.map((item) => (
+            <button
+              key={item.to}
+              onClick={() => navigate(item.to)}
+              aria-label={item.label}
+              className="snap-start flex flex-col items-center gap-2 min-w-[80px] active:scale-95 transition-transform"
+            >
+              <div className={`w-16 h-16 ${item.color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>
+                {item.icon}
+              </div>
               <span className="text-[12px] font-medium text-[#1C1C1E]">{item.label}</span>
             </button>
           ))}
         </div>
       </div>
 
+      {/* Recent Calls */}
       <div className="px-5 mb-6">
         <div className="flex items-center justify-between mb-3">
           <p className="ios-subheader !m-0">Recent Calls</p>
-          <span className="text-[#007AFF] text-[15px] font-medium">See All</span>
+          <button onClick={() => navigate('/calls')} className="text-[#007AFF] text-[15px] font-medium active:opacity-60">
+            See All
+          </button>
         </div>
         <div className="ios-card divide-y divide-[#E5E5EA]">
           {calls.slice(0, 3).map((call: any) => (
@@ -111,7 +123,11 @@ export default function Home() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[17px] font-medium text-[#1C1C1E] truncate">{call.leadName}</p>
-                <p className="text-[13px] text-[#8E8E93]">{call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer'} · {new Date(call.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</p>
+                <p className="text-[13px] text-[#8E8E93]">
+                  {call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer'}
+                  {' · '}
+                  {new Date(call.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                </p>
               </div>
               <span className="text-[13px] text-[#8E8E93]">{call.duration}s</span>
             </div>
@@ -119,10 +135,15 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Hot Leads */}
       <div className="px-5 mb-6">
         <div className="flex items-center justify-between mb-3">
-          <p className="ios-subheader !m-0 flex items-center gap-1"><Flame size={14} className="text-[#FF3B30]" /> Hot Leads</p>
-          <span className="text-[#007AFF] text-[15px] font-medium">See All</span>
+          <p className="ios-subheader !m-0 flex items-center gap-1">
+            <Flame size={14} className="text-[#FF3B30]" /> Hot Leads
+          </p>
+          <button onClick={() => navigate('/leads')} className="text-[#007AFF] text-[15px] font-medium active:opacity-60">
+            See All
+          </button>
         </div>
         <div className="space-y-3">
           {leads.filter((l: any) => l.motivationLevel === 'hot').map((lead: any) => (
@@ -149,6 +170,7 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Active Campaigns */}
       {campaigns.filter((c: any) => c.status === 'active').length > 0 && (
         <div className="px-5 mb-6">
           <p className="ios-subheader">Active Campaigns</p>
@@ -162,7 +184,10 @@ export default function Home() {
                 </div>
               </div>
               <div className="h-2 bg-[#E5E5EA] rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-[#34C759] to-[#30D158] rounded-full" style={{ width: `${camp.progress ?? 0}%` }} />
+                <div
+                  className="h-full bg-gradient-to-r from-[#34C759] to-[#30D158] rounded-full"
+                  style={{ width: `${camp.progress ?? 0}%` }}
+                />
               </div>
               <div className="flex justify-between mt-2 text-[13px] text-[#8E8E93]">
                 <span>{camp.callsMade ?? 0} calls made</span>
@@ -175,13 +200,5 @@ export default function Home() {
 
       <div className="h-4" />
     </div>
-  );
-}
-
-function MegaphoneIcon() {
-  return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m3 11 18-5v12L3 13v-2z" /><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
-    </svg>
   );
 }

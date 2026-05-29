@@ -9,12 +9,17 @@ const TABS = [
   { path: '/more', label: 'More', icon: LayoutGrid },
 ] as const
 
+const MORE_ROUTES = new Set([
+  '/more', '/appointments', '/deals', '/ai-config', '/sms', '/dnc', '/settings',
+])
+
 export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
 
   const isActive = (path: string) => {
     if (path === '/') return location.pathname === '/'
+    if (path === '/more') return MORE_ROUTES.has(location.pathname)
     return location.pathname.startsWith(path)
   }
 

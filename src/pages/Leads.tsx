@@ -2,26 +2,27 @@ import { useState } from 'react';
 import { trpc } from '@/providers/trpc';
 import {
   PhoneCall, MapPin, Flame, Snowflake, Thermometer,
-  Plus, Search, Home, Wrench, Banknote, Clock
+  Plus, Search, Home, Wrench, Banknote, Clock, Users,
 } from 'lucide-react';
-
-const DEMO_LEADS = [
-  { id: 1, sellerName: 'Sarah Johnson', propertyAddress: '142 Maple St, Springfield, MA', phone: '(413) 555-0123', motivationLevel: 'hot', timeline: '30 days', askingPrice: '185000', arv: '280000', estimatedRepairs: '25000', beds: 3, baths: 1.5, condition: 'medium_rehab', keyPainPoints: 'Inherited property, lives out of state, wants quick cash sale' },
-  { id: 2, sellerName: 'Mike Chen', propertyAddress: '78 Oak Avenue, Holyoke, MA', phone: '(413) 555-0456', motivationLevel: 'hot', timeline: '2 weeks', askingPrice: '120000', arv: '195000', estimatedRepairs: '35000', beds: 2, baths: 1, condition: 'heavy_rehab', keyPainPoints: 'Behind on mortgage payments, facing foreclosure' },
-  { id: 3, sellerName: 'Emma Davis', propertyAddress: '256 Elm Street, Chicopee, MA', phone: '(413) 555-0789', motivationLevel: 'warm', timeline: '60 days', askingPrice: '220000', arv: '310000', estimatedRepairs: '15000', beds: 4, baths: 2, condition: 'light_rehab', keyPainPoints: 'Downsizing, already purchased new home' },
-  { id: 4, sellerName: 'Robert Wilson', propertyAddress: '89 Pine Road, Westfield, MA', phone: '(413) 555-0321', motivationLevel: 'cold', timeline: '6 months', askingPrice: '350000', arv: '420000', estimatedRepairs: '5000', beds: 4, baths: 2.5, condition: 'move_in_ready', keyPainPoints: 'Testing market, not urgent' },
-];
+import { DEMO_LEADS } from '@/data/demo';
 
 type FilterTab = 'all' | 'hot' | 'warm' | 'cold';
+type MotivationLevel = 'hot' | 'warm' | 'cold';
 
 export default function Leads() {
   const [filter, setFilter] = useState<FilterTab>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAdd, setShowAdd] = useState(false);
+  const utils = trpc.useUtils();
 
   const { data, isLoading } = trpc.leads.list.useQuery(
     { motivationLevel: filter === 'all' ? undefined : filter },
     { retry: false }
   );
+
+  const addMutation = trpc.leads.create.useMutation({
+    onSuccess: () => { utils.leads.list.invalidate(); setShowAdd(false); },
+  });
 
   const leads = data?.items ?? DEMO_LEADS;
 
@@ -45,7 +46,11 @@ export default function Leads() {
       <div className="px-5 pt-6 pb-3">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Leads</h1>
-          <button className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white shadow-lg">
+          <button
+            onClick={() => setShowAdd(true)}
+            aria-label="Add lead"
+            className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white shadow-lg active:scale-90 transition-transform"
+          >
             <Plus size={20} />
           </button>
         </div>
@@ -84,9 +89,12 @@ export default function Leads() {
         {!isLoading && filteredLeads.length === 0 && (
           <div className="py-20 text-center">
             <div className="w-20 h-20 mx-auto rounded-full bg-[#F2F2F7] flex items-center justify-center">
-              <UsersIcon />
+              <Users size={36} className="text-[#C6C6C8]" />
             </div>
             <p className="text-[17px] text-[#8E8E93] mt-4">No leads found</p>
+            <button onClick={() => setShowAdd(true)} className="mt-3 ios-btn ios-btn-primary px-6 py-3 text-[16px]">
+              <Plus size={16} /> Add Your First Lead
+            </button>
           </div>
         )}
 
@@ -105,12 +113,16 @@ export default function Leads() {
               </div>
 
               {lead.phone && (
-                <div className="flex items-center gap-2 mt-3 text-[15px] text-[#007AFF]">
+                <a
+                  href={`tel:${lead.phone}`}
+                  className="flex items-center gap-2 mt-3 text-[15px] text-[#007AFF]"
+                  aria-label={`Call ${lead.sellerName}`}
+                >
                   <div className="w-8 h-8 rounded-full bg-[#E5F0FF] flex items-center justify-center">
                     <PhoneCall size={14} />
                   </div>
                   <span className="font-medium">{lead.phone}</span>
-                </div>
+                </a>
               )}
             </div>
 
@@ -131,16 +143,117 @@ export default function Leads() {
                 </div>
               )}
 
-              <button className="ios-btn ios-btn-green w-full mt-3 text-[16px] py-3">
-                <PhoneCall size={18} /> Call Now
-              </button>
+              {lead.phone && (
+                <a
+                  href={`tel:${lead.phone}`}
+                  className="ios-btn ios-btn-green w-full mt-3 text-[16px] py-3"
+                  aria-label={`Call ${lead.sellerName} now`}
+                >
+                  <PhoneCall size={18} /> Call Now
+                </a>
+              )}
             </div>
           </div>
         ))}
       </div>
 
+      {showAdd && (
+        <AddLeadSheet
+          onClose={() => setShowAdd(false)}
+          onAdd={(d) => addMutation.mutate(d)}
+          isSubmitting={addMutation.isPending}
+        />
+      )}
+
       <div className="h-4" />
     </div>
+  );
+}
+
+function AddLeadSheet({
+  onClose,
+  onAdd,
+  isSubmitting,
+}: {
+  onClose: () => void;
+  onAdd: (data: { sellerName: string; propertyAddress: string; phone?: string; motivationLevel: MotivationLevel }) => void;
+  isSubmitting: boolean;
+}) {
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [phone, setPhone] = useState('');
+  const [motivation, setMotivation] = useState<MotivationLevel>('cold');
+
+  const canSubmit = name.trim() && address.trim() && !isSubmitting;
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div className="bottom-sheet p-5 z-50">
+        <div className="w-10 h-1 bg-[#C6C6C8] rounded-full mx-auto mb-5" />
+        <h2 className="text-[22px] font-bold mb-4">Add Lead</h2>
+        <div className="space-y-4 mb-6">
+          <div>
+            <label className="text-[15px] font-medium mb-2 block">Full Name *</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Sarah Johnson"
+              className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]"
+            />
+          </div>
+          <div>
+            <label className="text-[15px] font-medium mb-2 block">Property Address *</label>
+            <input
+              type="text"
+              value={address}
+              onChange={e => setAddress(e.target.value)}
+              placeholder="142 Maple St, Springfield, MA"
+              className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]"
+            />
+          </div>
+          <div>
+            <label className="text-[15px] font-medium mb-2 block">Phone</label>
+            <input
+              type="tel"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
+              placeholder="(413) 555-0123"
+              className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]"
+            />
+          </div>
+          <div>
+            <label className="text-[15px] font-medium mb-2 block">Motivation</label>
+            <div className="flex gap-2">
+              {(['hot', 'warm', 'cold'] as MotivationLevel[]).map(level => (
+                <button
+                  key={level}
+                  onClick={() => setMotivation(level)}
+                  className={`flex-1 py-2.5 rounded-xl text-[15px] font-semibold capitalize transition-all ${
+                    motivation === level
+                      ? level === 'hot' ? 'bg-[#FF3B30] text-white' : level === 'warm' ? 'bg-[#FF9500] text-white' : 'bg-[#8E8E93] text-white'
+                      : 'bg-[#F2F2F7] text-[#8E8E93]'
+                  }`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={() => canSubmit && onAdd({ sellerName: name.trim(), propertyAddress: address.trim(), phone: phone.trim() || undefined, motivationLevel: motivation })}
+          disabled={!canSubmit}
+          className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50"
+        >
+          {isSubmitting ? 'Adding...' : 'Add Lead'}
+        </button>
+        <button onClick={onClose} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">
+          Cancel
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -159,13 +272,5 @@ function QualTag({ icon, label, value }: { icon: React.ReactNode; label: string;
         <p className="text-[14px] font-semibold text-[#1C1C1E] truncate capitalize">{value}</p>
       </div>
     </div>
-  );
-}
-
-function UsersIcon() {
-  return (
-    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#C6C6C8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
-    </svg>
   );
 }

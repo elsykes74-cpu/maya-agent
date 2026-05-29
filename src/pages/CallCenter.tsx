@@ -4,12 +4,7 @@ import {
   PhoneCall, Bot, Play, Square, CheckCircle,
   Calendar, FileText, Headphones
 } from 'lucide-react';
-
-const DEMO_CALLS = [
-  { id: 1, leadName: 'Sarah Johnson', outcome: 'connected', duration: 184, transcript: 'Hi Sarah, this is the AI assistant calling about your property on Maple Street. I understand you inherited the property and are looking for a quick sale. She said the house needs about $25k in repairs. Wants to close within 30 days. Score: HOT lead.', createdAt: new Date(Date.now() - 3600000).toISOString(), notes: 'Wants quick cash sale. $25k repairs needed.' },
-  { id: 2, leadName: 'Mike Chen', outcome: 'voicemail', duration: 32, transcript: 'Hi Mike, this is calling about your property on Oak Avenue. Please call back at your earliest convenience.', createdAt: new Date(Date.now() - 7200000).toISOString(), notes: 'Pre-foreclosure, time sensitive' },
-  { id: 3, leadName: 'Emma Davis', outcome: 'connected', duration: 245, transcript: "Hi Emma, I understand you're downsizing. We can close in 14 days. She said $220k would work. Score: HOT lead.", createdAt: new Date(Date.now() - 10800000).toISOString(), notes: 'Ready to sell, flexible on price' },
-];
+import { DEMO_CALLS } from '@/data/demo';
 
 const DEMO_CONFIG = {
   voiceName: 'alloy', language: 'English', maxCallDuration: 300, transferNumber: '(413) 555-0199',
@@ -18,6 +13,7 @@ const DEMO_CONFIG = {
 export default function CallCenter() {
   const [agentActive, setAgentActive] = useState(false);
   const [selectedCall, setSelectedCall] = useState<number | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const { data: callsData } = trpc.calls.list.useQuery({}, { retry: false });
   const { data: configData } = trpc.callingConfig.get.useQuery({}, { retry: false });
@@ -99,11 +95,15 @@ export default function CallCenter() {
       <div className="px-5 mb-6">
         <div className="flex items-center justify-between mb-3">
           <p className="ios-subheader !m-0">Call Transcripts</p>
-          <span className="text-[#007AFF] text-[15px] font-medium">See All</span>
+          {calls.length > 5 && (
+            <button onClick={() => setShowAll(v => !v)} className="text-[#007AFF] text-[15px] font-medium active:opacity-60">
+              {showAll ? 'Show Less' : 'See All'}
+            </button>
+          )}
         </div>
 
         <div className="space-y-3">
-          {calls.slice(0, 5).map((call: any) => (
+          {(showAll ? calls : calls.slice(0, 5)).map((call: any) => (
             <button key={call.id} onClick={() => setSelectedCall(selectedCall === call.id ? null : call.id)} className="w-full ios-card p-4 text-left">
               <div className="flex items-center gap-3">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${call.outcome === 'connected' ? 'bg-[#E5F9ED]' : call.outcome === 'voicemail' ? 'bg-[#FFF4E5]' : 'bg-[#FFE5E5]'}`}>
