@@ -8,7 +8,6 @@ process.on('unhandledRejection', (reason) => {
 });
 
 import { Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
@@ -60,14 +59,6 @@ const oauthLimiter = rateLimiter({
 	limit: 20,
 	standardHeaders: "draft-6",
 	keyGenerator: getClientIp,
-});
-
-// ---------------------------------------------------------------------------
-// Body limits
-// ---------------------------------------------------------------------------
-const trpcBodyLimit = bodyLimit({
-	maxSize: 1 * 1024 * 1024,
-	onError: (c) => c.json({ error: "Payload too large" }, 413),
 });
 
 // ---------------------------------------------------------------------------
@@ -218,7 +209,7 @@ app.route("/api/maya", createMayaWebhookRouter());
 // ---------------------------------------------------------------------------
 // tRPC
 // ---------------------------------------------------------------------------
-app.all("/api/trpc/*", trpcBodyLimit, async (c) =>
+app.all("/api/trpc/*", async (c) =>
 	fetchRequestHandler({
 		endpoint: "/api/trpc",
 		req: c.req.raw,
