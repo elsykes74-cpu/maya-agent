@@ -35,21 +35,23 @@ export default function Login() {
   };
 
   return (
-    <div className="app-shell" style={{ background: 'linear-gradient(180deg,#EAEAF2 0%,#F0F0F8 100%)' }}>
+    <div className="app-shell" style={{ background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-warm) 100%)' }}>
       <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-16">
-        <div className="w-24 h-24 rounded-3xl flex items-center justify-center mb-6"
+        {/* App icon */}
+        <div
+          className="w-24 h-24 rounded-3xl flex items-center justify-center mb-6"
           style={{
-            background: 'linear-gradient(160deg,#3395FF 0%,#5856D6 100%)',
-            boxShadow: '0 16px 40px rgba(0,122,255,0.45), 0 4px 12px rgba(88,86,214,0.30), inset 0 1px 0 rgba(255,255,255,0.30)',
+            background: 'linear-gradient(135deg, #1EC8B5 0%, #14B8A6 60%, #0E9F8E 100%)',
+            boxShadow: '0 20px 60px rgba(20,184,166,0.45), 0 8px 24px rgba(20,184,166,0.30), inset 0 1px 0 rgba(255,255,255,0.35)',
           }}
         >
           <Bot size={48} className="text-white" />
         </div>
 
-        <h1 className="text-[32px] font-bold text-[#1C1C1E] text-center tracking-tight">
+        <h1 className="text-[32px] font-bold text-[#1A1D26] text-center" style={{ letterSpacing: '-0.03em' }}>
           AI Calling Agent
         </h1>
-        <p className="text-[17px] text-[#8E8E93] text-center mt-2 leading-relaxed">
+        <p className="text-[17px] text-[#8E92A0] text-center mt-2 leading-relaxed">
           Never miss a motivated seller lead. Your AI agent calls 24/7.
         </p>
 
@@ -64,26 +66,25 @@ export default function Login() {
         <button
           onClick={handleKimiLogin}
           disabled={loading !== null}
-          className="w-full ios-btn bg-[#007AFF] text-white text-[18px] py-4 disabled:opacity-50 shadow-lg"
+          className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50"
         >
-          {loading === 'kimi' ? 'Signing in...' : 'Sign in with Kimi'}
+          {loading === 'kimi' ? 'Signing in…' : 'Sign in with Kimi'}
         </button>
 
         <button
           onClick={handleGoogleLogin}
           disabled={loading !== null}
-          className="w-full ios-btn bg-white border border-[#E5E5EA] text-[#1C1C1E] text-[18px] py-4 disabled:opacity-50 shadow-sm"
+          className="w-full ios-btn bg-white border border-[#E5E5EA] text-[#1A1D26] text-[18px] py-4 disabled:opacity-50"
+          style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)' }}
         >
-          {loading === 'google' ? (
-            'Signing in...'
-          ) : (
+          {loading === 'google' ? 'Signing in…' : (
             <span className="flex items-center justify-center gap-2">
               <GoogleG /> Sign in with Google
             </span>
           )}
         </button>
 
-        <p className="text-center text-[13px] text-[#C6C6C8] pt-2">
+        <p className="text-center text-[13px] text-[#B8BCC8] pt-2">
           By signing in, you agree to our Terms of Service
         </p>
       </div>
@@ -93,11 +94,12 @@ export default function Login() {
 
 function FeaturePill({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-      style={{ background: 'rgba(255,255,255,0.75)', boxShadow: '0 2px 10px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)' }}
+    <div
+      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+      style={{ background: 'rgba(255,255,255,0.78)', boxShadow: '0 2px 10px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.9)' }}
     >
-      <span className="text-[#007AFF]">{icon}</span>
-      <span className="text-[13px] font-semibold text-[#1C1C1E]">{label}</span>
+      <span style={{ color: 'var(--teal)' }}>{icon}</span>
+      <span className="text-[13px] font-semibold text-[#1A1D26]">{label}</span>
     </div>
   );
 }
