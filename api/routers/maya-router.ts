@@ -30,7 +30,7 @@ export const mayaRouter = createRouter({
       if (!isTwilioConfigured()) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
-          message: "Twilio is not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER in Vercel.",
+          message: "Twilio is not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_API_SECRET, and TWILIO_FROM_NUMBER or TWILIO_PHONE_NUMBER in Vercel.",
         });
       }
 
@@ -44,7 +44,7 @@ export const mayaRouter = createRouter({
       if (!result?.sid) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
-          message: "Twilio call failed. Check TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, and that the number is allowed by the Twilio account.",
+          message: "Twilio call failed. Check the Twilio credentials, sender phone number, and that the destination number is allowed by the Twilio account.",
         });
       }
 
@@ -56,13 +56,15 @@ export const mayaRouter = createRouter({
     .input(z.object({ sid: z.string() }))
     .mutation(async ({ input }) => {
       const { getTwilioEnv } = await import("../lib/twilio");
-      const { accountSid, authToken } = getTwilioEnv();
-      if (!accountSid || !authToken) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Twilio not configured" });
+      const { accountSid, authUser, authSecret } = getTwilioEnv();
+      if (!accountSid || !authUser || !authSecret) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Twilio not configured" });
+      }
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${input.sid}.json`;
       const resp = await fetch(url, {
         method: "POST",
         headers: {
-          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+          Authorization: `Basic ${Buffer.from(`${authUser}:${authSecret}`).toString("base64")}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: "Status=completed",
