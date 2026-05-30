@@ -12,16 +12,22 @@ export interface TwilioCallResult {
 }
 
 export function getTwilioEnv() {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
+  const apiKey = process.env.TWILIO_API_KEY ?? "";
+  const apiSecret = process.env.TWILIO_API_SECRET ?? "";
+  const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+
   return {
-    accountSid: process.env.TWILIO_ACCOUNT_SID ?? "",
-    authToken: process.env.TWILIO_AUTH_TOKEN ?? "",
-    fromNumber: process.env.TWILIO_FROM_NUMBER ?? "",
+    accountSid,
+    authUser: apiKey || accountSid,
+    authSecret: apiSecret || authToken,
+    fromNumber: process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "",
   };
 }
 
 export function isTwilioConfigured(): boolean {
-  const { accountSid, authToken, fromNumber } = getTwilioEnv();
-  return !!(accountSid && authToken && fromNumber);
+  const { accountSid, authUser, authSecret, fromNumber } = getTwilioEnv();
+  return !!(accountSid && authUser && authSecret && fromNumber);
 }
 
 function normalizePhoneNumber(value: string): string {
@@ -47,9 +53,9 @@ export async function placeTwilioOutboundCall(opts: {
   address: string;
   appUrl: string;
 }): Promise<TwilioCallResult | null> {
-  const { accountSid, authToken, fromNumber } = getTwilioEnv();
-  if (!accountSid || !authToken || !fromNumber) {
-    console.error("[twilio] Missing credentials: set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER");
+  const { accountSid, authUser, authSecret, fromNumber } = getTwilioEnv();
+  if (!accountSid || !authUser || !authSecret || !fromNumber) {
+    console.error("[twilio] Missing credentials: set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_API_SECRET, and TWILIO_FROM_NUMBER or TWILIO_PHONE_NUMBER");
     return null;
   }
 
@@ -74,7 +80,7 @@ export async function placeTwilioOutboundCall(opts: {
       {
         method: "POST",
         headers: {
-          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+          Authorization: `Basic ${Buffer.from(`${authUser}:${authSecret}`).toString("base64")}`,
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: body.toString(),
