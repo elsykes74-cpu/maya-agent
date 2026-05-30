@@ -18,12 +18,17 @@ function soft(name: string): string {
   return process.env[name] ?? "";
 }
 
-function firstDefined(names: readonly string[]): string {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value?.trim()) return value.trim().replace(/^['"]|['"]$/g, "");
+function normalizeEnvValue(value: string): string {
+  return value.trim().replace(/^['"]|['"]$/g, "");
+}
+
+function isPostgresConnectionString(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return ["postgres:", "postgresql:"].includes(parsed.protocol);
+  } catch {
+    return false;
   }
-  return "";
 }
 
 /**
@@ -39,11 +44,29 @@ function required(name: string): string {
 }
 
 function databaseUrl(): string {
-  const value = firstDefined(DATABASE_ENV_KEYS);
-  if (!value && process.env.NODE_ENV === "production") {
-    console.error(`[env] MISSING database URL var: ${DATABASE_ENV_KEYS.join(" or ")}`);
+  const configuredNames: string[] = [];
+
+  for (const name of DATABASE_ENV_KEYS) {
+    const raw = process.env[name];
+    if (!raw?.trim()) continue;
+
+    configuredNames.push(name);
+    const value = normalizeEnvValue(raw);
+    if (isPostgresConnectionString(value)) return value;
+
+    if (process.env.NODE_ENV === "production") {
+      console.error(`[env] Ignoring invalid database URL var: ${name}`);
+    }
   }
-  return value;
+
+  if (process.env.NODE_ENV === "production") {
+    const detail = configuredNames.length
+      ? `No valid database URL found in: ${configuredNames.join(", ")}`
+      : `MISSING database URL var: ${DATABASE_ENV_KEYS.join(" or ")}`;
+    console.error(`[env] ${detail}`);
+  }
+
+  return "";
 }
 
 /** Run once at boot - returns list of bad / missing vars. */
@@ -56,7 +79,7 @@ export function validateEnv(): string[] {
     "NODE_ENV",
   ] as const;
   const missing = required_keys.filter((k) => !process.env[k]);
-  if (!databaseUrl()) missing.push("DATABASE_URL or POSTGRES_URL");
+  if (!databaseUrl()) missing.push("valid DATABASE_URL or POSTGRES_URL");
   return missing;
 }
 
