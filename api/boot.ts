@@ -84,6 +84,42 @@ const requireGoogleConfigured = (c: Context) => {
 	return null;
 };
 
+const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5-20250929";
+
+type ClaudeMessage = {
+	role: "user" | "assistant";
+	content: string | Array<Record<string, unknown>>;
+};
+
+type ClaudeRequestBody = {
+	model?: string;
+	maxTokens?: number;
+	temperature?: number;
+	system?: string;
+	prompt?: string;
+	messages?: ClaudeMessage[];
+};
+
+const getBearerToken = (c: Context): string => {
+	const auth = c.req.header("authorization") ?? "";
+	const match = auth.match(/^Bearer\s+(.+)$/i);
+	return match?.[1]?.trim() ?? "";
+};
+
+const requireClaudeEndpointAuth = (c: Context) => {
+	const expected = env.claudeEndpointSecret || env.appSecret;
+	if (!expected) {
+		return c.json({ error: "Claude endpoint secret not configured" }, 503);
+	}
+
+	const provided = getBearerToken(c) || c.req.header("x-maya-agent-secret") || "";
+	if (provided !== expected) {
+		return c.json({ error: "Unauthorized" }, 401);
+	}
+	return null;
+};
+
 app.use("/api/*", apiLimiter);
 
 app.get("/api/oauth/google", oauthLimiter, async (c) => {
@@ -176,6 +212,68 @@ app.get("/api/auth/google/url", oauthLimiter, async (c) => {
 	const redirectTo = c.req.query("redirectTo") ?? "/";
 	const url = `/api/oauth/google?redirectTo=${encodeURIComponent(redirectTo)}`;
 	return c.json({ authUrl: url });
+});
+
+// Claude health and proxy endpoints
+app.get("/api/claude/health", (c) =>
+	c.json(
+		{
+			ok: true,
+			configured: Boolean(env.anthropicApiKey),
+			protected: Boolean(env.claudeEndpointSecret || env.appSecret),
+			model: process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL,
+		},
+		200,
+		{ "Cache-Control": "no-store" },
+	),
+);
+
+app.post("/api/claude/messages", async (c) => {
+	const authError = requireClaudeEndpointAuth(c);
+	if (authError) return authError;
+
+	if (!env.anthropicApiKey) {
+		return c.json({ error: "Anthropic API key not configured" }, 503);
+	}
+
+	let body: ClaudeRequestBody;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ error: "Invalid JSON body" }, 400);
+	}
+
+	const messages = body.messages ?? (body.prompt ? [{ role: "user" as const, content: body.prompt }] : undefined);
+	if (!messages?.length) {
+		return c.json({ error: "Provide prompt or messages" }, 400);
+	}
+
+	const maxTokens = Math.min(Math.max(Number(body.maxTokens ?? 1024), 1), 4096);
+	const payload = {
+		model: body.model || process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL,
+		max_tokens: maxTokens,
+		temperature: typeof body.temperature === "number" ? body.temperature : undefined,
+		system: body.system || undefined,
+		messages,
+	};
+
+	const response = await fetch(CLAUDE_API_URL, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"x-api-key": env.anthropicApiKey,
+			"anthropic-version": "2023-06-01",
+		},
+		body: JSON.stringify(payload),
+	});
+
+	const data = await response.json().catch(() => null);
+	if (!response.ok) {
+		console.error("[claude/messages]", response.status, data);
+		return c.json({ error: "Claude request failed", status: response.status, details: data }, 502);
+	}
+
+	return c.json(data, 200, { "Cache-Control": "no-store" });
 });
 
 // Env-dump endpoint (development / diagnostic only)
