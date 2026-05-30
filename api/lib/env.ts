@@ -22,7 +22,7 @@ function required(name: string): string {
   return v ?? "";
 }
 
-/** Run once at boot – returns list of bad / missing vars. */
+/** Run once at boot - returns list of bad / missing vars. */
 export function validateEnv(): string[] {
   const required_keys = [
     "APP_ID",
@@ -42,6 +42,7 @@ export const env = {
   databaseUrl: required("DATABASE_URL"),
   kimiAuthUrl: required("KIMI_AUTH_URL"),
   kimiOpenUrl: required("KIMI_OPEN_URL"),
+  anthropicApiKey: soft("ANTHROPIC_API_KEY") || soft("ANTHROPIC_KEY"),
   ownerUnionId: soft("OWNER_UNION_ID"),
   appUrl: soft("APP_URL") || "http://localhost:3000",
   googleClientId: soft("GOOGLE_CLIENT_ID"),
