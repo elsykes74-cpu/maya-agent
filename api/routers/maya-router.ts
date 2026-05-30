@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
 import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
@@ -27,15 +28,26 @@ export const mayaRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       if (!isTwilioConfigured()) {
-        throw new Error("Twilio is not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER in Settings.");
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "Twilio is not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER in Vercel.",
+        });
       }
+
       const result = await placeTwilioOutboundCall({
         to: input.to,
         name: input.name,
         address: input.address,
         appUrl: env.appUrl,
       });
-      if (!result?.sid) throw new Error("Call failed — no SID returned");
+
+      if (!result?.sid) {
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: "Twilio call failed. Check TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER, and that the number is allowed by the Twilio account.",
+        });
+      }
+
       activeCalls.set(result.sid, { to: input.to, status: "ringing", startedAt: new Date() });
       return { sid: result.sid, status: "ringing" };
     }),
@@ -45,7 +57,7 @@ export const mayaRouter = createRouter({
     .mutation(async ({ input }) => {
       const { getTwilioEnv } = await import("../lib/twilio");
       const { accountSid, authToken } = getTwilioEnv();
-      if (!accountSid || !authToken) throw new Error("Twilio not configured");
+      if (!accountSid || !authToken) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Twilio not configured" });
       const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${input.sid}.json`;
       const resp = await fetch(url, {
         method: "POST",
@@ -55,7 +67,7 @@ export const mayaRouter = createRouter({
         },
         body: "Status=completed",
       });
-      if (!resp.ok) throw new Error(`Twilio hangup failed: ${resp.status}`);
+      if (!resp.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Twilio hangup failed: ${resp.status}` });
       activeCalls.delete(input.sid);
       return { success: true };
     }),
