@@ -1,113 +1,87 @@
 import { useState } from 'react';
-import { ChevronLeft, Home, Wrench, DollarSign, Percent } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { Wrench, DollarSign, Percent } from 'lucide-react';
+import { C, NeoTile, NeoIcon, BackBtn, BRow, HomeDot } from '@/components/Neo';
 
 export default function DealAnalysis() {
   const navigate = useNavigate();
   const [arv, setArv] = useState('');
-  const [repairs, setRepairs] = useState('');
-  const [assignmentFee, setAssignmentFee] = useState('5000');
-  const [percent, setPercent] = useState('70');
+  const [rep, setRep] = useState('');
+  const [fee, setFee] = useState('5000');
+  const [pct, setPct] = useState('70');
 
-  const arvNum = parseFloat(arv) || 0;
-  const repairsNum = parseFloat(repairs) || 0;
-  const feeNum = parseFloat(assignmentFee) || 0;
-  const pctNum = parseFloat(percent) || 70;
-
-  const mao = (arvNum * (pctNum / 100)) - repairsNum - feeNum;
-  const maxOffer = arvNum * (pctNum / 100);
+  const a = parseFloat(arv) || 0;
+  const r = parseFloat(rep) || 0;
+  const f = parseFloat(fee) || 0;
+  const p = parseFloat(pct) || 70;
+  const mao = a * (p / 100) - r - f;
+  const mx = a * (p / 100);
 
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-4 pb-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
-            <ChevronLeft size={24} className="text-[#007AFF]" />
-          </button>
-          <h1 className="text-[22px] font-bold">Deal Calculator</h1>
-        </div>
+    <div style={{ padding: '16px 20px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <BackBtn onClick={() => navigate(-1)} />
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Deal Calculator</h1>
       </div>
 
-      <div className="px-5 mb-5">
-        <div className="ios-card p-5 text-center bg-gradient-to-br from-[#34C759] to-[#30B350]">
-          <p className="text-[15px] text-white/80 font-medium">Maximum Allowable Offer</p>
-          <p className="text-[42px] font-bold text-white mt-1">
-            {arvNum > 0 ? `$${Math.floor(mao).toLocaleString()}` : '$0'}
-          </p>
-          <div className="flex justify-center gap-6 mt-3">
-            <div className="text-center">
-              <p className="text-[13px] text-white/70">ARV × {pctNum}%</p>
-              <p className="text-[17px] font-semibold text-white">${Math.floor(maxOffer).toLocaleString()}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-[13px] text-white/70">Your Profit</p>
-              <p className="text-[17px] font-semibold text-white">${feeNum.toLocaleString()}</p>
-            </div>
+      <NeoTile style={{ background: `linear-gradient(135deg, ${C.teal}, ${C.green})`, textAlign: 'center', color: '#fff', marginBottom: 24, padding: 28 }}>
+        <p style={{ fontSize: 13, opacity: 0.75, margin: 0, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Maximum Allowable Offer</p>
+        <p style={{ fontSize: 44, fontWeight: 800, margin: '8px 0 0', letterSpacing: '-1.5px' }}>
+          {a > 0 ? `$${Math.floor(mao).toLocaleString()}` : '$0'}
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 32, marginTop: 16 }}>
+          <div>
+            <p style={{ fontSize: 12, opacity: 0.65, margin: 0, fontWeight: 500 }}>ARV x {p}%</p>
+            <p style={{ fontSize: 16, fontWeight: 700, margin: '4px 0 0' }}>${Math.floor(mx).toLocaleString()}</p>
+          </div>
+          <div>
+            <p style={{ fontSize: 12, opacity: 0.65, margin: 0, fontWeight: 500 }}>Your Profit</p>
+            <p style={{ fontSize: 16, fontWeight: 700, margin: '4px 0 0' }}>${f.toLocaleString()}</p>
           </div>
         </div>
-      </div>
+      </NeoTile>
 
-      <div className="px-5 space-y-4">
-        <p className="ios-subheader">Property Details</p>
+      {[
+        { l: 'After Repair Value (ARV)', icon: <HomeDot color={C.blue} />, v: arv, set: setArv, prefix: '$', ph: '300,000' },
+        { l: 'Estimated Repairs', icon: <Wrench size={18} color={C.orange} strokeWidth={2} />, v: rep, set: setRep, prefix: '$', ph: '25,000' },
+        { l: 'Assignment Fee', icon: <DollarSign size={18} color={C.green} strokeWidth={2} />, v: fee, set: setFee, prefix: '$', ph: '5,000' },
+        { l: 'Investor Margin', icon: <Percent size={18} color={C.purple} strokeWidth={2} />, v: pct, set: setPct, prefix: '', ph: '70', suffix: '%' },
+      ].map((fd, i) => (
+        <div key={i} style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color: C.muted }}>{fd.icon}</span>{fd.l}
+          </label>
+          <div className="neo-input" style={{ display: 'flex', alignItems: 'center', height: 56 }}>
+            {fd.prefix && <span style={{ fontSize: 18, color: C.muted, marginRight: 4, fontWeight: 500 }}>{fd.prefix}</span>}
+            <input
+              type="number"
+              value={fd.v}
+              onChange={e => fd.set(e.target.value)}
+              placeholder={fd.ph}
+              aria-label={fd.l}
+              style={{ flex: 1, border: 'none', outline: 'none', fontSize: 20, fontWeight: 700, background: 'transparent', color: C.text }}
+            />
+            {fd.suffix && <span style={{ fontSize: 18, color: C.muted, fontWeight: 500 }}>{fd.suffix}</span>}
+          </div>
+        </div>
+      ))}
 
-        <InputField label="After Repair Value (ARV)" icon={<Home size={18} />} value={arv} onChange={setArv} prefix="$" placeholder="300,000" />
-        <InputField label="Estimated Repairs" icon={<Wrench size={18} />} value={repairs} onChange={setRepairs} prefix="$" placeholder="25,000" />
-        <InputField label="Assignment Fee" icon={<DollarSign size={18} />} value={assignmentFee} onChange={setAssignmentFee} prefix="$" placeholder="5,000" />
-        <InputField label="Investor Margin" icon={<Percent size={18} />} value={percent} onChange={setPercent} suffix="%" placeholder="70" />
-
-        {arvNum > 0 && (
-          <div className="ios-card p-4 mt-4">
-            <p className="text-[17px] font-bold mb-3">Deal Breakdown</p>
-            <BreakdownRow label="After Repair Value" value={arvNum} />
-            <BreakdownRow label={`Investor Purchase (${pctNum}%)`} value={-maxOffer} />
-            <BreakdownRow label="Estimated Repairs" value={-repairsNum} />
-            <BreakdownRow label="Assignment Fee" value={-feeNum} />
-            <div className="border-t border-[#E5E5EA] mt-2 pt-2">
-              <BreakdownRow label="MAO (Your Max Offer)" value={mao} highlight />
+      {a > 0 && (
+        <NeoTile>
+          <p style={{ fontSize: 17, fontWeight: 700, margin: '0 0 14px', color: C.text }}>Deal Breakdown</p>
+          <BRow label="After Repair Value" value={a} />
+          <BRow label={`Investor Purchase (${p}%)`} value={-mx} />
+          <BRow label="Repairs" value={-r} />
+          <BRow label="Assignment Fee" value={-f} />
+          <div style={{ borderTop: '2px solid rgba(0,0,0,0.06)', marginTop: 10, paddingTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>MAO (Your Max Offer)</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: C.teal }}>${Math.floor(mao).toLocaleString()}</span>
             </div>
           </div>
-        )}
-      </div>
-
-      <div className="h-4" />
-    </div>
-  );
-}
-
-function InputField({ label, icon, value, onChange, prefix, suffix, placeholder }: {
-  label: string; icon: React.ReactNode; value: string; onChange: (v: string) => void;
-  prefix?: string; suffix?: string; placeholder?: string;
-}) {
-  return (
-    <div>
-      <label className="text-[15px] font-medium text-[#1C1C1E] mb-2 flex items-center gap-2">
-        <span className="text-[#8E8E93]">{icon}</span> {label}
-      </label>
-      <div className="flex items-center h-14 bg-white rounded-xl px-4 shadow-sm">
-        {prefix && <span className="text-[17px] text-[#8E8E93] mr-1">{prefix}</span>}
-        <input
-          type="number"
-          value={value}
-          onChange={e => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="flex-1 bg-transparent text-[20px] font-semibold outline-none placeholder:text-[#C6C6C8]"
-        />
-        {suffix && <span className="text-[17px] text-[#8E8E93] ml-1">{suffix}</span>}
-      </div>
-    </div>
-  );
-}
-
-function BreakdownRow({ label, value, highlight }: {
-  label: string; value: number; highlight?: boolean;
-}) {
-  const isPositive = value >= 0;
-  return (
-    <div className="flex justify-between py-1.5">
-      <span className={`text-[15px] ${highlight ? 'font-bold text-[#1C1C1E]' : 'text-[#8E8E93]'}`}>{label}</span>
-      <span className={`text-[15px] font-semibold ${highlight ? 'text-[#34C759]' : isPositive ? 'text-[#34C759]' : 'text-[#FF3B30]'}`}>
-        {isPositive ? '' : '-'}${Math.abs(value).toLocaleString()}
-      </span>
+        </NeoTile>
+      )}
+      <div style={{ height: 20 }} />
     </div>
   );
 }

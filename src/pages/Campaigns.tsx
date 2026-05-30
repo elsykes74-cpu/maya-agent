@@ -1,225 +1,134 @@
 import { useState } from 'react';
-import { trpc } from '@/providers/trpc';
-import { Megaphone, Plus, Play, Pause, Trash2, Users, PhoneCall, CheckCircle } from 'lucide-react';
-import { DEMO_CAMPAIGNS } from '@/data/demo';
-import ConfirmSheet from '@/components/ConfirmSheet';
+import { Plus, Users, PhoneCall, Pause, Play, Trash2, Megaphone } from 'lucide-react';
+import { CAMPAIGNS as INITIAL } from '@/data';
+import { C, NeoTile, NeoIcon, SectionTitle, CampaignStatusPill, ConfirmSheet } from '@/components/Neo';
+
+type CampaignStatus = 'active' | 'paused' | 'completed' | 'draft' | 'archived';
+
+interface Campaign {
+  id: number; name: string; description: string;
+  status: CampaignStatus; progress: number; callsMade: number; totalLeads: number;
+}
 
 export default function Campaigns() {
-  const [showCreate, setShowCreate] = useState(false);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
-  const utils = trpc.useUtils();
+  const [camps, setCamps] = useState<Campaign[]>(INITIAL as Campaign[]);
+  const [show, setShow] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmData, setConfirmData] = useState<{ title: string; desc: string; onConfirm: () => void } | null>(null);
 
-  const { data, isLoading } = trpc.campaigns.list.useQuery({}, { retry: false });
-  const campaigns = data?.items ?? DEMO_CAMPAIGNS;
+  const counts = {
+    a: camps.filter(c => c.status === 'active').length,
+    p: camps.filter(c => c.status === 'paused').length,
+    d: camps.filter(c => c.status === 'completed').length,
+  };
 
-  const createMutation = trpc.campaigns.create.useMutation({
-    onSuccess: () => { utils.campaigns.list.invalidate(); setShowCreate(false); },
-  });
-  const toggleMutation = trpc.campaigns.toggleStatus.useMutation({
-    onSuccess: () => utils.campaigns.list.invalidate(),
-  });
-  const deleteMutation = trpc.campaigns.delete.useMutation({
-    onSuccess: () => { utils.campaigns.list.invalidate(); setDeleteId(null); },
-  });
+  const toggle = (id: number) => setCamps(prev => prev.map(c => c.id === id ? { ...c, status: (c.status === 'active' ? 'paused' : 'active') as CampaignStatus } : c));
 
-  const statusCounts = {
-    active: campaigns.filter((c: any) => c.status === 'active').length,
-    paused: campaigns.filter((c: any) => c.status === 'paused').length,
-    completed: campaigns.filter((c: any) => c.status === 'completed').length,
+  const remove = (id: number) => {
+    const camp = camps.find(c => c.id === id);
+    if (!camp) return;
+    setConfirmData({
+      title: 'Delete Campaign',
+      desc: `Remove "${camp.name}"? All call history for this campaign will be lost.`,
+      onConfirm: () => { setCamps(p => p.filter(c => c.id !== id)); setConfirmOpen(false); },
+    });
+    setConfirmOpen(true);
   };
 
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Campaigns</h1>
-          <button
-            onClick={() => setShowCreate(true)}
-            aria-label="Create campaign"
-            className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white shadow-lg active:scale-90 transition-transform"
-          >
-            <Plus size={20} />
-          </button>
-        </div>
+    <div style={{ padding: '28px 20px 20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>Campaigns</h1>
+        <button onClick={() => setShow(true)} className="press-sm" aria-label="Create campaign" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+          <NeoIcon bg={C.tealS} size={48}><Plus size={22} color={C.teal} strokeWidth={2.5} /></NeoIcon>
+        </button>
       </div>
 
-      <div className="px-5 mb-5">
-        <div className="flex gap-3">
-          <StatusCard count={statusCounts.active} label="Active" color="bg-[#34C759]" />
-          <StatusCard count={statusCounts.paused} label="Paused" color="bg-[#FF9500]" />
-          <StatusCard count={statusCounts.completed} label="Done" color="bg-[#007AFF]" />
-        </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+        <CampaignStatusPill count={counts.a} label="Active" color={C.green} />
+        <CampaignStatusPill count={counts.p} label="Paused" color={C.orange} />
+        <CampaignStatusPill count={counts.d} label="Done" color={C.blue} />
       </div>
 
-      <div className="px-5 space-y-3">
-        {isLoading && <div className="py-20 text-center text-[#8E8E93] text-[17px]">Loading campaigns...</div>}
-
-        {!isLoading && campaigns.length === 0 && (
-          <div className="py-20 text-center">
-            <div className="w-20 h-20 mx-auto rounded-full bg-[#F2F2F7] flex items-center justify-center">
-              <Megaphone size={36} className="text-[#C6C6C8]" />
+      {camps.map(camp => (
+        <NeoTile key={camp.id} style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+            <div>
+              <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{camp.name}</p>
+              <p style={{ fontSize: 13, color: C.muted, margin: '3px 0 0', fontWeight: 500 }}>{camp.description}</p>
             </div>
-            <p className="text-[17px] text-[#8E8E93] mt-4">No campaigns yet</p>
-            <button onClick={() => setShowCreate(true)} className="mt-3 ios-btn ios-btn-primary px-6 py-3 text-[16px]">
-              <Plus size={16} /> Create Campaign
+            <span className={camp.status === 'active' ? 'maya-tag-hot' : camp.status === 'paused' ? 'maya-tag-warm' : 'maya-tag-cold'}
+              style={{ padding: '5px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, textTransform: 'capitalize', flexShrink: 0 }}>
+              {camp.status}
+            </span>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+              <span style={{ color: C.muted, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Progress</span>
+              <span style={{ color: C.text }}>{camp.progress}%</span>
+            </div>
+            <div className="maya-progress-track">
+              <div className="maya-progress-fill" style={{ width: `${camp.progress}%`, background: camp.status === 'active' ? `linear-gradient(90deg, ${C.teal}, ${C.green})` : camp.status === 'paused' ? C.orange : C.blue }} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 14, marginBottom: 14, fontSize: 13, color: C.muted, fontWeight: 600 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Users size={14} strokeWidth={2} /> {camp.totalLeads} leads</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><PhoneCall size={14} strokeWidth={2} /> {camp.callsMade} called</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => toggle(camp.id)} className="maya-tile press-sm" aria-label={camp.status === 'active' ? `Pause ${camp.name}` : `Resume ${camp.name}`} style={{ flex: 1, height: 44, borderRadius: 14, background: camp.status === 'active' ? C.orange : C.teal, color: '#fff', border: 'none', fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer', padding: 0 }}>
+              {camp.status === 'active' ? <><Pause size={16} strokeWidth={2.5} /> Pause</> : <><Play size={16} fill="white" strokeWidth={0} /> Resume</>}
+            </button>
+            <button onClick={() => remove(camp.id)} className="neo-pressed-sm press-sm" aria-label={`Delete ${camp.name}`} style={{ width: 44, height: 44, borderRadius: 14, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+              <Trash2 size={16} color={C.red} strokeWidth={2} />
             </button>
           </div>
-        )}
+        </NeoTile>
+      ))}
 
-        {campaigns.map((camp: any) => (
-          <div key={camp.id} className="ios-card overflow-hidden">
-            <div className="p-4">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <p className="text-[20px] font-bold text-[#1C1C1E]">{camp.name}</p>
-                  <p className="text-[15px] text-[#8E8E93] mt-0.5">{camp.description}</p>
-                </div>
-                <CampaignStatusBadge status={camp.status} />
-              </div>
-
-              <div className="mb-3">
-                <div className="flex justify-between text-[13px] mb-1">
-                  <span className="text-[#8E8E93]">Progress</span>
-                  <span className="font-semibold text-[#1C1C1E]">{camp.progress ?? 0}%</span>
-                </div>
-                <div className="h-3 bg-[#E5E5EA] rounded-full overflow-hidden">
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{
-                      width: `${camp.progress ?? 0}%`,
-                      background: camp.status === 'active'
-                        ? 'linear-gradient(90deg, #34C759, #30D158)'
-                        : camp.status === 'paused' ? '#FF9500' : '#007AFF',
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-4 mb-3">
-                <div className="flex items-center gap-2 text-[14px] text-[#8E8E93]">
-                  <Users size={16} /><span>{camp.totalLeads ?? 0} leads</span>
-                </div>
-                <div className="flex items-center gap-2 text-[14px] text-[#8E8E93]">
-                  <PhoneCall size={16} /><span>{camp.callsMade ?? 0} called</span>
-                </div>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() => toggleMutation.mutate({ id: camp.id })}
-                  className={`ios-btn flex-1 text-[16px] py-3 ${
-                    camp.status === 'active' ? 'ios-btn-orange' : camp.status === 'paused' ? 'ios-btn-green' : 'ios-btn-gray'
-                  }`}
-                >
-                  {camp.status === 'active'
-                    ? <><Pause size={18} /> Pause</>
-                    : camp.status === 'paused'
-                    ? <><Play size={18} /> Resume</>
-                    : <><CheckCircle size={18} /> Completed</>}
-                </button>
-                <button
-                  onClick={() => setDeleteId(camp.id)}
-                  aria-label="Delete campaign"
-                  className="ios-btn ios-btn-gray px-4"
-                >
-                  <Trash2 size={18} className="text-[#FF3B30]" />
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {showCreate && (
-        <CreateCampaignSheet
-          onClose={() => setShowCreate(false)}
-          onCreate={(d) => createMutation.mutate(d)}
-          isSubmitting={createMutation.isPending}
-        />
-      )}
-
-      {deleteId !== null && (
-        <ConfirmSheet
-          title="Delete Campaign"
-          message="This will permanently delete the campaign and all its data."
-          confirmLabel="Delete Campaign"
-          danger
-          onConfirm={() => deleteMutation.mutate({ id: deleteId })}
-          onCancel={() => setDeleteId(null)}
-        />
-      )}
-
-      <div className="h-4" />
-    </div>
-  );
-}
-
-function StatusCard({ count, label, color }: { count: number; label: string; color: string }) {
-  return (
-    <div className="flex-1 ios-card p-3 text-center">
-      <div className={`w-3 h-3 rounded-full ${color} mx-auto mb-1`} />
-      <p className="text-[24px] font-bold text-[#1C1C1E]">{count}</p>
-      <p className="text-[12px] text-[#8E8E93]">{label}</p>
-    </div>
-  );
-}
-
-function CampaignStatusBadge({ status }: { status: string }) {
-  if (status === 'active') return <span className="ios-badge ios-badge-green">Active</span>;
-  if (status === 'paused') return <span className="ios-badge ios-badge-warm">Paused</span>;
-  return <span className="ios-badge ios-badge-blue">Completed</span>;
-}
-
-function CreateCampaignSheet({
-  onClose,
-  onCreate,
-  isSubmitting,
-}: {
-  onClose: () => void;
-  onCreate: (data: { name: string; description: string }) => void;
-  isSubmitting: boolean;
-}) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  return (
-    <>
-      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
-      <div className="bottom-sheet p-5 z-50">
-        <div className="w-10 h-1 bg-[#C6C6C8] rounded-full mx-auto mb-5" />
-        <h2 className="text-[22px] font-bold mb-4">New Campaign</h2>
-        <div className="space-y-4 mb-6">
-          <div>
-            <label className="text-[15px] font-medium mb-2 block">Campaign Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="e.g., Springfield Motivated Sellers"
-              className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]"
-            />
-          </div>
-          <div>
-            <label className="text-[15px] font-medium mb-2 block">Description</label>
-            <textarea
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="What is this campaign for?"
-              rows={3}
-              className="w-full bg-[#F2F2F7] rounded-xl px-4 py-3 text-[17px] outline-none resize-none focus:ring-2 focus:ring-[#007AFF]"
-            />
-          </div>
+      {camps.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <NeoIcon bg={C.tealS} size={64} round={20} style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Megaphone size={28} color={C.teal} strokeWidth={1.5} />
+          </NeoIcon>
+          <p style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: '0 0 4px' }}>No campaigns</p>
+          <p style={{ fontSize: 14, color: C.muted, margin: '0 0 16px' }}>Tap + to create your first campaign</p>
+          <button onClick={() => setShow(true)} className="maya-tile press-sm" style={{ padding: '12px 24px', borderRadius: 16, background: C.teal, color: '#fff', border: 'none', fontSize: 15, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={16} strokeWidth={2.5} /> New Campaign
+          </button>
         </div>
-        <button
-          onClick={() => name.trim() && onCreate({ name: name.trim(), description: description.trim() })}
-          disabled={!name.trim() || isSubmitting}
-          className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50"
-        >
-          {isSubmitting ? 'Creating...' : 'Create Campaign'}
-        </button>
-        <button onClick={onClose} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">
-          Cancel
-        </button>
-      </div>
-    </>
+      )}
+
+      {show && <CreateSheet onClose={() => setShow(false)} onCreate={(d) => { setCamps(p => [...p, { ...d, id: Date.now(), status: 'active' as CampaignStatus, progress: 0, callsMade: 0, totalLeads: 0 }]); setShow(false); }} />}
+      {confirmData && <ConfirmSheet open={confirmOpen} title={confirmData.title} desc={confirmData.desc} danger onConfirm={confirmData.onConfirm} onCancel={() => setConfirmOpen(false)} />}
+      <div style={{ height: 20 }} />
+    </div>
   );
+}
+
+function CreateSheet({ onClose, onCreate }: { onClose: () => void; onCreate: (d: any) => void }) {
+  const [n, setN] = useState('');
+  const [d, setD] = useState('');
+  return <>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,28,30,0.3)', zIndex: 40, backdropFilter: 'blur(4px)' }} onClick={onClose} />
+    <div className="neo-sheet" style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, zIndex: 50, padding: 28, borderRadius: '28px 28px 0 0' }}>
+      <div style={{ width: 40, height: 5, borderRadius: 3, background: '#C7C7CC', margin: '0 auto 24px' }} />
+      <h2 style={{ fontSize: 24, fontWeight: 800, color: C.text, margin: '0 0 20px' }}>New Campaign</h2>
+      <div style={{ marginBottom: 18 }}>
+        <label style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 8, display: 'block' }}>Campaign Name</label>
+        <input value={n} onChange={e => setN(e.target.value)} placeholder="e.g., Springfield Motivated Sellers" className="neo-input" />
+      </div>
+      <div style={{ marginBottom: 28 }}>
+        <label style={{ fontSize: 15, fontWeight: 700, color: C.text, marginBottom: 8, display: 'block' }}>Description</label>
+        <textarea value={d} onChange={e => setD(e.target.value)} placeholder="What is this campaign for?" rows={3} className="neo-textarea" />
+      </div>
+      <button onClick={() => n.trim() && onCreate({ name: n.trim(), description: d.trim() })} disabled={!n.trim()} className="maya-tile press-sm" style={{ width: '100%', height: 56, borderRadius: 18, background: C.teal, color: '#fff', border: 'none', fontSize: 17, fontWeight: 700, cursor: 'pointer', padding: 0, opacity: n.trim() ? 1 : 0.45 }}>
+        Create Campaign
+      </button>
+      <button onClick={onClose} style={{ width: '100%', marginTop: 12, fontSize: 17, color: C.muted, background: 'none', border: 'none', padding: 12, cursor: 'pointer', fontWeight: 700 }}>Cancel</button>
+    </div>
+  </>;
 }

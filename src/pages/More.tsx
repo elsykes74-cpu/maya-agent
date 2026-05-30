@@ -1,71 +1,61 @@
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
-import {
-  Calendar, TrendingUp, Settings, Shield, MessageSquare,
-  Bot, ChevronRight, LogOut, User
-} from 'lucide-react';
+import { Calendar, TrendingUp, MessageSquare, Shield, Bot, Settings, LogOut, Key } from 'lucide-react';
+import { C, NeoTile, NeoIcon } from '@/components/Neo';
 
-const MENU_ITEMS = [
-  { icon: Calendar, label: 'Appointments', path: '/appointments', color: 'bg-[#AF52DE]' },
-  { icon: TrendingUp, label: 'Deal Analysis', path: '/deals', color: 'bg-[#34C759]' },
-  { icon: MessageSquare, label: 'SMS Sequences', path: '/sms', color: 'bg-[#5AC8FA]' },
-  { icon: Shield, label: 'DNC Lists', path: '/dnc', color: 'bg-[#FF3B30]' },
-  { icon: Bot, label: 'AI Agent Config', path: '/ai-config', color: 'bg-[#FF9500]' },
-  { icon: Settings, label: 'Settings', path: '/settings', color: 'bg-[#8E8E93]' },
+const ITEMS = [
+  { icon: Calendar, label: 'Appointments', path: '/appointments', description: '2 upcoming', color: C.purple, bg: C.purpleS },
+  { icon: TrendingUp, label: 'Deal Analysis', path: '/deals', description: 'MAO calculator', color: C.green, bg: C.greenS },
+  { icon: MessageSquare, label: 'SMS Sequences', path: '/sms', description: '2 templates', color: C.blue, bg: C.blueS },
+  { icon: Shield, label: 'DNC Lists', path: '/dnc', description: '3 numbers', color: C.red, bg: C.redS },
+  { icon: Bot, label: 'AI Agent Config', path: '/ai-config', description: 'Voice & script', color: C.orange, bg: C.orangeS },
+  { icon: Key, label: 'API Keys', path: '/settings', description: 'Twilio & ElevenLabs', color: C.teal, bg: C.tealS },
+  { icon: Settings, label: 'Settings', path: '/settings', description: 'Account & preferences', color: C.muted, bg: '#F3F4F7' },
 ];
 
 export default function More() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
+  const initials = user?.name
+    ? user.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+    : user?.email?.[0]?.toUpperCase() ?? 'U';
+
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-6 pb-4">
-        <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">More</h1>
-      </div>
+    <div style={{ padding: '28px 20px 20px' }}>
+      <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>More</h1>
 
-      <div className="px-5 mb-5">
-        <div className="ios-card p-4 flex items-center gap-4">
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#007AFF] to-[#5856D6] flex items-center justify-center text-white text-[20px] font-bold">
-            {user?.name?.charAt(0) ?? 'U'}
-          </div>
-          <div className="flex-1">
-            <p className="text-[20px] font-bold text-[#1C1C1E]">{user?.name ?? 'User'}</p>
-            <p className="text-[15px] text-[#8E8E93]">{user?.email ?? 'No email'}</p>
-          </div>
-          <User size={20} className="text-[#C6C6C8]" />
+      <NeoTile style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20, fontWeight: 800, background: `linear-gradient(135deg, ${C.teal}, ${C.blue})`, letterSpacing: '-0.02em', flexShrink: 0 }}>
+          {initials}
         </div>
-      </div>
-
-      <div className="px-5 mb-6">
-        <p className="ios-subheader">Tools</p>
-        <div className="ios-list">
-          {MENU_ITEMS.map((item, i) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.path}
-                onClick={() => navigate(item.path)}
-                className={`ios-list-item w-full text-left ${i < MENU_ITEMS.length - 1 ? 'border-b border-[#E5E5EA]' : ''}`}
-              >
-                <div className={`w-9 h-9 ${item.color} rounded-xl flex items-center justify-center text-white`}>
-                  <Icon size={18} />
-                </div>
-                <span className="flex-1 text-[17px] text-[#1C1C1E]">{item.label}</span>
-                <ChevronRight size={18} className="text-[#C6C6C8]" />
-              </button>
-            );
-          })}
+        <div>
+          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'User'}</p>
+          <p style={{ fontSize: 14, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{user?.email || ''}</p>
         </div>
+      </NeoTile>
+
+      <p className="maya-section-title" style={{ marginTop: 28 }}>Tools</p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {ITEMS.map((it) => {
+          const Icon = it.icon;
+          return (
+            <button key={it.path + it.label} onClick={() => navigate(it.path)} className="maya-card press-sm" aria-label={it.label} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px', border: 'none', cursor: 'pointer', borderRadius: 20, textAlign: 'left', width: '100%' }}>
+              <NeoIcon bg={it.bg} size={44} round={14}><Icon size={20} color={it.color} strokeWidth={2} /></NeoIcon>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>{it.label}</p>
+                <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{it.description}</p>
+              </div>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.tertiary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+            </button>
+          );
+        })}
       </div>
 
-      <div className="px-5 mb-8">
-        <button onClick={logout} className="w-full ios-btn ios-btn-red text-[17px] py-4">
-          <LogOut size={18} /> Sign Out
-        </button>
-      </div>
-
-      <div className="h-4" />
+      <button onClick={logout} className="maya-tile press-sm" aria-label="Sign out" style={{ width: '100%', marginTop: 24, height: 54, borderRadius: 18, background: C.red, color: '#fff', border: 'none', fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, cursor: 'pointer', padding: 0, boxShadow: `0 6px 20px ${C.red}25` }}>
+        <LogOut size={18} strokeWidth={2} /> Sign Out
+      </button>
+      <div style={{ height: 20 }} />
     </div>
   );
 }

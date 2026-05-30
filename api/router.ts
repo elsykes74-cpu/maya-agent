@@ -10,6 +10,7 @@ import { callingConfigRouter } from "./routers/calling-config-router";
 import { campaignsRouter } from "./routers/campaigns-router";
 import { dncRouter } from "./routers/dnc-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { mayaRouter } from "./routers/maya-router";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
@@ -24,6 +25,7 @@ export const appRouter = createRouter({
   campaigns: campaignsRouter,
   dnc: dncRouter,
   webhooks: webhooksRouter,
+  maya: mayaRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -622,6 +622,8 @@ body {
 /* Press states */
 .press:active { transform: scale(0.96); transition: transform 0.1s; }
 .press-sm:active { transform: scale(0.97); transition: transform 0.1s; }
+.press-shrink:active { transform: scale(0.97); transition: transform 0.1s; }
+.press-shrink-sm:active { transform: scale(0.98); transition: transform 0.1s; }
 
 /* Skeleton loader */
 .skeleton {
@@ -657,12 +659,28 @@ body {
   50%       { box-shadow: 0 0 0 6px rgba(20,184,166,0); }
 }
 
+@keyframes mayaPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.6; transform: scale(1.15); }
+}
+
 @keyframes shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
-.fade-in { animation: fadeInUp 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+.fade-in, .maya-fade-in { animation: fadeInUp 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+.maya-skeleton { background: linear-gradient(90deg, #E5E5EA 25%, #F0F0F0 50%, #E5E5EA 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 14px; }
+.maya-pulse { animation: mayaPulse 2.5s ease-in-out infinite; }
+/* maya-tile-dark defined below */
+.maya-stagger-1 { animation-delay: 0.04s; }
+.maya-stagger-2 { animation-delay: 0.08s; }
+.maya-stagger-3 { animation-delay: 0.12s; }
+.maya-stagger-4 { animation-delay: 0.16s; }
+.maya-stagger-5 { animation-delay: 0.20s; }
+.maya-stagger-6 { animation-delay: 0.24s; }
+.maya-stagger-7 { animation-delay: 0.28s; }
+.maya-stagger-8 { animation-delay: 0.32s; }
 .s-1 { animation-delay: 0.04s; }
 .s-2 { animation-delay: 0.08s; }
 .s-3 { animation-delay: 0.12s; }
@@ -731,6 +749,42 @@ body {
 [data-theme="dark"] .skeleton {
   background: linear-gradient(90deg, #2A2D3E 25%, #35384D 50%, #2A2D3E 75%);
   background-size: 200% 100%;
+}
+
+[data-theme="dark"] .maya-skeleton {
+  background: linear-gradient(90deg, #2A2D3E 25%, #35384D 50%, #2A2D3E 75%);
+  background-size: 200% 100%;
+}
+
+/* ─── Neo Select ──────────────────────────────────────────────── */
+
+.neo-select {
+  background: var(--bg);
+  border: 1px solid rgba(0,0,0,0.06);
+  border-radius: 12px;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  outline: none;
+  cursor: pointer;
+  box-shadow: var(--shadow-inset);
+}
+
+[data-theme="dark"] .neo-select {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.08);
+  color: var(--text);
+}
+
+/* ─── Dark Mode tile-dark ─────────────────────────────────────── */
+.maya-tile-dark {
+  background: linear-gradient(135deg, #1A1D2E, #0D0F17);
+  border-radius: 24px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+  overflow: hidden;
 }
 
 [data-theme="dark"] .bottom-sheet,

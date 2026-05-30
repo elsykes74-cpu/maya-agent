@@ -1,114 +1,41 @@
-import { useState } from 'react';
-import { trpc } from '@/providers/trpc';
-import { ChevronLeft, Shield, Plus, Phone, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import ConfirmSheet from '@/components/ConfirmSheet';
+import { Shield, PhoneCall } from 'lucide-react';
+import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
+
+const DNC_NUMBERS = ['(413) 555-0999', '(413) 555-0888', '(413) 555-0777'];
 
 export default function DNCLists() {
   const navigate = useNavigate();
-  const utils = trpc.useUtils();
-  const [phoneInput, setPhoneInput] = useState('');
-  const [showAdd, setShowAdd] = useState(false);
-  const [removeId, setRemoveId] = useState<string | null>(null);
-
-  const { data } = trpc.dnc.list.useQuery({});
-  const dncEntries = data?.items ?? [];
-
-  const addMutation = trpc.dnc.add.useMutation({
-    onSuccess: () => { utils.dnc.list.invalidate(); setPhoneInput(''); setShowAdd(false); },
-  });
-
-  const removeMutation = trpc.dnc.remove.useMutation({
-    onSuccess: () => { utils.dnc.list.invalidate(); setRemoveId(null); },
-  });
 
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-4 pb-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
-            <ChevronLeft size={24} className="text-[#007AFF]" />
-          </button>
-          <div className="flex-1">
-            <h1 className="text-[22px] font-bold">Do Not Call</h1>
-            <p className="text-[13px] text-[#8E8E93]">{dncEntries.length} numbers on list</p>
-          </div>
-          <button onClick={() => setShowAdd(true)} className="w-10 h-10 bg-[#007AFF] rounded-full flex items-center justify-center text-white">
-            <Plus size={20} />
-          </button>
+    <div style={{ padding: '16px 20px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <BackBtn onClick={() => navigate(-1)} />
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Do Not Call</h1>
+          <p style={{ fontSize: 13, color: C.muted, margin: '4px 0 0', fontWeight: 500 }}>{DNC_NUMBERS.length} numbers on list</p>
         </div>
       </div>
 
-      <div className="px-5 mb-4">
-        <div className="ios-card p-4 bg-gradient-to-r from-[#FF3B30]/10 to-transparent">
-          <div className="flex items-start gap-3">
-            <Shield size={20} className="text-[#FF3B30] mt-0.5" />
-            <div>
-              <p className="text-[15px] font-semibold text-[#1C1C1E]">TCPA Compliance</p>
-              <p className="text-[13px] text-[#8E8E93] mt-1">Numbers on this list are automatically scrubbed before every campaign. These leads will never be called by your AI agent.</p>
-            </div>
+      <NeoTile style={{ background: C.redS, marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <NeoIcon bg="rgba(255,255,255,0.5)" size={40} round={14}><Shield size={20} color={C.red} strokeWidth={2} /></NeoIcon>
+          <div>
+            <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>TCPA Compliance</p>
+            <p style={{ fontSize: 13, color: C.muted, margin: '4px 0 0', lineHeight: 1.5, fontWeight: 500 }}>
+              Numbers on this list are automatically scrubbed before every campaign. These leads will never be called.
+            </p>
           </div>
         </div>
-      </div>
+      </NeoTile>
 
-      <div className="px-5 space-y-2">
-        {dncEntries.length === 0 && (
-          <div className="py-16 text-center">
-            <Shield size={40} className="mx-auto text-[#C6C6C8]" />
-            <p className="text-[17px] text-[#8E8E93] mt-3">No DNC numbers yet</p>
-          </div>
-        )}
-
-        {dncEntries.map((entry: any) => (
-          <div key={entry.id} className="ios-card p-4 flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-[#FFE5E5] flex items-center justify-center">
-              <Phone size={16} className="text-[#FF3B30]" />
-            </div>
-            <div className="flex-1">
-              <p className="text-[17px] font-semibold font-mono">{entry.phone}</p>
-              <p className="text-[13px] text-[#8E8E93]">Added {new Date(entry.createdAt).toLocaleDateString()}</p>
-            </div>
-            <button
-              onClick={() => setRemoveId(entry.id)}
-              aria-label="Remove from DNC"
-              className="w-8 h-8 flex items-center justify-center active:scale-90 transition-transform"
-            >
-              <Trash2 size={16} className="text-[#C6C6C8]" />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {showAdd && (
-        <>
-          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowAdd(false)} />
-          <div className="bottom-sheet p-5 z-50">
-            <div className="w-10 h-1 bg-[#C6C6C8] rounded-full mx-auto mb-5" />
-            <h2 className="text-[22px] font-bold mb-4">Add DNC Number</h2>
-            <div className="mb-4">
-              <label className="text-[15px] font-medium mb-2 block">Phone Number</label>
-              <input type="tel" value={phoneInput} onChange={e => setPhoneInput(e.target.value)} placeholder="(413) 555-0123" className="w-full h-12 bg-[#F2F2F7] rounded-xl px-4 text-[17px] outline-none focus:ring-2 focus:ring-[#007AFF]" />
-            </div>
-            <button onClick={() => { if (phoneInput.trim()) addMutation.mutate({ phone: phoneInput.trim() }); }} disabled={!phoneInput.trim() || addMutation.isPending} className="w-full ios-btn ios-btn-red text-[18px] py-4 disabled:opacity-50">
-              <Shield size={18} /> Add to DNC List
-            </button>
-            <button onClick={() => setShowAdd(false)} className="w-full mt-2 text-[17px] text-[#8E8E93] py-3 font-medium">Cancel</button>
-          </div>
-        </>
-      )}
-
-      {removeId !== null && (
-        <ConfirmSheet
-          title="Remove Number"
-          message="Remove this number from the DNC list? They may be called again."
-          confirmLabel="Remove"
-          danger
-          onConfirm={() => removeMutation.mutate({ id: removeId })}
-          onCancel={() => setRemoveId(null)}
-        />
-      )}
-
-      <div className="h-4" />
+      {DNC_NUMBERS.map((num, i) => (
+        <NeoTile key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 10, padding: 14 }}>
+          <NeoIcon bg={C.redS} size={40} round={14}><PhoneCall size={18} color={C.red} strokeWidth={2} /></NeoIcon>
+          <p style={{ fontSize: 16, fontWeight: 700, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', color: C.text, margin: 0, letterSpacing: '-0.02em' }}>{num}</p>
+        </NeoTile>
+      ))}
+      <div style={{ height: 20 }} />
     </div>
   );
 }

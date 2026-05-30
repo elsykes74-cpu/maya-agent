@@ -1,92 +1,72 @@
 import { useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import {
-  ChevronLeft, Bell, Moon, Globe, Shield, HelpCircle,
-  Info, ChevronRight, ToggleLeft, ToggleRight
-} from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { useAuth } from '@/hooks/useAuth';
+import { useDarkMode } from '@/hooks/useDarkMode';
+import { Bell, Moon, Shield, Globe } from 'lucide-react';
+import { C, NeoTile, NeoIcon, NeoToggle, BackBtn } from '@/components/Neo';
 
 export default function Settings() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [darkMode, setDarkMode] = useState(false);
-  const [notifications, setNotifications] = useState(true);
+  const [notif, setNotif] = useState(true);
+  const { isDark, toggle } = useDarkMode();
+
+  const initials = user?.name
+    ? user.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
+    : user?.email?.[0]?.toUpperCase() ?? 'U';
 
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-4 pb-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
-            <ChevronLeft size={24} className="text-[#007AFF]" />
-          </button>
-          <h1 className="text-[22px] font-bold">Settings</h1>
-        </div>
+    <div style={{ padding: '16px 20px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <BackBtn onClick={() => navigate('/more')} />
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Settings</h1>
       </div>
 
-      <div className="px-5 mb-5">
-        <div className="ios-card p-4 flex items-center gap-4">
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#007AFF] to-[#5856D6] flex items-center justify-center text-white text-[24px] font-bold">
-            {user?.name?.charAt(0) ?? 'U'}
-          </div>
-          <div className="flex-1">
-            <p className="text-[20px] font-bold text-[#1C1C1E]">{user?.name ?? 'User'}</p>
-            <p className="text-[15px] text-[#8E8E93]">{user?.email ?? 'No email'}</p>
-            {(user as any)?.role && <p className="text-[13px] text-[#007AFF] mt-1 font-medium">{(user as any).role}</p>}
-          </div>
+      <NeoTile style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20, fontWeight: 800, background: `linear-gradient(135deg, ${C.teal}, ${C.blue})`, flexShrink: 0 }}>
+          {initials}
         </div>
-      </div>
-
-      <div className="px-5 mb-5">
-        <p className="ios-subheader">General</p>
-        <div className="ios-list">
-          <ToggleRow icon={<Bell size={18} />} label="Push Notifications" value={notifications} onToggle={() => setNotifications(!notifications)} />
-          <ToggleRow icon={<Moon size={18} />} label="Dark Mode" value={darkMode} onToggle={() => setDarkMode(!darkMode)} last />
+        <div>
+          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'User'}</p>
+          <p style={{ fontSize: 14, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{user?.email || ''}</p>
         </div>
-      </div>
+      </NeoTile>
 
-      <div className="px-5 mb-5">
-        <p className="ios-subheader">Account</p>
-        <div className="ios-list">
-          <LinkRow icon={<Shield size={18} />} label="Privacy & Security" />
-          <LinkRow icon={<Globe size={18} />} label="Language" detail="English" />
-          <LinkRow icon={<HelpCircle size={18} />} label="Help & Support" last />
-        </div>
-      </div>
+      <p className="maya-section-title">General</p>
+      <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
+        <ToggleRow icon={<Bell size={18} color={C.teal} strokeWidth={2} />} bg={C.tealS} label="Push Notifications" value={notif} onToggle={() => setNotif(!notif)} />
+        <ToggleRow icon={<Moon size={18} color={C.purple} strokeWidth={2} />} bg={C.purpleS} label="Dark Mode" value={isDark} onToggle={toggle} last />
+      </NeoTile>
 
-      <div className="px-5 mb-8">
-        <div className="ios-list">
-          <LinkRow icon={<Info size={18} />} label="About" detail="v2.0.1" last />
-        </div>
-      </div>
+      <p className="maya-section-title" style={{ marginTop: 24 }}>Account</p>
+      <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
+        <LinkRow icon={<Shield size={18} color={C.teal} strokeWidth={2} />} bg={C.tealS} label="Privacy & Security" />
+        <LinkRow icon={<Globe size={18} color={C.green} strokeWidth={2} />} bg={C.greenS} label="Language" detail="English" last />
+      </NeoTile>
 
-      <div className="h-4" />
+      <p style={{ textAlign: 'center', fontSize: 13, color: C.tertiary, marginTop: 28, fontWeight: 500 }}>Maya Agent v2.0.1</p>
+      <div style={{ height: 20 }} />
     </div>
   );
 }
 
-function ToggleRow({ icon, label, value, onToggle, last }: {
-  icon: React.ReactNode; label: string; value: boolean; onToggle: () => void; last?: boolean;
-}) {
+function ToggleRow({ icon, bg, label, value, onToggle, last }: { icon: React.ReactNode; bg: string; label: string; value: boolean; onToggle: () => void; last?: boolean }) {
   return (
-    <div className={`ios-list-item ${last ? '' : 'border-b border-[#E5E5EA]'}`}>
-      <span className="text-[#007AFF]">{icon}</span>
-      <span className="flex-1 text-[17px] text-[#1C1C1E]">{label}</span>
-      <button onClick={onToggle}>
-        {value ? <ToggleRight size={28} className="text-[#34C759]" /> : <ToggleLeft size={28} className="text-[#C6C6C8]" />}
-      </button>
+    <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: last ? 'none' : '1px solid rgba(0,0,0,0.04)' }}>
+      <NeoIcon bg={bg} size={36} round={12} style={{ marginRight: 14 }}>{icon}</NeoIcon>
+      <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: C.text }}>{label}</span>
+      <NeoToggle value={value} onChange={onToggle} ariaLabel={label} />
     </div>
   );
 }
 
-function LinkRow({ icon, label, detail, last }: {
-  icon: React.ReactNode; label: string; detail?: string; last?: boolean;
-}) {
+function LinkRow({ icon, bg, label, detail, last }: { icon: React.ReactNode; bg: string; label: string; detail?: string; last?: boolean }) {
   return (
-    <div className={`ios-list-item ${last ? '' : 'border-b border-[#E5E5EA]'}`}>
-      <span className="text-[#007AFF]">{icon}</span>
-      <span className="flex-1 text-[17px] text-[#1C1C1E]">{label}</span>
-      {detail && <span className="text-[15px] text-[#8E8E93] mr-1">{detail}</span>}
-      <ChevronRight size={18} className="text-[#C6C6C8]" />
+    <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: last ? 'none' : '1px solid rgba(0,0,0,0.04)' }}>
+      <NeoIcon bg={bg} size={36} round={12} style={{ marginRight: 14 }}>{icon}</NeoIcon>
+      <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: C.text }}>{label}</span>
+      {detail && <span style={{ fontSize: 14, color: C.muted, marginRight: 8, fontWeight: 500 }}>{detail}</span>}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.tertiary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6"/></svg>
     </div>
   );
 }

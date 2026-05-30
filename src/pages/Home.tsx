@@ -1,204 +1,167 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
-import { PhoneCall, Users, Zap, Calendar, Flame, Clock, Megaphone } from 'lucide-react';
-import { trpc } from '@/providers/trpc';
-import { DEMO_LEADS, DEMO_CALLS, DEMO_CAMPAIGNS } from '@/data/demo';
+import { PhoneCall, Users, Zap, Calendar, Flame, Upload, CheckCircle } from 'lucide-react';
+import { LEADS, CALLS } from '@/data';
+import { C, NeoTile, NeoIcon, SectionTitle, MotTag } from '@/components/Neo';
+import { AgentTile } from '@/components/AgentTile';
+import { MayaHeader, QuickActionBar } from '@/components/MayaHeader';
+import type { AgentData } from '@/components/Neo';
+
+const AGENTS: AgentData[] = [
+  { id: 'instagram', title: 'Instagram', icon: 'Zap', iconColor: '#E4405F', iconBg: '#FCE4EC', status: 'online', count: 3 },
+  { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#7B61FF', iconBg: '#EDE9FE', status: 'online' },
+  { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#14B8A6', iconBg: '#F0FDF9', status: 'online', count: 2 },
+  { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#25D366', iconBg: '#E8F5E9', status: 'busy', count: 12 },
+  { id: 'facebook', title: 'Facebook', icon: 'TrendingUp', iconColor: '#1877F2', iconBg: '#E3F2FD', status: 'online' },
+  { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FF9F0A', iconBg: '#FFFBF0', status: 'paused', count: 5 },
+  { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#8B5CF6', iconBg: '#FAF5FF', status: 'online', count: 8 },
+  { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#34C759', iconBg: '#F0FFF5', status: 'online', count: 3 },
+];
 
 export default function Home() {
   const navigate = useNavigate();
+  const [uploaded, setUploaded] = useState<{ name: string; count: number } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const hours = new Date().getHours();
+  const greeting = hours < 12 ? 'Good Morning' : hours < 17 ? 'Good Afternoon' : 'Good Evening';
+  const hot = LEADS.filter(l => l.motivationLevel === 'hot').length;
 
-  const [greeting] = useState(() => {
-    const h = new Date().getHours();
-    if (h < 12) return 'Good Morning';
-    if (h < 17) return 'Good Afternoon';
-    return 'Good Evening';
-  });
-
-  const { data: leadsData } = trpc.leads.list.useQuery({ limit: 10 }, { retry: false });
-  const { data: callsData } = trpc.calls.list.useQuery({}, { retry: false });
-  const { data: campaignsData } = trpc.campaigns.list.useQuery({}, { retry: false });
-
-  const leads = leadsData?.items ?? DEMO_LEADS;
-  const calls = callsData?.items ?? DEMO_CALLS;
-  const campaigns = campaignsData?.items ?? DEMO_CAMPAIGNS;
-
-  const hotLeads = leads.filter((l: any) => l.motivationLevel === 'hot').length;
-  const todayCalls = calls.length;
-  const activeCampaigns = campaigns.filter((c: any) => c.status === 'active').length;
-
-  const QUICK_ACTIONS = [
-    { icon: <PhoneCall size={28} />, label: 'Start Calling', color: 'bg-[#007AFF]', to: '/calls' },
-    { icon: <Users size={28} />, label: 'Add Lead', color: 'bg-[#34C759]', to: '/leads' },
-    { icon: <Megaphone size={28} />, label: 'New Campaign', color: 'bg-[#FF9500]', to: '/campaigns' },
-    { icon: <Calendar size={28} />, label: 'Schedule', color: 'bg-[#AF52DE]', to: '/appointments' },
-  ];
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const lines = text.split('\n').filter(l => l.trim());
+      setUploaded({ name: file.name, count: Math.max(lines.length - 1, 0) });
+      setTimeout(() => setUploaded(null), 3000);
+    };
+    reader.readAsText(file);
+  };
 
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-6 pb-4">
-        <p className="text-[15px] text-[#8E8E93]">{greeting}</p>
-        <h1 className="text-[28px] font-bold tracking-tight text-[#1C1C1E]">Dashboard</h1>
+    <div style={{ padding: '28px 20px 20px' }}>
+      <MayaHeader greeting={greeting} title="Maya" subtitle="Your AI Agent Command Center" status="online" statusLabel="Agent Online" />
+
+      {/* KPI Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
+        <KpiButton icon={<Users size={16} color={C.red} />} value={hot} label="Hot" onClick={() => navigate('/leads')} />
+        <KpiButton icon={<PhoneCall size={16} color={C.teal} />} value={3} label="Calls" onClick={() => navigate('/calls')} />
+        <KpiButton icon={<Zap size={16} color={C.orange} />} value={1} label="Active" onClick={() => navigate('/campaigns')} />
+        <KpiButton icon={<Calendar size={16} color={C.purple} />} value={2} label="Appts" onClick={() => navigate('/appointments')} />
       </div>
 
-      {/* KPI grid */}
-      <div className="px-5 grid grid-cols-2 gap-3 mb-6">
-        <button onClick={() => navigate('/leads')} className="ios-card p-4 text-left active:scale-95 transition-transform">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
-              <Users size={22} className="text-[#FF3B30]" />
-            </div>
-            <span className="ios-badge ios-badge-hot">HOT</span>
-          </div>
-          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{hotLeads}</p>
-          <p className="text-[13px] text-[#8E8E93] mt-1">Hot Leads</p>
-        </button>
-
-        <button onClick={() => navigate('/calls')} className="ios-card p-4 text-left active:scale-95 transition-transform">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
-              <PhoneCall size={22} className="text-[#007AFF]" />
-            </div>
-            <span className="ios-badge ios-badge-blue">TODAY</span>
-          </div>
-          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{todayCalls}</p>
-          <p className="text-[13px] text-[#8E8E93] mt-1">Calls Today</p>
-        </button>
-
-        <button onClick={() => navigate('/campaigns')} className="ios-card p-4 text-left active:scale-95 transition-transform">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
-              <Zap size={22} className="text-[#FF9500]" />
-            </div>
-            <span className="ios-badge ios-badge-warm">LIVE</span>
-          </div>
-          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">{activeCampaigns}</p>
-          <p className="text-[13px] text-[#8E8E93] mt-1">Active Campaigns</p>
-        </button>
-
-        <button onClick={() => navigate('/appointments')} className="ios-card p-4 text-left active:scale-95 transition-transform">
-          <div className="flex items-center justify-between mb-3">
-            <div className="w-10 h-10 rounded-xl bg-[#F2F2F7] flex items-center justify-center">
-              <Calendar size={22} className="text-[#34C759]" />
-            </div>
-            <span className="ios-badge ios-badge-green">TODAY</span>
-          </div>
-          <p className="text-[32px] font-bold text-[#1C1C1E] leading-none">2</p>
-          <p className="text-[13px] text-[#8E8E93] mt-1">Appointments</p>
-        </button>
+      {/* Agent Hub */}
+      <SectionTitle>Agent Hub</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 24 }}>
+        {AGENTS.map((agent, i) => (
+          <AgentTile key={agent.id} {...agent} className={`s-${Math.min(i + 1, 6)}`} onClick={() => {
+            if (agent.id === 'calls') navigate('/calls');
+            else if (agent.id === 'leads') navigate('/leads');
+            else if (agent.id === 'messages') navigate('/sms');
+            else if (agent.id === 'workflow') navigate('/ai-config');
+            else if (agent.id === 'camera') navigate('/appointments');
+          }} />
+        ))}
       </div>
+
+      {/* Upload Leads */}
+      <SectionTitle>Data</SectionTitle>
+      <input type="file" ref={fileRef} accept=".csv,.xlsx,.xls,.json" onChange={handleFile} style={{ display: 'none' }} />
+      <button
+        onClick={() => fileRef.current?.click()}
+        className="maya-tile press-sm"
+        aria-label="Upload leads from CSV or Excel"
+        style={{ width: '100%', height: 64, borderRadius: 20, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 24, background: `linear-gradient(135deg, ${C.blue}, ${C.teal})`, color: '#fff', padding: 0 }}
+      >
+        {uploaded ? (
+          <><CheckCircle size={22} strokeWidth={2.5} /><span style={{ fontSize: 16, fontWeight: 700 }}>{uploaded.count} leads imported from {uploaded.name}</span></>
+        ) : (
+          <><Upload size={22} strokeWidth={2.5} /><span style={{ fontSize: 16, fontWeight: 700 }}>Upload Leads (CSV / Excel)</span></>
+        )}
+      </button>
 
       {/* Quick Actions */}
-      <div className="px-5 mb-6">
-        <p className="ios-subheader">Quick Actions</p>
-        <div className="flex gap-3 overflow-x-auto hide-scrollbar snap-x snap-mandatory pb-1">
-          {QUICK_ACTIONS.map((item) => (
-            <button
-              key={item.to}
-              onClick={() => navigate(item.to)}
-              aria-label={item.label}
-              className="snap-start flex flex-col items-center gap-2 min-w-[80px] active:scale-95 transition-transform"
-            >
-              <div className={`w-16 h-16 ${item.color} rounded-2xl flex items-center justify-center text-white shadow-lg`}>
-                {item.icon}
-              </div>
-              <span className="text-[12px] font-medium text-[#1C1C1E]">{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      <SectionTitle>Quick Actions</SectionTitle>
+      <QuickActionBar actions={[
+        { label: 'Call', icon: <PhoneCall size={18} color="#fff" />, bg: C.teal, onClick: () => navigate('/calls') },
+        { label: 'Lead', icon: <Users size={18} color="#fff" />, bg: C.green, onClick: () => navigate('/leads') },
+        { label: 'Campaign', icon: <Zap size={18} color="#fff" />, bg: C.orange, onClick: () => navigate('/campaigns') },
+        { label: 'Schedule', icon: <Calendar size={18} color="#fff" />, bg: C.purple, onClick: () => navigate('/appointments') },
+      ]} />
 
       {/* Recent Calls */}
-      <div className="px-5 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <p className="ios-subheader !m-0">Recent Calls</p>
-          <button onClick={() => navigate('/calls')} className="text-[#007AFF] text-[15px] font-medium active:opacity-60">
-            See All
-          </button>
-        </div>
-        <div className="ios-card divide-y divide-[#E5E5EA]">
-          {calls.slice(0, 3).map((call: any) => (
-            <div key={call.id} className="flex items-center gap-4 p-4">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${call.outcome === 'connected' ? 'bg-[#E5F9ED]' : 'bg-[#FFE5E5]'}`}>
-                <PhoneCall size={18} className={call.outcome === 'connected' ? 'text-[#34C759]' : 'text-[#FF3B30]'} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-[17px] font-medium text-[#1C1C1E] truncate">{call.leadName}</p>
-                <p className="text-[13px] text-[#8E8E93]">
-                  {call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer'}
-                  {' · '}
-                  {new Date(call.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                </p>
-              </div>
-              <span className="text-[13px] text-[#8E8E93]">{call.duration}s</span>
-            </div>
-          ))}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <SectionTitle>Recent Calls</SectionTitle>
+        <button onClick={() => navigate('/calls')} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.teal, cursor: 'pointer', marginBottom: 14 }}>See All</button>
       </div>
+      <NeoTile style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+        {CALLS.slice(0, 3).map((c, i) => (
+          <button key={c.id} onClick={() => navigate('/calls')} className="press-sm" aria-label={`Call from ${c.leadName}`} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', borderBottom: i < 2 ? '1px solid rgba(0,0,0,0.04)' : 'none', border: 'none', background: 'none', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
+            <NeoIcon bg={c.outcome === 'connected' ? C.greenS : c.outcome === 'voicemail' ? C.orangeS : C.redS} size={44}>
+              <PhoneCall size={20} color={c.outcome === 'connected' ? C.green : c.outcome === 'voicemail' ? C.orange : C.red} strokeWidth={2} />
+            </NeoIcon>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>{c.leadName}</p>
+              <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>
+                {c.outcome === 'connected' ? 'Connected' : c.outcome === 'voicemail' ? 'Voicemail' : 'No Answer'} · {new Date(c.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </p>
+            </div>
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.tertiary }}>{c.duration}s</span>
+          </button>
+        ))}
+      </NeoTile>
 
       {/* Hot Leads */}
-      <div className="px-5 mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <p className="ios-subheader !m-0 flex items-center gap-1">
-            <Flame size={14} className="text-[#FF3B30]" /> Hot Leads
-          </p>
-          <button onClick={() => navigate('/leads')} className="text-[#007AFF] text-[15px] font-medium active:opacity-60">
-            See All
-          </button>
-        </div>
-        <div className="space-y-3">
-          {leads.filter((l: any) => l.motivationLevel === 'hot').map((lead: any) => (
-            <div key={lead.id} className="ios-card p-4">
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <p className="text-[17px] font-semibold text-[#1C1C1E]">{lead.sellerName}</p>
-                  <p className="text-[13px] text-[#8E8E93] truncate max-w-[240px]">{lead.propertyAddress}</p>
-                </div>
-                <span className="ios-badge ios-badge-hot">HOT</span>
-              </div>
-              <div className="flex items-center gap-4 text-[13px] text-[#8E8E93]">
-                <span className="flex items-center gap-1"><PhoneCall size={12} /> {lead.phone}</span>
-                {lead.timeline && <span className="flex items-center gap-1"><Clock size={12} /> {lead.timeline}</span>}
-              </div>
-              {lead.keyPainPoints && (
-                <div className="mt-2 p-2 bg-[#FFF9E5] rounded-lg">
-                  <p className="text-[13px] text-[#FF9500] font-medium">Motivation</p>
-                  <p className="text-[14px] text-[#1C1C1E] mt-0.5">{lead.keyPainPoints}</p>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <SectionTitle icon={<Flame size={14} color={C.red} />}>Hot Leads</SectionTitle>
+        <button onClick={() => navigate('/leads')} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.teal, cursor: 'pointer', marginBottom: 14 }}>See All</button>
       </div>
-
-      {/* Active Campaigns */}
-      {campaigns.filter((c: any) => c.status === 'active').length > 0 && (
-        <div className="px-5 mb-6">
-          <p className="ios-subheader">Active Campaigns</p>
-          {campaigns.filter((c: any) => c.status === 'active').map((camp: any) => (
-            <div key={camp.id} className="ios-card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[17px] font-semibold">{camp.name}</p>
-                <div className="flex items-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-[#34C759] animate-pulse" />
-                  <span className="ios-badge ios-badge-green">Live</span>
-                </div>
-              </div>
-              <div className="h-2 bg-[#E5E5EA] rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-[#34C759] to-[#30D158] rounded-full"
-                  style={{ width: `${camp.progress ?? 0}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-2 text-[13px] text-[#8E8E93]">
-                <span>{camp.callsMade ?? 0} calls made</span>
-                <span>{camp.totalLeads ?? 0} total leads</span>
-              </div>
+      {LEADS.filter(l => l.motivationLevel === 'hot').map(l => (
+        <button key={l.id} onClick={() => navigate('/leads')} className="maya-tile press-sm" aria-label={l.sellerName} style={{ marginBottom: 12, padding: 18, border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', display: 'block' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <p style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: 0 }}>{l.sellerName}</p>
+              <p style={{ fontSize: 13, color: C.muted, margin: '3px 0 0', fontWeight: 500 }}>{l.propertyAddress}</p>
             </div>
-          ))}
-        </div>
-      )}
+            <MotTag level={l.motivationLevel} />
+          </div>
+          {l.keyPainPoints && (
+            <div className="neo-pressed-sm" style={{ marginTop: 10, padding: 10 }}>
+              <p style={{ fontSize: 12, color: C.red, fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Motivation</p>
+              <p style={{ fontSize: 14, color: C.text, margin: '2px 0 0', fontWeight: 500 }}>{l.keyPainPoints}</p>
+            </div>
+          )}
+        </button>
+      ))}
 
-      <div className="h-4" />
+      {/* Live Campaign */}
+      <SectionTitle>Live Campaign</SectionTitle>
+      <button onClick={() => navigate('/campaigns')} className="maya-tile press-sm" style={{ padding: 18, border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', display: 'block', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>Springfield Motivated</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: C.green, boxShadow: `0 0 0 3px rgba(52,199,89,0.25)`, animation: 'mayaPulse 2.5s ease-in-out infinite' }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>Live</span>
+          </div>
+        </div>
+        <div className="maya-progress-track"><div className="maya-progress-fill" style={{ width: '68%' }} /></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, fontSize: 13, color: C.muted, fontWeight: 600 }}>
+          <span>34 calls</span><span>50 leads</span>
+        </div>
+      </button>
+
+      <div style={{ height: 20 }} />
     </div>
+  );
+}
+
+function KpiButton({ icon, value, label, onClick }: { icon: React.ReactNode; value: number; label: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="neo-pressed-sm press-sm" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 8px', gap: 4, border: 'none', cursor: 'pointer' }}>
+      {icon}
+      <p style={{ fontSize: 20, fontWeight: 800, color: '#1C1C1E', margin: 0, letterSpacing: '-0.5px' }}>{value}</p>
+      <p style={{ fontSize: 11, color: '#8E8E93', margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</p>
+    </button>
   );
 }

@@ -1,122 +1,66 @@
 import { useState } from 'react';
-import { trpc } from '@/providers/trpc';
-import { ChevronLeft, Bot, Save, Volume2, Languages, Clock, Phone } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { Bot, Volume2, Globe } from 'lucide-react';
+import { C, NeoTile, NeoIcon, NeoButton, BackBtn } from '@/components/Neo';
 
 export default function AIConfig() {
   const navigate = useNavigate();
-  const utils = trpc.useUtils();
-
-  const { data: config, isLoading } = trpc.callingConfig.get.useQuery();
-  const [voiceName, setVoiceName] = useState(config?.voiceName ?? 'alloy');
-  const [language, setLanguage] = useState(config?.language ?? 'English');
-  const [greeting, setGreeting] = useState(config?.greetingScript ?? '');
-  const [transferNumber, setTransferNumber] = useState(config?.transferNumber ?? '');
-  const [maxDuration, setMaxDuration] = useState(config?.maxCallDuration?.toString() ?? '300');
-
-  const updateMutation = trpc.callingConfig.update.useMutation({
-    onSuccess: () => utils.callingConfig.get.invalidate(),
-  });
-
-  const handleSave = () => {
-    updateMutation.mutate({
-      voiceName,
-      language,
-      greetingScript: greeting,
-      transferNumber: transferNumber || undefined,
-      maxCallDuration: parseInt(maxDuration) || 300,
-    });
-  };
+  const [voice, setVoice] = useState('alloy');
+  const [lang, setLang] = useState('English');
+  const [greeting, setGreeting] = useState(
+    "Hello, this is your AI real estate assistant. I work with local investors who buy houses for cash, as-is, and can close in as little as 14 days. Do you have a few minutes to talk?"
+  );
 
   return (
-    <div className="min-h-full">
-      <div className="px-5 pt-4 pb-3">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="w-8 h-8 flex items-center justify-center">
-            <ChevronLeft size={24} className="text-[#007AFF]" />
-          </button>
-          <h1 className="text-[22px] font-bold">AI Agent Config</h1>
-        </div>
+    <div style={{ padding: '16px 20px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <BackBtn onClick={() => navigate(-1)} />
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>AI Agent Config</h1>
       </div>
 
-      <div className="px-5 mb-5">
-        <div className="ios-card p-5 text-center bg-gradient-to-br from-[#007AFF] to-[#5856D6]">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-white/20 flex items-center justify-center mb-3">
-            <Bot size={32} className="text-white" />
-          </div>
-          <p className="text-[18px] font-bold text-white">AI Calling Agent</p>
-          <p className="text-[14px] text-white/70 mt-1">Western Massachusetts Real Estate</p>
+      <NeoTile style={{ background: `linear-gradient(135deg, ${C.teal}, ${C.blue})`, textAlign: 'center', color: '#fff', marginBottom: 24, padding: 28 }}>
+        <div style={{ width: 64, height: 64, borderRadius: 22, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+          <Bot size={30} color="#fff" strokeWidth={1.5} />
         </div>
-      </div>
+        <p style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>AI Calling Agent</p>
+        <p style={{ fontSize: 13, opacity: 0.65, margin: '6px 0 0', fontWeight: 500 }}>Western Massachusetts Real Estate</p>
+      </NeoTile>
 
-      {isLoading ? (
-        <div className="py-20 text-center text-[#8E8E93] text-[17px]">Loading config...</div>
-      ) : (
-        <div className="px-5 space-y-5">
-          <div>
-            <p className="ios-subheader">Voice</p>
-            <div className="ios-list">
-              <div className="ios-list-item border-b border-[#E5E5EA]">
-                <Volume2 size={18} className="text-[#007AFF]" />
-                <span className="flex-1 text-[17px]">Voice</span>
-                <select value={voiceName} onChange={e => setVoiceName(e.target.value)} className="bg-[#F2F2F7] rounded-lg px-3 py-1.5 text-[15px] outline-none">
-                  <option value="alloy">Alloy (Neutral)</option>
-                  <option value="echo">Echo (Male)</option>
-                  <option value="fable">Fable (Male)</option>
-                  <option value="onyx">Onyx (Male)</option>
-                  <option value="nova">Nova (Female)</option>
-                  <option value="shimmer">Shimmer (Female)</option>
-                </select>
-              </div>
-              <div className="ios-list-item">
-                <Languages size={18} className="text-[#007AFF]" />
-                <span className="flex-1 text-[17px]">Language</span>
-                <select value={language} onChange={e => setLanguage(e.target.value)} className="bg-[#F2F2F7] rounded-lg px-3 py-1.5 text-[15px] outline-none">
-                  <option value="English">English</option>
-                  <option value="Spanish">Spanish</option>
-                  <option value="Portuguese">Portuguese</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <p className="ios-subheader">Call Settings</p>
-            <div className="ios-list">
-              <div className="ios-list-item border-b border-[#E5E5EA]">
-                <Clock size={18} className="text-[#007AFF]" />
-                <span className="flex-1 text-[17px]">Max Duration</span>
-                <div className="flex items-center gap-1">
-                  <input type="number" value={maxDuration} onChange={e => setMaxDuration(e.target.value)} className="w-16 bg-[#F2F2F7] rounded-lg px-2 py-1 text-[15px] text-right outline-none" />
-                  <span className="text-[15px] text-[#8E8E93]">sec</span>
-                </div>
-              </div>
-              <div className="ios-list-item">
-                <Phone size={18} className="text-[#007AFF]" />
-                <span className="flex-1 text-[17px]">Transfer Number</span>
-                <input type="tel" value={transferNumber} onChange={e => setTransferNumber(e.target.value)} placeholder="Optional" className="w-32 bg-[#F2F2F7] rounded-lg px-2 py-1 text-[15px] text-right outline-none" />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <p className="ios-subheader">Greeting Script</p>
-            <div className="ios-card p-4">
-              <textarea value={greeting} onChange={e => setGreeting(e.target.value)} placeholder="Hello, this is [Name] with [Company]. I'm calling about your property..." rows={5} className="w-full bg-transparent text-[17px] outline-none resize-none placeholder:text-[#C6C6C8]" />
-            </div>
-          </div>
-
-          <button onClick={handleSave} disabled={updateMutation.isPending} className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50">
-            <Save size={20} /> {updateMutation.isPending ? 'Saving...' : 'Save Configuration'}
-          </button>
-
-          {updateMutation.isSuccess && (
-            <p className="text-center text-[#34C759] text-[15px] font-medium">Configuration saved!</p>
-          )}
+      <p className="maya-section-title">Voice</p>
+      <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+          <NeoIcon bg={C.tealS} size={36} round={12} style={{ marginRight: 14 }}><Volume2 size={18} color={C.teal} strokeWidth={2} /></NeoIcon>
+          <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: C.text }}>Voice</span>
+          <select value={voice} onChange={e => setVoice(e.target.value)} className="neo-select" aria-label="Select voice">
+            <option value="alloy">Alloy (Neutral)</option>
+            <option value="echo">Echo (Male)</option>
+            <option value="nova">Nova (Female)</option>
+            <option value="shimmer">Shimmer (Female)</option>
+          </select>
         </div>
-      )}
+        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px' }}>
+          <NeoIcon bg={C.purpleS} size={36} round={12} style={{ marginRight: 14 }}><Globe size={18} color={C.purple} strokeWidth={2} /></NeoIcon>
+          <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: C.text }}>Language</span>
+          <select value={lang} onChange={e => setLang(e.target.value)} className="neo-select" aria-label="Select language">
+            <option>English</option>
+            <option>Spanish</option>
+          </select>
+        </div>
+      </NeoTile>
 
-      <div className="h-4" />
+      <p className="maya-section-title" style={{ marginTop: 24 }}>Greeting Script</p>
+      <NeoTile>
+        <textarea
+          value={greeting}
+          onChange={e => setGreeting(e.target.value)}
+          rows={6}
+          aria-label="Greeting script"
+          style={{ width: '100%', border: 'none', outline: 'none', fontSize: 15, resize: 'none', background: 'transparent', color: C.text, lineHeight: 1.6, fontWeight: 500 }}
+        />
+      </NeoTile>
+
+      <NeoButton style={{ marginTop: 24 }} onClick={() => {}}>Save Configuration</NeoButton>
+      <div style={{ height: 20 }} />
     </div>
   );
 }
