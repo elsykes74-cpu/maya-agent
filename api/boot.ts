@@ -257,7 +257,9 @@ app.notFound((c) => {
 // ---------------------------------------------------------------------------
 // Production bootstrap
 // ---------------------------------------------------------------------------
-if (env.isProduction) {
+// On Vercel (serverless), skip TCP server — requests come via app.fetch exported below.
+// On Railway/VPS, start the persistent Node.js HTTP server.
+if (env.isProduction && !process.env.VERCEL) {
   if (!loadIndex()) {
     throw new Error(
       `Client build not found at ${CLIENT_DIST}. Run the client build before starting the server.`,

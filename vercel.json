@@ -3,12 +3,12 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist/public",
   "functions": {
-    "api/boot.ts": {
+    "api/vercel.js": {
       "includeFiles": "dist/**"
     }
   },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/boot.ts" },
+    { "source": "/api/(.*)", "destination": "/api/vercel.js" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
