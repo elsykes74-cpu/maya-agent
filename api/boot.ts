@@ -14,6 +14,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
+import { getDb } from "./queries/connection";
 import { telegramApp } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { createOAuthCallbackHandler } from "./kimi/auth";
@@ -274,6 +276,33 @@ app.post("/api/claude/messages", async (c) => {
 	}
 
 	return c.json(data, 200, { "Cache-Control": "no-store" });
+});
+
+app.get("/api/db/health", async (c) => {
+	try {
+		const db = getDb();
+		await db.execute(sql`select 1 as ok`);
+		return c.json(
+			{
+				ok: true,
+				configured: Boolean(env.databaseUrl),
+			},
+			200,
+			{ "Cache-Control": "no-store" },
+		);
+	} catch (err) {
+		console.error("[db/health]", err);
+		const message = err instanceof Error ? err.message : "Database health check failed";
+		return c.json(
+			{
+				ok: false,
+				configured: Boolean(env.databaseUrl),
+				error: message,
+			},
+			503,
+			{ "Cache-Control": "no-store" },
+		);
+	}
 });
 
 // Env-dump endpoint (development / diagnostic only)
