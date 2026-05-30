@@ -22,6 +22,8 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
+import { telegramApp } from "./telegram-webhook";
+import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Session, Paths } from "../contracts/constants";
 import {
@@ -210,6 +212,11 @@ app.get("/__env-debug", async (c) => {
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 
 // ---------------------------------------------------------------------------
+// Telegram webhook
+// ---------------------------------------------------------------------------
+app.route("/api/telegram", telegramApp);
+
+// ---------------------------------------------------------------------------
 // tRPC
 // ---------------------------------------------------------------------------
 app.all("/api/trpc/*", trpcBodyLimit, async (c) =>
@@ -261,6 +268,7 @@ if (env.isProduction) {
     const port = Number.parseInt(process.env.PORT ?? "3000", 10);
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
+      startDailyDigestScheduler();
     });
   } catch (err) {
     console.error("[boot] FATAL:", err);

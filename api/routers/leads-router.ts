@@ -3,6 +3,14 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { leads, leadSources, leadProfiles } from "../../db/schema";
+import { computeLeadScore, scoreToMotivation } from "../lib/lead-scorer";
+import { sendAlert, formatLeadCard } from "../lib/telegram";
+
+const LEAD_TYPES = [
+  "vacant", "absentee_owner", "probate", "tax_delinquent", "pre_foreclosure",
+  "tired_landlord", "code_violation", "expired_listing", "fsbo", "high_equity",
+  "inherited", "fire_damaged", "long_term_owner", "other",
+] as const;
 
 export const leadsRouter = createRouter({
   list: publicQuery
@@ -91,9 +99,36 @@ export const leadsRouter = createRouter({
       objectionsRaised: z.string().optional(),
       pipelineStage: z.enum(["lead", "outreach", "scoring", "hot_routing", "warm_nurture", "cold_drip", "appointment", "close"]).default("lead"),
       notes: z.string().optional(),
+      // Lead Finder Bot fields
+      leadType: z.enum(LEAD_TYPES).default("other"),
+      ownerMailingAddress: z.string().optional(),
+      county: z.string().optional(),
+      yearBuilt: z.number().optional(),
+      lotSize: z.string().optional(),
+      assessedValue: z.string().optional(),
+      estimatedValue: z.string().optional(),
+      estimatedEquity: z.string().optional(),
+      lastSalePrice: z.string().optional(),
+      taxStatus: z.string().optional(),
+      foreclosureStatus: z.string().optional(),
+      ownershipYears: z.number().optional(),
+      isVacant: z.boolean().default(false),
+      isAbsentee: z.boolean().default(false),
+      isProbate: z.boolean().default(false),
+      hasCodeViolations: z.boolean().default(false),
+      hasTaxDelinquency: z.boolean().default(false),
+      isPreForeclosure: z.boolean().default(false),
+      isFsbo: z.boolean().default(false),
+      isExpiredListing: z.boolean().default(false),
+      isOutOfState: z.boolean().default(false),
+      isMultifamilyLandlord: z.boolean().default(false),
+      hasVisibleDistress: z.boolean().default(false),
+      confidenceLevel: z.enum(["high", "medium", "low"]).default("medium"),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
+      const score = computeLeadScore(input);
+      const motivation = score > 0 ? scoreToMotivation(score) : input.motivationLevel;
       const result = await db.insert(leads).values({
         ...input,
         estimatedRepairs: input.estimatedRepairs ? String(input.estimatedRepairs) : "0",
@@ -101,10 +136,31 @@ export const leadsRouter = createRouter({
         arv: input.arv ? String(input.arv) : null,
         mao: input.mao ? String(input.mao) : null,
         assignmentFee: input.assignmentFee ? String(input.assignmentFee) : "5000",
+        assessedValue: input.assessedValue ? String(input.assessedValue) : null,
+        estimatedValue: input.estimatedValue ? String(input.estimatedValue) : null,
+        estimatedEquity: input.estimatedEquity ? String(input.estimatedEquity) : null,
+        lastSalePrice: input.lastSalePrice ? String(input.lastSalePrice) : null,
+        leadScore: score,
+        motivationLevel: motivation,
         callCount: 0,
         smsCount: 0,
       });
-      return { id: Number(result[0].insertId), success: true };
+      const newId = Number((result as any)[0]?.insertId ?? 0);
+
+      if (score >= 80) {
+        const preview = {
+          id: newId, sellerName: input.sellerName,
+          propertyAddress: input.propertyAddress, city: input.city,
+          phone: input.phone, leadScore: score, leadType: input.leadType,
+          isPreForeclosure: input.isPreForeclosure, hasTaxDelinquency: input.hasTaxDelinquency,
+          isProbate: input.isProbate, isVacant: input.isVacant,
+          isAbsentee: input.isAbsentee, hasCodeViolations: input.hasCodeViolations,
+          isExpiredListing: input.isExpiredListing, isOutOfState: input.isOutOfState,
+        };
+        sendAlert(`🔥 <b>NEW HOT LEAD</b>\n\n${formatLeadCard(preview)}`).catch(() => {});
+      }
+
+      return { id: newId, success: true };
     }),
 
   update: publicQuery
@@ -137,10 +193,59 @@ export const leadsRouter = createRouter({
       appointmentDate: z.date().optional(),
       appointmentTime: z.string().optional(),
       notes: z.string().optional(),
+      // Lead Finder Bot fields
+      leadType: z.enum(LEAD_TYPES).optional(),
+      ownerMailingAddress: z.string().optional(),
+      county: z.string().optional(),
+      yearBuilt: z.number().optional(),
+      lotSize: z.string().optional(),
+      assessedValue: z.string().optional(),
+      estimatedValue: z.string().optional(),
+      estimatedEquity: z.string().optional(),
+      lastSalePrice: z.string().optional(),
+      taxStatus: z.string().optional(),
+      foreclosureStatus: z.string().optional(),
+      ownershipYears: z.number().optional(),
+      isVacant: z.boolean().optional(),
+      isAbsentee: z.boolean().optional(),
+      isProbate: z.boolean().optional(),
+      hasCodeViolations: z.boolean().optional(),
+      hasTaxDelinquency: z.boolean().optional(),
+      isPreForeclosure: z.boolean().optional(),
+      isFsbo: z.boolean().optional(),
+      isExpiredListing: z.boolean().optional(),
+      isOutOfState: z.boolean().optional(),
+      isMultifamilyLandlord: z.boolean().optional(),
+      hasVisibleDistress: z.boolean().optional(),
+      confidenceLevel: z.enum(["high", "medium", "low"]).optional(),
+      callOpening: z.string().optional(),
+      smsOpener: z.string().optional(),
+      outreachAngle: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
       const { id, ...data } = input;
+      // Recompute score if any motivation flag is included in this update
+      const hasMotivationFlags =
+        data.isVacant !== undefined || data.isAbsentee !== undefined ||
+        data.isProbate !== undefined || data.hasCodeViolations !== undefined ||
+        data.hasTaxDelinquency !== undefined || data.isPreForeclosure !== undefined ||
+        data.isFsbo !== undefined || data.isExpiredListing !== undefined ||
+        data.isOutOfState !== undefined || data.isMultifamilyLandlord !== undefined ||
+        data.hasVisibleDistress !== undefined || data.ownershipYears !== undefined;
+
+      if (hasMotivationFlags) {
+        const existing = await db.query.leads.findFirst({ where: eq(leads.id, id) });
+        if (existing) {
+          const merged = { ...existing, ...data };
+          const score = computeLeadScore(merged);
+          (data as any).leadScore = score;
+          if (!data.motivationLevel) {
+            (data as any).motivationLevel = scoreToMotivation(score);
+          }
+        }
+      }
+
       await db.update(leads).set(data).where(eq(leads.id, id));
       return { success: true };
     }),
