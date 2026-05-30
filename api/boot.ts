@@ -71,7 +71,7 @@ const trpcBodyLimit = bodyLimit({
 });
 
 // ---------------------------------------------------------------------------
-// Google OAuth — start
+// Google OAuth - start
 // ---------------------------------------------------------------------------
 const OAUTH_STATE_COOKIE = "g_oauth_state";
 const OAUTH_REDIRECT_COOKIE = "g_oauth_redirect";
@@ -106,7 +106,7 @@ app.get("/api/oauth/google", oauthLimiter, async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Google OAuth — callback
+// Google OAuth - callback
 // ---------------------------------------------------------------------------
 app.get("/api/oauth/google/callback", oauthLimiter, async (c) => {
 	const guard = requireGoogleConfigured(c);
@@ -211,7 +211,7 @@ app.get("/__env-debug", async (c) => {
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 
 // ---------------------------------------------------------------------------
-// Maya Twilio webhook — mount before tRPC so /api/maya/* is handled here
+// Maya Twilio webhook - mount before tRPC so /api/maya/* is handled here
 // ---------------------------------------------------------------------------
 app.route("/api/maya", createMayaWebhookRouter());
 
@@ -230,7 +230,7 @@ app.all("/api/trpc/*", trpcBodyLimit, async (c) =>
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 // ---------------------------------------------------------------------------
-// SPA fallback — no external static files, just serve index.html
+// SPA fallback - no external static files, just serve index.html
 // ---------------------------------------------------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.resolve(__dirname, "./public");
@@ -256,7 +256,8 @@ app.notFound((c) => {
 // ---------------------------------------------------------------------------
 // Production bootstrap
 // ---------------------------------------------------------------------------
-if (env.isProduction) {
+// On Vercel (serverless), skip TCP server. On Railway/VPS, start the Node server.
+if (env.isProduction && !process.env.VERCEL) {
   if (!loadIndex()) {
     throw new Error(
       `Client build not found at ${CLIENT_DIST}. Run the client build before starting the server.`,
