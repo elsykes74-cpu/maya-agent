@@ -11,23 +11,38 @@ export interface TwilioCallResult {
   status: string;
 }
 
+type TwilioCredential = {
+  label: string;
+  user: string;
+  secret: string;
+};
+
 export function getTwilioEnv() {
   const accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
   const apiKey = process.env.TWILIO_API_KEY ?? "";
   const apiSecret = process.env.TWILIO_API_SECRET ?? "";
   const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
 
+  const credentials: TwilioCredential[] = [];
+  if (apiKey && apiSecret) {
+    credentials.push({ label: "api-key", user: apiKey, secret: apiSecret });
+  }
+  if (accountSid && (authToken || apiSecret)) {
+    credentials.push({ label: "account-token", user: accountSid, secret: authToken || apiSecret });
+  }
+
   return {
     accountSid,
-    authUser: apiKey || accountSid,
-    authSecret: apiSecret || authToken,
+    credentials,
+    authUser: credentials[0]?.user ?? "",
+    authSecret: credentials[0]?.secret ?? "",
     fromNumber: process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "",
   };
 }
 
 export function isTwilioConfigured(): boolean {
-  const { accountSid, authUser, authSecret, fromNumber } = getTwilioEnv();
-  return !!(accountSid && authUser && authSecret && fromNumber);
+  const { accountSid, credentials, fromNumber } = getTwilioEnv();
+  return !!(accountSid && credentials.length && fromNumber);
 }
 
 function normalizePhoneNumber(value: string): string {
@@ -47,14 +62,28 @@ function resolveAppUrl(appUrl: string): string {
   return appUrl.replace(/\/$/, "");
 }
 
+async function postTwilioCall(accountSid: string, credential: TwilioCredential, body: URLSearchParams) {
+  return fetch(
+    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${Buffer.from(`${credential.user}:${credential.secret}`).toString("base64")}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    }
+  );
+}
+
 export async function placeTwilioOutboundCall(opts: {
   to: string;
   name: string;
   address: string;
   appUrl: string;
 }): Promise<TwilioCallResult | null> {
-  const { accountSid, authUser, authSecret, fromNumber } = getTwilioEnv();
-  if (!accountSid || !authUser || !authSecret || !fromNumber) {
+  const { accountSid, credentials, fromNumber } = getTwilioEnv();
+  if (!accountSid || !credentials.length || !fromNumber) {
     console.error("[twilio] Missing credentials: set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_API_SECRET, and TWILIO_FROM_NUMBER or TWILIO_PHONE_NUMBER");
     return null;
   }
@@ -75,26 +104,18 @@ export async function placeTwilioOutboundCall(opts: {
   });
 
   try {
-    const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls.json`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${authUser}:${authSecret}`).toString("base64")}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: body.toString(),
+    for (const credential of credentials) {
+      const res = await postTwilioCall(accountSid, credential, body);
+      if (res.ok) {
+        const data: any = await res.json();
+        return { sid: data.sid, status: data.status };
       }
-    );
 
-    if (!res.ok) {
       const err = await res.text();
-      console.error("[twilio] outbound call error:", res.status, err);
-      return null;
+      console.error("[twilio] outbound call error:", credential.label, res.status, err);
+      if (res.status !== 401) return null;
     }
-
-    const data: any = await res.json();
-    return { sid: data.sid, status: data.status };
+    return null;
   } catch (err) {
     console.error("[twilio] outbound call exception:", err);
     return null;
