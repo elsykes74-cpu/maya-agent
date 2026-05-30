@@ -22,6 +22,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
+import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Session, Paths } from "../contracts/constants";
 import {
@@ -208,6 +209,11 @@ app.get("/__env-debug", async (c) => {
 
 // Kimi OAuth callback
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
+
+// ---------------------------------------------------------------------------
+// Maya Twilio webhook — mount before tRPC so /api/maya/* is handled here
+// ---------------------------------------------------------------------------
+app.route("/api/maya", createMayaWebhookRouter());
 
 // ---------------------------------------------------------------------------
 // tRPC
