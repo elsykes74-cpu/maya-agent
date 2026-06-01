@@ -314,6 +314,62 @@ app.get("/api/db/health", async (c) => {
 	}
 });
 
+// ── One-tap bot setup (migration + webhook registration) ──────────────────
+// Visit: GET /api/admin/setup?secret=<APP_SECRET>
+app.get("/api/admin/setup", async (c) => {
+	const provided = c.req.query("secret") ?? "";
+	const expected = env.appSecret || env.claudeEndpointSecret;
+	if (!expected || provided !== expected) {
+		return c.json({ error: "Unauthorized — add ?secret=YOUR_APP_SECRET to the URL" }, 401);
+	}
+
+	const results: Record<string, string> = {};
+
+	// 1. Run DB migration
+	try {
+		const db = getDb();
+		await db.execute(sql`
+			ALTER TABLE leads
+			  ADD COLUMN IF NOT EXISTS research_summary  TEXT,
+			  ADD COLUMN IF NOT EXISTS call_briefing     TEXT,
+			  ADD COLUMN IF NOT EXISTS distress_signals  TEXT,
+			  ADD COLUMN IF NOT EXISTS web_mentions      TEXT
+		`);
+		await db.execute(sql`
+			CREATE TABLE IF NOT EXISTS follow_up_messages (
+			  id           BIGSERIAL PRIMARY KEY,
+			  lead_id      BIGINT       NOT NULL,
+			  message_type VARCHAR(50)  NOT NULL,
+			  tone         VARCHAR(50)  DEFAULT 'friendly',
+			  content      TEXT         NOT NULL,
+			  created_by   VARCHAR(50)  DEFAULT 'ladyjaye',
+			  created_at   TIMESTAMP    NOT NULL DEFAULT NOW()
+			)
+		`);
+		results.migration = "✅ DB migration applied";
+	} catch (err: any) {
+		results.migration = `❌ Migration failed: ${err?.message ?? err}`;
+	}
+
+	// 2. Register Telegram webhooks
+	const appUrl = (env.appUrl || "").replace(/\/$/, "");
+	if (!appUrl || appUrl.includes("localhost")) {
+		results.webhooks = "⚠️ APP_URL not set — set it to your Vercel domain and re-run";
+	} else {
+		const { registerAllWebhooks } = await import("./telegram-webhook");
+		await registerAllWebhooks(appUrl);
+		results.webhooks = `✅ Webhooks registered to ${appUrl}`;
+	}
+
+	// 3. API key status
+	results.braveApiKey     = env.braveApiKey      ? "✅ set" : "❌ missing — set BRAVE_API_KEY";
+	results.anthropicApiKey = env.anthropicApiKey  ? "✅ set" : "❌ missing — set ANTHROPIC_API_KEY";
+	results.quickkickToken  = process.env.TELEGRAM_BOT_TOKEN         ? "✅ set" : "❌ missing";
+	results.ladyjayeToken   = process.env.TELEGRAM_BOT_TOKEN_LADYJAYE ? "✅ set" : "❌ missing";
+
+	return c.json({ ok: true, ...results }, 200, { "Cache-Control": "no-store" });
+});
+
 // Env-dump endpoint (development / diagnostic only)
 app.get("/__env-debug", async (c) => {
   // Called AFTER module loads so env is populated
