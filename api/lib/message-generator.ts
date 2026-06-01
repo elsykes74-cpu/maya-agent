@@ -126,6 +126,32 @@ export async function generateFollowUpMessage(
   return await callClaude(prompt);
 }
 
+export async function callClaudeConversation(systemPrompt: string, userMessage: string): Promise<string> {
+  if (!env.anthropicApiKey) {
+    return "I need an ANTHROPIC_API_KEY to respond to messages.";
+  }
+  const res = await fetch(ANTHROPIC_API_URL, {
+    method: "POST",
+    headers: {
+      "x-api-key": env.anthropicApiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userMessage }],
+    }),
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Anthropic API error ${res.status}: ${errText}`);
+  }
+  const data = await res.json() as any;
+  return (data?.content?.[0]?.text ?? "").trim();
+}
+
 export async function rewriteMessage(originalText: string, tone: MessageTone): Promise<string> {
   if (!env.anthropicApiKey) {
     return originalText;

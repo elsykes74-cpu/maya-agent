@@ -16,8 +16,8 @@ import {
   generateOutreachAngle,
 } from "./lib/lead-scorer";
 import { env } from "./lib/env";
-import { handleQuickKickCommand } from "./bots/quickkick";
-import { handleLadyJayeCommand } from "./bots/ladyjaye";
+import { handleQuickKickCommand, handleQuickKickNaturalLanguage } from "./bots/quickkick";
+import { handleLadyJayeCommand, handleLadyJayeNaturalLanguage } from "./bots/ladyjaye";
 
 export const telegramApp = new Hono();
 
@@ -91,7 +91,16 @@ async function dispatchCommand(
       }
       break;
     default:
-      await send("Unknown command. Type /help for available commands.");
+      if (!cmd.startsWith("/")) {
+        const fullText = parts.join(" ");
+        if (botName === "ladyjaye") {
+          await handleLadyJayeNaturalLanguage(chatId, fullText, token);
+        } else {
+          await handleQuickKickNaturalLanguage(chatId, fullText, token);
+        }
+      } else {
+        await send("Unknown command. Type /help for available commands.");
+      }
   }
 }
 

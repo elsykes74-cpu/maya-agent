@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { leads } from "../../db/schema";
 import { sendMessage } from "../lib/telegram";
-import { generateFollowUpMessage, rewriteMessage } from "../lib/message-generator";
+import { generateFollowUpMessage, rewriteMessage, callClaudeConversation } from "../lib/message-generator";
 import { saveFollowUpMessage, getFollowUpHistory } from "../lib/crm-saver";
 import type { MessageTone, MessageType } from "../lib/message-generator";
 
@@ -122,6 +122,13 @@ async function handleHistory(chatId: string, parts: string[], token: string): Pr
   }
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+const LADYJAYE_SYSTEM = `You are LadyJayeBot, a real estate outreach and messaging specialist for a wholesale investor in Western Massachusetts. You help write SMS messages, emails, voicemail scripts, follow-up content, and provide messaging strategy and advice. Keep responses concise and Telegram-friendly (plain text, short paragraphs). For generating messages for specific leads, remind users of: /sms [id], /email [id], /voicemail [id], /followup [id], /rewrite [tone] [message].`;
+
+export async function handleLadyJayeNaturalLanguage(chatId: string, text: string, token: string): Promise<void> {
+  const response = await callClaudeConversation(LADYJAYE_SYSTEM, text);
+  await sendMessage(chatId, response, { token } as any);
 }
 
 export async function handleLadyJayeCommand(

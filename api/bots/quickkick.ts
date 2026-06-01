@@ -3,9 +3,10 @@ import { getDb } from "../queries/connection";
 import { leads } from "../../db/schema";
 import { sendMessage } from "../lib/telegram";
 import { computeLeadScore, generateCallOpening, generateOutreachAngle, scoreToMotivation, scoreToPriorityLabel } from "../lib/lead-scorer";
-import { researchLead } from "../lib/brave-search";
+import { braveSearch, researchLead } from "../lib/brave-search";
 import { formatScoreBreakdown, getMotivationFlags } from "../lib/telegram";
 import { saveResearchToLead } from "../lib/crm-saver";
+import { callClaudeConversation } from "../lib/message-generator";
 
 function getTelegramFlags(lead: any): string[] {
   return getMotivationFlags(lead);
@@ -194,6 +195,33 @@ async function handleLeadStatus(chatId: string, parts: string[], token: string):
   msg += `💬 <b>SMS Count:</b> ${lead.smsCount ?? 0}\n`;
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+const QUICKKICK_SYSTEM = `You are QuickKickBot, a real estate lead research and intelligence assistant for a wholesale investor in Western Massachusetts. You help with property research, comparable sales, distress signals, lead scoring, and outreach strategy. Keep responses concise and Telegram-friendly (plain text, short paragraphs). Remind users they can use /researchlead, /scorelead, /callbrief, /leadstatus, /hot, /warm, /leads, /digest for specific tasks.`;
+
+const RESEARCH_KEYWORDS = ["sale", "sold", "foreclos", "price", "comp", "neighborhood", "area", "blvd", "street", "ave", " rd ", " rd,", "lane", "court", "drive", "propert", "listing", "market", "home", "house", "sqft", "bedroom", "bath", "zestimate", "zillow", "realtor", "redfin", "mls"];
+
+function looksLikeResearchQuery(text: string): boolean {
+  const lower = text.toLowerCase();
+  return RESEARCH_KEYWORDS.some((k) => lower.includes(k));
+}
+
+export async function handleQuickKickNaturalLanguage(chatId: string, text: string, token: string): Promise<void> {
+  let contextMessage = text;
+
+  if (looksLikeResearchQuery(text)) {
+    const results = await braveSearch(`${text} Western Massachusetts real estate`, 5);
+    if (results.length > 0) {
+      const snippets = results
+        .slice(0, 3)
+        .map((r) => `${r.title}: ${r.description}`)
+        .join("\n");
+      contextMessage = `User question: ${text}\n\nSearch results:\n${snippets}`;
+    }
+  }
+
+  const response = await callClaudeConversation(QUICKKICK_SYSTEM, contextMessage);
+  await sendMessage(chatId, response, { token } as any);
 }
 
 export async function handleQuickKickCommand(
