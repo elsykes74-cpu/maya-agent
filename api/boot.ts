@@ -405,6 +405,35 @@ app.get("/__env-debug", async (c) => {
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 
 // ---------------------------------------------------------------------------
+// Twilio inbound call webhook — returns TwiML that connects to the VAPI assistant
+// Set this URL as the webhook for your Twilio number's "A call comes in" handler
+// ---------------------------------------------------------------------------
+app.post("/api/twilio/voice", async (c) => {
+	const { getCallingConfig } = await import("./lib/vapi");
+	const config = await getCallingConfig().catch(() => null);
+	const assistantId = config?.assistantId || process.env.VAPI_ASSISTANT_ID || "8f0c5749-74f5-4757-8377-10e10f47dd25";
+	const appUrl = (env.appUrl || "").replace(/\/$/, "");
+
+	// Connect the call to VAPI via SIP
+	// VAPI exposes a SIP endpoint per assistant: sip.vapi.ai
+	const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Sip>sip:${assistantId}@sip.vapi.ai</Sip>
+  </Connect>
+</Response>`;
+
+	return c.text(twiml, 200, { "Content-Type": "text/xml" });
+});
+
+// Twilio call status callback
+app.post("/api/twilio/status", async (c) => {
+	const body = await c.req.parseBody().catch(() => ({}));
+	console.log("[twilio/status]", body);
+	return c.text("ok");
+});
+
+// ---------------------------------------------------------------------------
 // Telegram webhook
 // ---------------------------------------------------------------------------
 app.route("/api/telegram", telegramApp);

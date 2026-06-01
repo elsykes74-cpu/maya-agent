@@ -7,6 +7,7 @@ import { braveSearch, researchLead } from "../lib/brave-search";
 import { formatScoreBreakdown, getMotivationFlags } from "../lib/telegram";
 import { saveResearchToLead } from "../lib/crm-saver";
 import { callClaudeConversation } from "../lib/message-generator";
+import { createVapiCall, scrubPhone, getCallingConfig } from "../lib/vapi";
 
 function getTelegramFlags(lead: any): string[] {
   return getMotivationFlags(lead);
@@ -19,9 +20,56 @@ function quickKickHelp(): string {
     `/scorelead [id] — Compute & display lead score\n` +
     `/callbrief [id] — 30-sec call briefing + opening line\n` +
     `/leadstatus [id] — Full lead status snapshot\n` +
+    `/callnow [id] — Dial lead with AI agent (VAPI)\n` +
     `/help — Show this menu\n\n` +
     `Also available: /hot /warm /leads /digest /outreach /score`
   );
+}
+
+async function handleCallNow(chatId: string, parts: string[], token: string): Promise<void> {
+  const id = parts[1] ? parseInt(parts[1], 10) : NaN;
+  if (isNaN(id)) {
+    await sendMessage(chatId, "Usage: /callnow [lead_id]\nExample: /callnow 42", { token } as any);
+    return;
+  }
+
+  const db = getDb();
+  const lead = await db.query.leads.findFirst({ where: eq(leads.id, id) });
+  if (!lead) {
+    await sendMessage(chatId, `❌ Lead #${id} not found.`, { token } as any);
+    return;
+  }
+  if (!lead.phone) {
+    await sendMessage(chatId, `❌ Lead #${id} (${lead.sellerName}) has no phone number.`, { token } as any);
+    return;
+  }
+
+  const config = await getCallingConfig();
+  if (!config?.apiKey) {
+    await sendMessage(chatId, "❌ VAPI not configured. Add VAPI_API_KEY in Calling Config settings.", { token } as any);
+    return;
+  }
+
+  const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+  if (!scrub.pass) {
+    await sendMessage(chatId, `🚫 Call blocked: ${scrub.reason}`, { token } as any);
+    return;
+  }
+
+  await sendMessage(chatId, `📞 Dialing <b>${lead.sellerName}</b> (${lead.phone}) with AI agent…`, { parse_mode: "HTML", token } as any);
+
+  const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName);
+  if (!vapiCall) {
+    await sendMessage(chatId, "❌ VAPI call failed to start. Check your VAPI API key and phone number ID in settings.", { token } as any);
+    return;
+  }
+
+  let msg = `✅ <b>AI Agent Dialing</b>\n`;
+  msg += `Lead: #${id} ${lead.sellerName}\n`;
+  msg += `Phone: ${lead.phone}\n`;
+  msg += `VAPI Call ID: <code>${vapiCall.id}</code>\n`;
+  msg += `Status: ${vapiCall.status}`;
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
 }
 
 async function handleResearchLead(chatId: string, parts: string[], token: string): Promise<void> {
@@ -243,6 +291,9 @@ export async function handleQuickKickCommand(
         break;
       case "/leadstatus":
         await handleLeadStatus(chatId, parts, token);
+        break;
+      case "/callnow":
+        await handleCallNow(chatId, parts, token);
         break;
       case "/help":
         await sendMessage(chatId, quickKickHelp(), { parse_mode: "HTML", token } as any);

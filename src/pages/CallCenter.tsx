@@ -31,6 +31,18 @@ export default function CallCenter() {
   )
   const { data: objections } = trpc.aiConfig.objections.useQuery()
   const createCall = trpc.calls.create.useMutation({ onSuccess: () => { refetchCalls(); setCallDialogOpen(false) } })
+  const [dialStatus, setDialStatus] = useState<string | null>(null)
+  const dialLead = trpc.calls.dial.useMutation({
+    onSuccess: (data) => {
+      setDialStatus(`✅ AI agent dialing ${selectedLead?.sellerName}… (call ID: ${data.callId})`)
+      setTimeout(() => setDialStatus(null), 8000)
+      refetchCalls()
+    },
+    onError: (err) => {
+      setDialStatus(`❌ ${err.message}`)
+      setTimeout(() => setDialStatus(null), 6000)
+    },
+  })
 
   const selectedLead = leadsData?.items?.find((l: any) => l.id === selectedLeadId)
 
@@ -106,7 +118,16 @@ export default function CallCenter() {
             </Badge>
           )}
         </div>
-        <Dialog open={callDialogOpen} onOpenChange={setCallDialogOpen}>
+        <div className="flex gap-2 flex-wrap">
+          <Button
+            disabled={!selectedLeadId || dialLead.isPending}
+            onClick={() => selectedLeadId && dialLead.mutate({ leadId: selectedLeadId })}
+            className="bg-blue-600 hover:bg-blue-700"
+          >
+            <Phone className="w-4 h-4 mr-2" />
+            {dialLead.isPending ? 'Connecting…' : 'Call with AI Agent'}
+          </Button>
+          <Dialog open={callDialogOpen} onOpenChange={setCallDialogOpen}>
           <DialogTrigger asChild>
             <Button disabled={!selectedLeadId} className="bg-emerald-600 hover:bg-emerald-700">
               <Phone className="w-4 h-4 mr-2" /> Log Call
@@ -185,7 +206,13 @@ export default function CallCenter() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
+      {dialStatus && (
+        <div className={`px-4 py-2 rounded-lg text-sm font-medium ${dialStatus.startsWith('✅') ? 'bg-blue-50 text-blue-800 dark:bg-blue-900/20 dark:text-blue-200' : 'bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-200'}`}>
+          {dialStatus}
+        </div>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="grid w-full grid-cols-3 lg:w-[400px]">
