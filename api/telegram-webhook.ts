@@ -7,8 +7,6 @@ import {
   formatLeadCard,
   formatDailyDigest,
   formatScoreBreakdown,
-  helpText,
-  helpTextLadyJaye,
   registerWebhook,
   getWebhookInfo,
 } from "./lib/telegram";
@@ -37,7 +35,12 @@ async function dispatchCommand(
   switch (cmd) {
     case "/start":
     case "/help":
-      await send(botName === "ladyjaye" ? helpTextLadyJaye() : helpText(), { parse_mode: "HTML" });
+      // Route to each bot's own handler so /help lists all bot-specific commands.
+      if (botName === "ladyjaye") {
+        await handleLadyJayeCommand(chatId, cmd, parts, token);
+      } else {
+        await handleQuickKickCommand(chatId, cmd, parts, token);
+      }
       break;
     case "/hot":
       await handleHotLeads(chatId, token);
@@ -137,13 +140,15 @@ telegramApp.post("/ladyjaye", async (c) => {
 export async function registerAllWebhooks(appUrl: string): Promise<void> {
   const base = appUrl.replace(/\/$/, "");
 
-  if (env.telegramBotToken) {
+  // Only register when the operator explicitly set the token — env.telegramBotToken
+  // has a hardcoded fallback that must not be used to claim a webhook.
+  if (process.env.TELEGRAM_BOT_TOKEN) {
     const url = `${base}/api/telegram/webhook`;
     const ok = await registerWebhook(env.telegramBotToken, url);
     console.log(`[telegram] Quickkick webhook ${ok ? "registered" : "FAILED"}: ${url}`);
   }
 
-  if (env.telegramBotTokenLadyJaye) {
+  if (process.env.TELEGRAM_BOT_TOKEN_LADYJAYE) {
     const url = `${base}/api/telegram/ladyjaye`;
     const ok = await registerWebhook(env.telegramBotTokenLadyJaye, url);
     console.log(`[telegram] LadyJaye webhook ${ok ? "registered" : "FAILED"}: ${url}`);
