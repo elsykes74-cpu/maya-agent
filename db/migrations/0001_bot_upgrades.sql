@@ -5,7 +5,8 @@ ALTER TABLE leads
   ADD COLUMN IF NOT EXISTS research_summary  TEXT,
   ADD COLUMN IF NOT EXISTS call_briefing     TEXT,
   ADD COLUMN IF NOT EXISTS distress_signals  TEXT,
-  ADD COLUMN IF NOT EXISTS web_mentions      TEXT;
+  ADD COLUMN IF NOT EXISTS web_mentions      TEXT,
+  ADD COLUMN IF NOT EXISTS created_by        BIGINT;
 
 CREATE TABLE IF NOT EXISTS follow_up_messages (
   id           BIGSERIAL PRIMARY KEY,

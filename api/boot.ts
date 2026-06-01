@@ -333,7 +333,8 @@ app.get("/api/admin/setup", async (c) => {
 			  ADD COLUMN IF NOT EXISTS research_summary  TEXT,
 			  ADD COLUMN IF NOT EXISTS call_briefing     TEXT,
 			  ADD COLUMN IF NOT EXISTS distress_signals  TEXT,
-			  ADD COLUMN IF NOT EXISTS web_mentions      TEXT
+			  ADD COLUMN IF NOT EXISTS web_mentions      TEXT,
+			  ADD COLUMN IF NOT EXISTS created_by        BIGINT
 		`);
 		await db.execute(sql`
 			CREATE TABLE IF NOT EXISTS follow_up_messages (
