@@ -2,7 +2,7 @@ import { relations } from "drizzle-orm";
 import {
   users, leads, calls, smsLogs, appointments, leadSources, leadProfiles,
   dncList, campaigns, campaignLeads, phoneValidation, scrubLists, scrubListEntries,
-  callQueue
+  callQueue, followUpMessages
 } from "./schema";
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -27,6 +27,11 @@ export const leadsRelations = relations(leads, ({ one, many }) => ({
   appointment: one(appointments, { fields: [leads.id], references: [appointments.leadId] }),
   phoneValidations: many(phoneValidation),
   campaignLeads: many(campaignLeads),
+  followUpMessages: many(followUpMessages),
+}));
+
+export const followUpMessagesRelations = relations(followUpMessages, ({ one }) => ({
+  lead: one(leads, { fields: [followUpMessages.leadId], references: [leads.id] }),
 }));
 
 export const callsRelations = relations(calls, ({ one }) => ({

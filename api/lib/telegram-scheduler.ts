@@ -43,12 +43,16 @@ export async function sendDailyDigestNow(): Promise<void> {
     total,
   };
 
-  await sendAlert(formatDailyDigest(stats, hotLeads, warmLeads));
+  const digest = formatDailyDigest(stats, hotLeads, warmLeads);
+  await sendAlert(digest, "quickkick");
+  await sendAlert(digest, "ladyjaye");
 }
 
 export function startDailyDigestScheduler(): void {
-  if (!env.telegramChatId || !env.telegramBotToken) {
-    console.log("[telegram-scheduler] Skipped — TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set");
+  const hasAnyBot = (env.telegramBotToken && env.telegramChatId) ||
+    (env.telegramBotTokenLadyJaye && env.telegramChatIdLadyJaye);
+  if (!hasAnyBot) {
+    console.log("[telegram-scheduler] Skipped — no bot tokens/chat IDs configured");
     return;
   }
 

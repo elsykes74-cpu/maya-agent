@@ -26,6 +26,7 @@ import { env, validateEnv } from "./lib/env";
 import { getDb } from "./queries/connection";
 import { telegramApp } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
+import { registerAllWebhooks } from "./telegram-webhook";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Session, Paths } from "../contracts/constants";
 import {
@@ -88,6 +89,12 @@ const requireGoogleConfigured = (c: Context) => {
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
+// Models that require paid usage credits (1M context tier) — block these by default
+const BLOCKED_MODELS = new Set([
+	"claude-sonnet-4-5-20250929",
+	"claude-opus-4-8",
+	"claude-opus-4-5-20250929",
+]);
 
 type ClaudeMessage = {
 	role: "user" | "assistant";
@@ -223,7 +230,7 @@ app.get("/api/claude/health", (c) =>
 			ok: true,
 			configured: Boolean(env.anthropicApiKey),
 			protected: Boolean(env.claudeEndpointSecret || env.appSecret),
-			model: process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL,
+			model: BLOCKED_MODELS.has(process.env.CLAUDE_MODEL ?? "") ? DEFAULT_CLAUDE_MODEL : (process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL),
 		},
 		200,
 		{ "Cache-Control": "no-store" },
@@ -251,8 +258,10 @@ app.post("/api/claude/messages", async (c) => {
 	}
 
 	const maxTokens = Math.min(Math.max(Number(body.maxTokens ?? 1024), 1), 4096);
+	const requestedModel = body.model || process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL;
+	const resolvedModel = BLOCKED_MODELS.has(requestedModel) ? DEFAULT_CLAUDE_MODEL : requestedModel;
 	const payload = {
-		model: body.model || process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL,
+		model: resolvedModel,
 		max_tokens: maxTokens,
 		temperature: typeof body.temperature === "number" ? body.temperature : undefined,
 		system: body.system || undefined,
@@ -398,6 +407,12 @@ if (env.isProduction && !process.env.VERCEL) {
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
       startDailyDigestScheduler();
+      // Auto-register Telegram webhooks so bots don't go silent after redeploys
+      if (env.appUrl && !env.appUrl.includes("localhost")) {
+        registerAllWebhooks(env.appUrl).catch((err) =>
+          console.error("[boot] webhook registration error:", err)
+        );
+      }
     });
   } catch (err) {
     console.error("[boot] FATAL:", err);

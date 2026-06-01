@@ -194,6 +194,12 @@ export const leads = pgTable("leads", {
   outreachAngle: text("outreach_angle"),
   confidenceLevel: confidenceLevelEnum("confidence_level").default("medium"),
   dateFound: timestamp("date_found"),
+
+  // ── Research & Messaging fields ──────────────────────────────────────────────
+  researchSummary: text("research_summary"),
+  callBriefing: text("call_briefing"),
+  distressSignals: text("distress_signals"),
+  webMentions: text("web_mentions"),
   // ────────────────────────────────────────────────────────────────────────────
 
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -203,6 +209,17 @@ export const leads = pgTable("leads", {
 
 export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
+
+export const followUpMessages = pgTable("follow_up_messages", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  messageType: varchar("message_type", { length: 50 }).notNull(),
+  tone: varchar("tone", { length: 50 }).default("friendly"),
+  content: text("content").notNull(),
+  createdBy: varchar("created_by", { length: 50 }).default("ladyjaye"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type FollowUpMessage = typeof followUpMessages.$inferSelect;
 
 export const calls = pgTable("calls", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
