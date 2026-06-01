@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
-import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
+import { placeTwilioOutboundCall } from "../lib/twilio";
 import { env } from "../lib/env";
 
 const VOICES = [
@@ -27,13 +27,6 @@ export const mayaRouter = createRouter({
       voice: z.string().default("Polly.Joanna"),
     }))
     .mutation(async ({ input }) => {
-      if (!isTwilioConfigured()) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Twilio is not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_API_SECRET, and TWILIO_FROM_NUMBER or TWILIO_PHONE_NUMBER in Vercel.",
-        });
-      }
-
       const result = await placeTwilioOutboundCall({
         to: input.to,
         name: input.name,
@@ -41,10 +34,10 @@ export const mayaRouter = createRouter({
         appUrl: env.appUrl,
       });
 
-      if (!result?.sid) {
+      if (!result.sid) {
         throw new TRPCError({
-          code: "BAD_GATEWAY",
-          message: "Twilio call failed. Check the Twilio credentials, sender phone number, and that the destination number is allowed by the Twilio account.",
+          code: result.error?.includes("Missing env vars") ? "PRECONDITION_FAILED" : "BAD_GATEWAY",
+          message: result.error ?? "Twilio call failed.",
         });
       }
 

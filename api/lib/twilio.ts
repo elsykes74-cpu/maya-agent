@@ -9,6 +9,7 @@ import { Buffer } from "node:buffer";
 export interface TwilioCallResult {
   sid: string;
   status: string;
+  error?: string;
 }
 
 type TwilioCredential = {
@@ -81,11 +82,15 @@ export async function placeTwilioOutboundCall(opts: {
   name: string;
   address: string;
   appUrl: string;
-}): Promise<TwilioCallResult | null> {
+}): Promise<TwilioCallResult> {
   const { accountSid, credentials, fromNumber } = getTwilioEnv();
   if (!accountSid || !credentials.length || !fromNumber) {
-    console.error("[twilio] Missing credentials: set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN or TWILIO_API_SECRET, and TWILIO_FROM_NUMBER or TWILIO_PHONE_NUMBER");
-    return null;
+    const missing = [
+      !accountSid && "TWILIO_ACCOUNT_SID",
+      !credentials.length && "TWILIO_AUTH_TOKEN (or TWILIO_API_KEY + TWILIO_API_SECRET)",
+      !fromNumber && "TWILIO_FROM_NUMBER",
+    ].filter(Boolean).join(", ");
+    return { sid: "", status: "failed", error: `Missing env vars: ${missing}` };
   }
 
   const baseUrl = resolveAppUrl(opts.appUrl);
@@ -111,13 +116,24 @@ export async function placeTwilioOutboundCall(opts: {
         return { sid: data.sid, status: data.status };
       }
 
-      const err = await res.text();
-      console.error("[twilio] outbound call error:", credential.label, res.status, err);
-      if (res.status !== 401) return null;
+      const errText = await res.text();
+      console.error("[twilio] outbound call error:", credential.label, res.status, errText);
+
+      let friendlyError = `Twilio error ${res.status}`;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.message) friendlyError = errJson.message;
+        if (errJson.code === 21219) friendlyError = "The destination number is not verified. Twilio trial accounts can only call verified numbers. Upgrade your Twilio account or verify the number at twilio.com/console.";
+        if (errJson.code === 21211) friendlyError = "Invalid 'To' phone number format. Use E.164 format like +14135551234.";
+        if (errJson.code === 21212) friendlyError = "Invalid 'From' phone number. Check TWILIO_FROM_NUMBER in your Vercel env vars.";
+        if (errJson.code === 20003) friendlyError = "Twilio authentication failed. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in Vercel.";
+      } catch { /* errText not JSON */ }
+
+      if (res.status !== 401) return { sid: "", status: "failed", error: friendlyError };
     }
-    return null;
-  } catch (err) {
+    return { sid: "", status: "failed", error: "Twilio authentication failed for all credentials." };
+  } catch (err: any) {
     console.error("[twilio] outbound call exception:", err);
-    return null;
+    return { sid: "", status: "failed", error: err?.message ?? "Network error reaching Twilio." };
   }
 }

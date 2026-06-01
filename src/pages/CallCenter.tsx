@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio } from 'lucide-react';
+import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
 import { loadLeads, loadCalls, addCallRecord } from '@/lib/persistence';
 import type { CallRecord } from '@/lib/persistence';
@@ -76,6 +76,8 @@ export default function CallCenter() {
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+  const [twilioMissing, setTwilioMissing] = useState(false);
+
   const placeCall = useCallback(async (phone: string, name = '', address = '') => {
     setError(null);
     setStage('connecting');
@@ -86,8 +88,12 @@ export default function CallCenter() {
       setStage('ringing');
       setTimeout(() => { setStage('in_progress'); startTimer(); }, 3000);
     } catch (e: any) {
-      setError(e.message || 'Call failed');
+      const msg: string = e.message || 'Call failed';
+      setError(msg);
       setStage('failed');
+      if (msg.toLowerCase().includes('missing env') || msg.toLowerCase().includes('not configured')) {
+        setTwilioMissing(true);
+      }
     }
   }, [placeCallMut, selectedVoice]);
 
@@ -194,6 +200,8 @@ export default function CallCenter() {
         </NeoTile>
       )}
 
+      {twilioMissing && <TwilioSetupCard />}
+
       {/* Test Call with Maya */}
       <NeoTile style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
@@ -234,9 +242,7 @@ export default function CallCenter() {
           ))}
         </div>
 
-        {error && (
-          <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 12, background: C.redS, color: C.red, fontSize: 13, fontWeight: 600 }}>{error}</div>
-        )}
+        {error && <CallError error={error} onDismiss={() => setError(null)} />}
 
         <button
           onClick={() => isCallActive ? hangUp() : placeCall(number)}
@@ -307,6 +313,86 @@ export default function CallCenter() {
         ))
       )}
       <div style={{ height: 20 }} />
+    </div>
+  );
+}
+
+const TWILIO_ENV_VARS = [
+  { name: 'TWILIO_ACCOUNT_SID', hint: 'Starts with AC… — found on your Twilio Console dashboard' },
+  { name: 'TWILIO_AUTH_TOKEN', hint: 'Found next to your Account SID on the Twilio Console' },
+  { name: 'TWILIO_FROM_NUMBER', hint: 'E.164 format, e.g. +14135551234 — your purchased Twilio number' },
+  { name: 'APP_URL', hint: 'Your Vercel deployment URL, e.g. https://maya-agent-xxx.vercel.app' },
+];
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', borderRadius: 6, color: copied ? C.green : C.muted, display: 'flex', alignItems: 'center' }}
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </button>
+  );
+}
+
+function TwilioSetupCard() {
+  return (
+    <NeoTile style={{ marginBottom: 20, border: `1px solid ${C.orangeL}` }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+        <NeoIcon bg={C.orangeS} size={40} round={14}>
+          <AlertTriangle size={18} color={C.orange} strokeWidth={2} />
+        </NeoIcon>
+        <div>
+          <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>Twilio Setup Required</p>
+          <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0' }}>Add these env vars in Vercel → Settings → Environment Variables</p>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {TWILIO_ENV_VARS.map(v => (
+          <div key={v.name} className="neo-pressed-sm" style={{ padding: '10px 12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13, fontWeight: 700, color: C.text }}>{v.name}</span>
+              <CopyButton text={v.name} />
+            </div>
+            <p style={{ fontSize: 12, color: C.muted, margin: '3px 0 0', fontWeight: 500 }}>{v.hint}</p>
+          </div>
+        ))}
+      </div>
+      <a
+        href="https://console.twilio.com"
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, padding: '10px 0', borderRadius: 14, background: C.orangeS, color: C.orange, fontSize: 14, fontWeight: 700, textDecoration: 'none' }}
+      >
+        Open Twilio Console <ExternalLink size={14} />
+      </a>
+    </NeoTile>
+  );
+}
+
+function CallError({ error, onDismiss }: { error: string; onDismiss: () => void }) {
+  const isSetup = error.toLowerCase().includes('missing env') || error.toLowerCase().includes('not configured');
+  const isTrialRestriction = error.toLowerCase().includes('not verified') || error.toLowerCase().includes('trial');
+  const isAuth = error.toLowerCase().includes('authentication failed') || error.toLowerCase().includes('twilio_auth');
+
+  return (
+    <div style={{ marginBottom: 14, borderRadius: 14, background: C.redS, border: `1px solid ${C.redL}`, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px' }}>
+        <AlertTriangle size={16} color={C.red} style={{ flexShrink: 0, marginTop: 1 }} />
+        <p style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.red, margin: 0, lineHeight: 1.5 }}>{error}</p>
+        <button onClick={onDismiss} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.red, padding: 0, fontSize: 16, lineHeight: 1, flexShrink: 0 }}>×</button>
+      </div>
+      {(isSetup || isAuth) && (
+        <div style={{ padding: '0 14px 12px', fontSize: 12, color: C.red, fontWeight: 500 }}>
+          Add <strong>TWILIO_ACCOUNT_SID</strong>, <strong>TWILIO_AUTH_TOKEN</strong>, and <strong>TWILIO_FROM_NUMBER</strong> in Vercel → Settings → Environment Variables, then redeploy.
+        </div>
+      )}
+      {isTrialRestriction && (
+        <div style={{ padding: '0 14px 12px', fontSize: 12, color: C.red, fontWeight: 500 }}>
+          Go to <strong>twilio.com/console</strong> → Verified Caller IDs to add this number, or upgrade from a trial account.
+        </div>
+      )}
     </div>
   );
 }
