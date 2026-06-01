@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { PhoneCall, Bot, Shield, Zap } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { PhoneCall, Bot, Shield, Zap, Sparkles } from 'lucide-react';
 
-function getKimiOAuthUrl() {
+const kimiConfigured = !!(import.meta.env.VITE_KIMI_AUTH_URL && import.meta.env.VITE_APP_ID);
+
+function getKimiOAuthUrl(): string {
   const kimiAuthUrl = import.meta.env.VITE_KIMI_AUTH_URL;
   const appID = import.meta.env.VITE_APP_ID;
   const redirectUri = `${window.location.origin}/api/oauth/callback`;
@@ -16,28 +19,52 @@ function getKimiOAuthUrl() {
 }
 
 export default function Login() {
-  const [loading, setLoading] = useState<'kimi' | 'google' | null>(null);
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState<'kimi' | 'google' | 'demo' | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const handleKimiLogin = () => {
-    setLoading('kimi');
-    window.location.href = getKimiOAuthUrl();
+    setError(null);
+    if (!kimiConfigured) {
+      setError('Kimi OAuth is not configured on this deployment. Use Demo Mode or add VITE_KIMI_AUTH_URL and VITE_APP_ID to your environment variables.');
+      return;
+    }
+    try {
+      setLoading('kimi');
+      window.location.href = getKimiOAuthUrl();
+    } catch (e: any) {
+      setError('Failed to build Kimi OAuth URL: ' + e.message);
+      setLoading(null);
+    }
   };
 
   const handleGoogleLogin = async () => {
+    setError(null);
     setLoading('google');
     try {
       const res = await fetch('/api/auth/google/url');
       const data = await res.json();
-      if (data.authUrl) window.location.href = data.authUrl;
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      } else {
+        setError(data.error || 'Google OAuth is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to your environment variables.');
+        setLoading(null);
+      }
     } catch {
+      setError('Could not reach the server. Please try again.');
       setLoading(null);
     }
+  };
+
+  const handleDemo = () => {
+    setLoading('demo');
+    localStorage.setItem('maya_demo_mode', 'true');
+    navigate('/');
   };
 
   return (
     <div className="app-shell" style={{ background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-warm) 100%)' }}>
       <div className="flex-1 flex flex-col items-center justify-center px-6 -mt-16">
-        {/* App icon */}
         <div
           className="w-24 h-24 rounded-3xl flex items-center justify-center mb-6"
           style={{
@@ -63,6 +90,12 @@ export default function Login() {
       </div>
 
       <div className="px-6 pb-12 space-y-3">
+        {error && (
+          <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: 16, padding: '12px 16px', marginBottom: 4 }}>
+            <p style={{ fontSize: 13, color: '#C53030', margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{error}</p>
+          </div>
+        )}
+
         <button
           onClick={handleKimiLogin}
           disabled={loading !== null}
@@ -84,8 +117,24 @@ export default function Login() {
           )}
         </button>
 
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0' }}>
+          <div style={{ flex: 1, height: 1, background: '#E5E5EA' }} />
+          <span style={{ fontSize: 13, color: '#B8BCC8', fontWeight: 600 }}>or</span>
+          <div style={{ flex: 1, height: 1, background: '#E5E5EA' }} />
+        </div>
+
+        <button
+          onClick={handleDemo}
+          disabled={loading !== null}
+          className="w-full ios-btn disabled:opacity-50"
+          style={{ background: 'linear-gradient(135deg, #8B5CF6, #7C3AED)', color: '#fff', fontSize: 18, padding: '16px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          <Sparkles size={20} />
+          {loading === 'demo' ? 'Loading…' : 'Try Demo Mode'}
+        </button>
+
         <p className="text-center text-[13px] text-[#B8BCC8] pt-2">
-          By signing in, you agree to our Terms of Service
+          Demo mode uses sample data. Sign in for live features.
         </p>
       </div>
     </div>
