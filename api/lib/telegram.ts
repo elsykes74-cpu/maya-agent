@@ -1,18 +1,20 @@
 import { env } from "./env";
 
-const baseUrl = () => `https://api.telegram.org/bot${env.telegramBotToken}`;
+const botUrl = (token: string) => `https://api.telegram.org/bot${token}`;
 
 export async function sendMessage(
   chatId: string,
   text: string,
-  opts: { parse_mode?: "HTML"; disable_web_page_preview?: boolean } = {}
+  opts: { parse_mode?: "HTML"; disable_web_page_preview?: boolean; token?: string; [k: string]: unknown } = {}
 ): Promise<void> {
-  if (!env.telegramBotToken || !chatId) return;
+  const token = opts.token ?? env.telegramBotToken;
+  if (!token || !chatId) return;
+  const { token: _t, ...rest } = opts;
   try {
-    const res = await fetch(`${baseUrl()}/sendMessage`, {
+    const res = await fetch(`${botUrl(token)}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...opts }),
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...rest }),
     });
     if (!res.ok) console.error("[telegram] sendMessage error:", await res.text());
   } catch (err) {
@@ -20,9 +22,39 @@ export async function sendMessage(
   }
 }
 
-export async function sendAlert(text: string): Promise<void> {
-  if (!env.telegramChatId) return;
-  await sendMessage(env.telegramChatId, text, { parse_mode: "HTML" });
+export async function sendAlert(text: string, bot: "quickkick" | "ladyjaye" = "quickkick"): Promise<void> {
+  const token = bot === "ladyjaye" ? env.telegramBotTokenLadyJaye : env.telegramBotToken;
+  const chatId = bot === "ladyjaye" ? env.telegramChatIdLadyJaye : env.telegramChatId;
+  if (!token || !chatId) return;
+  await sendMessage(chatId, text, { parse_mode: "HTML", token });
+}
+
+export async function registerWebhook(token: string, webhookUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${botUrl(token)}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+    });
+    const data = await res.json().catch(() => null) as any;
+    if (!res.ok || !data?.ok) {
+      console.error("[telegram] setWebhook failed:", data);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[telegram] setWebhook fetch error:", err);
+    return false;
+  }
+}
+
+export async function getWebhookInfo(token: string): Promise<any> {
+  try {
+    const res = await fetch(`${botUrl(token)}/getWebhookInfo`);
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
 export function scoreEmoji(score: number): string {
@@ -150,6 +182,20 @@ export function formatDailyDigest(
 export function helpText(): string {
   return (
     `🏠 <b>Western Mass Wholesale Bot — @Quickkickbot</b>\n\n` +
+    `/hot — HOT leads (score 80+) · Call same day\n` +
+    `/warm — WARM leads (60–79) · Call this week\n` +
+    `/leads — Last 5 leads added\n` +
+    `/digest — Full morning digest with stats\n` +
+    `/outreach [id] — Call opening + SMS for a lead\n` +
+    `/score [id] — Score breakdown for a lead\n` +
+    `/help — Show this message\n\n` +
+    `🔔 Automatic alerts fire when a new HOT lead is scored.`
+  );
+}
+
+export function helpTextLadyJaye(): string {
+  return (
+    `💼 <b>Western Mass Wholesale Bot — @LadyJaye</b>\n\n` +
     `/hot — HOT leads (score 80+) · Call same day\n` +
     `/warm — WARM leads (60–79) · Call this week\n` +
     `/leads — Last 5 leads added\n` +

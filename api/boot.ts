@@ -26,6 +26,7 @@ import { env, validateEnv } from "./lib/env";
 import { getDb } from "./queries/connection";
 import { telegramApp } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
+import { registerAllWebhooks } from "./telegram-webhook";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { Session, Paths } from "../contracts/constants";
 import {
@@ -406,6 +407,12 @@ if (env.isProduction && !process.env.VERCEL) {
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
       startDailyDigestScheduler();
+      // Auto-register Telegram webhooks so bots don't go silent after redeploys
+      if (env.appUrl && !env.appUrl.includes("localhost")) {
+        registerAllWebhooks(env.appUrl).catch((err) =>
+          console.error("[boot] webhook registration error:", err)
+        );
+      }
     });
   } catch (err) {
     console.error("[boot] FATAL:", err);

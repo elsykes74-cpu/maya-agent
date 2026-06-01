@@ -98,4 +98,7 @@ export const env = {
   googleClientSecret: soft("GOOGLE_CLIENT_SECRET"),
   telegramBotToken: soft("TELEGRAM_BOT_TOKEN") || "8063610170:AAFvRIccv3tH0U5xjEdqtFYe5Wq_L08OBR0",
   telegramChatId: soft("TELEGRAM_CHAT_ID") || "8693969643",
+  // LadyJaye — second bot
+  telegramBotTokenLadyJaye: soft("TELEGRAM_BOT_TOKEN_LADYJAYE"),
+  telegramChatIdLadyJaye: soft("TELEGRAM_CHAT_ID_LADYJAYE"),
 };
