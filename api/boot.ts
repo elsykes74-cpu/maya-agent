@@ -87,7 +87,7 @@ const requireGoogleConfigured = (c: Context) => {
 };
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5-20250929";
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 
 type ClaudeMessage = {
 	role: "user" | "assistant";
