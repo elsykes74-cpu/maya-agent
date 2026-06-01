@@ -88,7 +88,7 @@ const requireGoogleConfigured = (c: Context) => {
 };
 
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-const DEFAULT_CLAUDE_MODEL = "claude-haiku-4-5-20251001";
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
 // Models that require paid usage credits (1M context tier) — block these by default
 const BLOCKED_MODELS = new Set([
 	"claude-sonnet-4-5-20250929",
