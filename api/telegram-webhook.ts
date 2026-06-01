@@ -18,6 +18,8 @@ import {
   generateOutreachAngle,
 } from "./lib/lead-scorer";
 import { env } from "./lib/env";
+import { handleQuickKickCommand } from "./bots/quickkick";
+import { handleLadyJayeCommand } from "./bots/ladyjaye";
 
 export const telegramApp = new Hono();
 
@@ -61,6 +63,30 @@ async function dispatchCommand(
       else await send("Usage: /score [lead_id]\nExample: /score 42");
       break;
     }
+    // ── QuickKickBot exclusive commands ──────────────────────────────────────
+    case "/researchlead":
+    case "/scorelead":
+    case "/callbrief":
+    case "/leadstatus":
+      if (botName === "quickkick") {
+        await handleQuickKickCommand(chatId, cmd, parts, token);
+      } else {
+        await send("This command is only available on QuickKickBot.");
+      }
+      break;
+    // ── LadyJayeBot exclusive commands ───────────────────────────────────────
+    case "/sms":
+    case "/email":
+    case "/voicemail":
+    case "/followup":
+    case "/rewrite":
+    case "/history":
+      if (botName === "ladyjaye") {
+        await handleLadyJayeCommand(chatId, cmd, parts, token);
+      } else {
+        await send("This command is only available on LadyJayeBot.");
+      }
+      break;
     default:
       await send("Unknown command. Type /help for available commands.");
   }
