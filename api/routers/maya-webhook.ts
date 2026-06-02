@@ -28,8 +28,7 @@ function say(text: string, voice = "Google.en-US-Neural2-F"): string {
 }
 
 function gather(action: string, content: string): string {
-  // 1s pause before Maya speaks + 3s speechTimeout so caller isn't cut off too quickly
-  return `<Gather input="speech" speechTimeout="3" timeout="10" action="${escXml(action)}" method="POST"><Pause length="1"/>${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="2" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
