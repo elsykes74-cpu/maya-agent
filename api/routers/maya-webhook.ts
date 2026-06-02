@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { supabase } from "../lib/supabase";
 import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
+import { elevenLabsTTSStream } from "../lib/elevenlabs";
 
 function getAppUrl(c: Context): string {
   const proto = c.req.header("x-forwarded-proto") ?? "https";
@@ -33,14 +34,25 @@ function respondUrl(appUrl: string, name: string, address: string, voice: string
   return `${appUrl}/api/maya/respond?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`;
 }
 
-async function getSystemPrompt(): Promise<string> {
+interface ElevenLabsConfig { apiKey: string; voiceId: string; }
+
+async function getAIConfig(): Promise<{ systemPrompt: string; elevenlabs: ElevenLabsConfig | null }> {
   const { data } = await supabase
     .from("ai_config")
-    .select("system_prompt")
+    .select("system_prompt, elevenlabs_api_key, elevenlabs_voice_id")
     .order("id")
     .limit(1)
     .single();
-  return data?.system_prompt ?? defaultSystemPrompt;
+  const elevenlabs =
+    data?.elevenlabs_api_key && data?.elevenlabs_voice_id
+      ? { apiKey: data.elevenlabs_api_key, voiceId: data.elevenlabs_voice_id }
+      : null;
+  return { systemPrompt: data?.system_prompt ?? defaultSystemPrompt, elevenlabs };
+}
+
+function playEl(appUrl: string, text: string, apiKey: string, voiceId: string): string {
+  const url = `${appUrl}/api/maya/audio?text=${enc(text)}&vid=${enc(voiceId)}&key=${enc(apiKey)}`;
+  return `<Play>${escXml(url)}</Play>`;
 }
 
 async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
@@ -139,11 +151,14 @@ ${gather(respondUrl(appUrl, "", "", voice), say("Hi there — this is Maya calli
     const answeredBy = (body["AnsweredBy"] as string) ?? "";
     const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
 
+    const { elevenlabs } = await getAIConfig();
+
     if (isMachine) {
       const vm = name
         ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. Give us a call back when you get a chance. Thanks!`
         : `Hi, this is Maya with a quick message about your property. Give us a call back when you get a chance. Thanks!`;
-      return twimlResponse(c, `<Response>${say(vm, voice)}<Hangup/></Response>`);
+      const vmTts = elevenlabs ? playEl(appUrl, vm, elevenlabs.apiKey, elevenlabs.voiceId) : say(vm, voice);
+      return twimlResponse(c, `<Response>${vmTts}<Hangup/></Response>`);
     }
 
     const opener = name
@@ -156,8 +171,10 @@ ${gather(respondUrl(appUrl, "", "", voice), say("Hi there — this is Maya calli
       ], { name, address });
     }
 
+    const openerTts = elevenlabs ? playEl(appUrl, opener, elevenlabs.apiKey, elevenlabs.voiceId) : say(opener, voice);
+
     return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), say(opener, voice))}
+${gather(respondUrl(appUrl, name, address, voice), openerTts)}
 <Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`)}</Redirect>
 </Response>`);
   });
@@ -173,10 +190,10 @@ ${gather(respondUrl(appUrl, name, address, voice), say(opener, voice))}
     const speech = (body["SpeechResult"] as string) ?? "";
     const callSid = (body["CallSid"] as string) ?? "";
 
-    // Load conversation history and system prompt in parallel
-    const [turns, systemPrompt] = await Promise.all([
+    // Load conversation history and AI config in parallel
+    const [turns, { systemPrompt, elevenlabs }] = await Promise.all([
       callSid ? loadConversation(callSid) : Promise.resolve([]),
-      getSystemPrompt(),
+      getAIConfig(),
     ]);
 
     // Add what the person just said
@@ -206,12 +223,14 @@ ${gather(respondUrl(appUrl, name, address, voice), say(opener, voice))}
       await saveConversation(callSid, finalTurns, { name, address });
     }
 
+    const tts = elevenlabs ? playEl(appUrl, spoken, elevenlabs.apiKey, elevenlabs.voiceId) : say(spoken, voice);
+
     if (endCall) {
-      return twimlResponse(c, `<Response>${say(spoken, voice)}<Hangup/></Response>`);
+      return twimlResponse(c, `<Response>${tts}<Hangup/></Response>`);
     }
 
     return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), say(spoken, voice))}
+${gather(respondUrl(appUrl, name, address, voice), tts)}
 <Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`)}</Redirect>
 </Response>`);
   });
@@ -227,6 +246,35 @@ ${gather(respondUrl(appUrl, name, address, voice), say(spoken, voice))}
 ${gather(respondUrl(appUrl, name, address, voice), say("Sorry, I didn't catch that — are you still there?", voice))}
 <Hangup/>
 </Response>`);
+  });
+
+  // ElevenLabs audio proxy — streams TTS audio for Twilio <Play>
+  app.get("/audio", async (c) => {
+    const text = c.req.query("text") ?? "";
+    const voiceId = c.req.query("vid") ?? "";
+    const apiKey = c.req.query("key") ?? "";
+
+    if (!text || !voiceId || !apiKey) {
+      return c.body("Missing params", 400);
+    }
+
+    try {
+      const upstream = await elevenLabsTTSStream(text, voiceId, apiKey);
+      if (!upstream.ok) {
+        console.error("[elevenlabs] TTS error:", upstream.status);
+        return c.body("TTS error", 502);
+      }
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Cache-Control": "no-store",
+        },
+      });
+    } catch (err) {
+      console.error("[elevenlabs] audio proxy error:", err);
+      return c.body("TTS error", 502);
+    }
   });
 
   // Status callback — save outcome when call completes

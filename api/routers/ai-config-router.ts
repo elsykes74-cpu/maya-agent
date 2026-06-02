@@ -55,6 +55,9 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
       closeScript: z.string().optional(),
       voicemailScript: z.string().optional(),
       complianceDisclaimer: z.string().optional(),
+      elevenLabsApiKey: z.string().optional(),
+      elevenLabsVoiceId: z.string().optional(),
+      elevenLabsVoiceName: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();

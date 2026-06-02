@@ -1,17 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Bot, Save, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Bot, Save, RotateCcw, ChevronDown, ChevronUp, Mic2 } from 'lucide-react';
 import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
 import { trpc } from '@/providers/trpc';
 
 interface Section {
-  key: keyof ConfigFields;
+  key: keyof ScriptFields;
   label: string;
   description: string;
   rows: number;
 }
 
-interface ConfigFields {
+interface ScriptFields {
   systemPrompt: string;
   openerScript: string;
   discoveryQuestions: string;
@@ -19,6 +19,12 @@ interface ConfigFields {
   priceAnchorScript: string;
   closeScript: string;
   voicemailScript: string;
+}
+
+interface ConfigFields extends ScriptFields {
+  elevenLabsApiKey: string;
+  elevenLabsVoiceId: string;
+  elevenLabsVoiceName: string;
 }
 
 const SECTIONS: Section[] = [
@@ -30,6 +36,13 @@ const SECTIONS: Section[] = [
   { key: 'closeScript', label: 'Closing / Appointment', description: 'How Maya asks for and locks in the walkthrough appointment.', rows: 6 },
   { key: 'voicemailScript', label: 'Voicemail Script', description: 'What Maya leaves when she reaches voicemail.', rows: 5 },
 ];
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12,
+  padding: '12px 14px', fontSize: 13, background: 'rgba(0,0,0,0.02)',
+  color: C.text, fontWeight: 500, fontFamily: 'inherit', outline: 'none',
+  boxSizing: 'border-box',
+};
 
 export default function AIConfig() {
   const navigate = useNavigate();
@@ -50,6 +63,9 @@ export default function AIConfig() {
           priceAnchorScript: data.priceAnchorScript ?? '',
           closeScript: data.closeScript ?? '',
           voicemailScript: data.voicemailScript ?? '',
+          elevenLabsApiKey: data.elevenLabsApiKey ?? '',
+          elevenLabsVoiceId: data.elevenLabsVoiceId ?? '',
+          elevenLabsVoiceName: data.elevenLabsVoiceName ?? '',
         });
       }
     },
@@ -79,6 +95,8 @@ export default function AIConfig() {
     );
   }
 
+  const elActive = !!(fields.elevenLabsApiKey && fields.elevenLabsVoiceId);
+
   return (
     <div style={{ padding: '16px 20px 24px' }}>
       {/* Header */}
@@ -94,6 +112,51 @@ export default function AIConfig() {
         </NeoIcon>
         <p style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Claude-Powered AI Brain</p>
         <p style={{ fontSize: 13, opacity: 0.7, margin: '6px 0 0', fontWeight: 500 }}>Edit Maya's instructions below — changes take effect on the next call</p>
+      </NeoTile>
+
+      {/* ElevenLabs Voice */}
+      <NeoTile style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+          <NeoIcon bg={elActive ? 'rgba(52,199,89,0.12)' : C.purpleS} size={40} round={14}>
+            <Mic2 size={18} color={elActive ? C.green : C.purple} strokeWidth={2} />
+          </NeoIcon>
+          <div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>ElevenLabs Voice</p>
+            <p style={{ fontSize: 12, color: elActive ? C.green : C.muted, margin: '2px 0 0', fontWeight: 600 }}>
+              {elActive ? `Active · ${fields.elevenLabsVoiceName || 'Custom voice'}` : 'Not configured — using Google Neural2'}
+            </p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div>
+            <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>Voice Name (label only)</p>
+            <input
+              value={fields.elevenLabsVoiceName}
+              onChange={e => setField('elevenLabsVoiceName', e.target.value)}
+              placeholder="e.g. Liz"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>Voice ID</p>
+            <input
+              value={fields.elevenLabsVoiceId}
+              onChange={e => setField('elevenLabsVoiceId', e.target.value)}
+              placeholder="ElevenLabs voice ID"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>API Key</p>
+            <input
+              value={fields.elevenLabsApiKey}
+              onChange={e => setField('elevenLabsApiKey', e.target.value)}
+              placeholder="ElevenLabs API key"
+              type="password"
+              style={inputStyle}
+            />
+          </div>
+        </div>
       </NeoTile>
 
       {/* Script sections */}
