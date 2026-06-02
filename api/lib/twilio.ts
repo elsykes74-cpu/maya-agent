@@ -57,10 +57,6 @@ function normalizePhoneNumber(value: string): string {
 }
 
 function resolveAppUrl(appUrl: string): string {
-  // On Vercel, always use the exact deployment URL so Twilio webhooks
-  // come back to the same deployment (preview or production).
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  if (appUrl && !appUrl.includes("localhost")) return appUrl.replace(/\/$/, "");
   return appUrl.replace(/\/$/, "");
 }
 

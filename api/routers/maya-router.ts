@@ -50,7 +50,7 @@ export const mayaRouter = createRouter({
       address: z.string().default(""),
       voice: z.string().default("Google.en-US-Neural2-F"),
     }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const { accountSid, authToken, fromNumber } = await getTwilioConfig();
       if (!accountSid || !authToken || !fromNumber) {
         throw new TRPCError({
@@ -58,11 +58,15 @@ export const mayaRouter = createRouter({
           message: "Twilio not configured — add Account SID, Auth Token, and From Number in AI Config.",
         });
       }
+      // Use the actual incoming request host so Twilio webhooks hit the right URL
+      const proto = ctx.req.headers.get("x-forwarded-proto") ?? "https";
+      const host = ctx.req.headers.get("x-forwarded-host") ?? ctx.req.headers.get("host") ?? "";
+      const appUrl = host ? `${proto}://${host}` : env.appUrl;
       const result = await placeTwilioOutboundCall({
         to: input.to,
         name: input.name,
         address: input.address,
-        appUrl: env.appUrl,
+        appUrl,
         voice: input.voice,
         accountSid,
         authToken,
