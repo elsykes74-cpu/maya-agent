@@ -5,12 +5,12 @@ import { placeTwilioOutboundCall } from "../lib/twilio";
 import { env } from "../lib/env";
 
 const VOICES = [
-  { id: "Polly.Joanna-Neural", label: "Joanna", gender: "Female", style: "Warm & Natural" },
-  { id: "Polly.Kendra-Neural", label: "Kendra", gender: "Female", style: "Bright & Clear" },
-  { id: "Polly.Kimberly-Neural", label: "Kimberly", gender: "Female", style: "Friendly & Warm" },
-  { id: "Polly.Salli-Neural", label: "Salli", gender: "Female", style: "Youthful & Casual" },
+  { id: "Google.en-US-Neural2-F", label: "Aria", gender: "Female", style: "Most Natural (Recommended)" },
+  { id: "Google.en-US-Neural2-H", label: "Emma", gender: "Female", style: "Expressive & Warm" },
+  { id: "Google.en-US-Neural2-C", label: "Clara", gender: "Female", style: "Bright & Clear" },
+  { id: "Polly.Ruth-Neural", label: "Ruth", gender: "Female", style: "Natural & Conversational" },
+  { id: "Polly.Joanna-Neural", label: "Joanna", gender: "Female", style: "Warm & Polished" },
   { id: "Polly.Matthew-Neural", label: "Matthew", gender: "Male", style: "Professional & Natural" },
-  { id: "Polly.Joey", label: "Joey", gender: "Male", style: "Casual & Conversational" },
 ];
 
 const activeCalls = new Map<string, { to: string; status: string; startedAt: Date }>();
@@ -31,6 +31,7 @@ export const mayaRouter = createRouter({
         name: input.name,
         address: input.address,
         appUrl: env.appUrl,
+        voice: input.voice,
       });
 
       if (!result.sid) {

@@ -83,6 +83,7 @@ export async function placeTwilioOutboundCall(opts: {
   name: string;
   address: string;
   appUrl: string;
+  voice?: string;
 }): Promise<TwilioCallResult> {
   const { accountSid, credentials, fromNumber } = getTwilioEnv();
   if (!accountSid || !credentials.length || !fromNumber) {
@@ -95,7 +96,7 @@ export async function placeTwilioOutboundCall(opts: {
   }
 
   const baseUrl = resolveAppUrl(opts.appUrl);
-  const params = new URLSearchParams({ name: opts.name, address: opts.address });
+  const params = new URLSearchParams({ name: opts.name, address: opts.address, voice: opts.voice ?? "Google.en-US-Neural2-F" });
   const webhookUrl = `${baseUrl}/api/maya/outbound?${params}`;
   const statusUrl = `${baseUrl}/api/maya/status`;
 

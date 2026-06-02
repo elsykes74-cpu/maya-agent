@@ -16,10 +16,12 @@ type CallStage = 'idle' | 'connecting' | 'ringing' | 'in_progress' | 'completed'
 interface TranscriptTurn { speaker: 'maya' | 'user'; text: string; time: number; }
 
 const VOICES = [
+  { id: 'Google.en-US-Neural2-F', label: 'Aria', style: 'Most Natural' },
+  { id: 'Google.en-US-Neural2-H', label: 'Emma', style: 'Expressive' },
+  { id: 'Google.en-US-Neural2-C', label: 'Clara', style: 'Bright' },
+  { id: 'Polly.Ruth-Neural', label: 'Ruth', style: 'Conversational' },
   { id: 'Polly.Joanna-Neural', label: 'Joanna', style: 'Warm' },
-  { id: 'Polly.Kendra-Neural', label: 'Kendra', style: 'Bright' },
   { id: 'Polly.Matthew-Neural', label: 'Matthew', style: 'Pro' },
-  { id: 'Polly.Joey', label: 'Joey', style: 'Casual' },
 ];
 
 export default function CallCenter() {
@@ -37,7 +39,7 @@ export default function CallCenter() {
   const [number, setNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
-  const [selectedVoice, setSelectedVoice] = useState('Polly.Joanna-Neural');
+  const [selectedVoice, setSelectedVoice] = useState('Google.en-US-Neural2-F');
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);

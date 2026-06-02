@@ -21,7 +21,7 @@ function escXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;");
 }
 
-function say(text: string, voice = "Polly.Joanna-Neural"): string {
+function say(text: string, voice = "Google.en-US-Neural2-F"): string {
   return `<Say voice="${voice}">${escXml(text)}</Say>`;
 }
 
@@ -29,8 +29,8 @@ function gather(action: string, content: string): string {
   return `<Gather input="speech" speechTimeout="auto" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
-function respondUrl(appUrl: string, name: string, address: string): string {
-  return `${appUrl}/api/maya/respond?name=${enc(name)}&address=${enc(address)}`;
+function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
+  return `${appUrl}/api/maya/respond?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`;
 }
 
 async function getSystemPrompt(): Promise<string> {
@@ -111,6 +111,7 @@ export function createMayaWebhookRouter() {
   // Inbound calls — generic opener
   app.post("/initial", async (c) => {
     const appUrl = getAppUrl(c);
+    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
     const body = await c.req.parseBody();
     const callSid = (body["CallSid"] as string) ?? "";
     if (callSid) {
@@ -119,8 +120,8 @@ export function createMayaWebhookRouter() {
       ]);
     }
     return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, "", ""), say("Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?"))}
-<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=&address=`)}</Redirect>
+${gather(respondUrl(appUrl, "", "", voice), say("Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?", voice))}
+<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=&address=&voice=${enc(voice)}`)}</Redirect>
 </Response>`);
   });
 
@@ -128,6 +129,7 @@ ${gather(respondUrl(appUrl, "", ""), say("Hi there — this is Maya calling. I w
   app.post("/outbound", async (c) => {
     const name = c.req.query("name") ?? "";
     const address = c.req.query("address") ?? "";
+    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
     const appUrl = getAppUrl(c);
 
     const body = await c.req.parseBody();
@@ -141,7 +143,7 @@ ${gather(respondUrl(appUrl, "", ""), say("Hi there — this is Maya calling. I w
       const vm = name
         ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. Give us a call back when you get a chance. Thanks!`
         : `Hi, this is Maya with a quick message about your property. Give us a call back when you get a chance. Thanks!`;
-      return twimlResponse(c, `<Response>${say(vm)}<Hangup/></Response>`);
+      return twimlResponse(c, `<Response>${say(vm, voice)}<Hangup/></Response>`);
     }
 
     const opener = name
@@ -155,8 +157,8 @@ ${gather(respondUrl(appUrl, "", ""), say("Hi there — this is Maya calling. I w
     }
 
     return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address), say(opener))}
-<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}`)}</Redirect>
+${gather(respondUrl(appUrl, name, address, voice), say(opener, voice))}
+<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`)}</Redirect>
 </Response>`);
   });
 
@@ -164,6 +166,7 @@ ${gather(respondUrl(appUrl, name, address), say(opener))}
   app.post("/respond", async (c) => {
     const name = c.req.query("name") ?? "";
     const address = c.req.query("address") ?? "";
+    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
     const appUrl = getAppUrl(c);
 
     const body = await c.req.parseBody();
@@ -204,12 +207,12 @@ ${gather(respondUrl(appUrl, name, address), say(opener))}
     }
 
     if (endCall) {
-      return twimlResponse(c, `<Response>${say(spoken)}<Hangup/></Response>`);
+      return twimlResponse(c, `<Response>${say(spoken, voice)}<Hangup/></Response>`);
     }
 
     return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address), say(spoken))}
-<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}`)}</Redirect>
+${gather(respondUrl(appUrl, name, address, voice), say(spoken, voice))}
+<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`)}</Redirect>
 </Response>`);
   });
 
@@ -217,10 +220,11 @@ ${gather(respondUrl(appUrl, name, address), say(spoken))}
   app.post("/no-response", async (c) => {
     const name = c.req.query("name") ?? "";
     const address = c.req.query("address") ?? "";
+    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
     const appUrl = getAppUrl(c);
 
     return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address), say("Sorry, I didn't catch that — are you still there?"))}
+${gather(respondUrl(appUrl, name, address, voice), say("Sorry, I didn't catch that — are you still there?", voice))}
 <Hangup/>
 </Response>`);
   });
