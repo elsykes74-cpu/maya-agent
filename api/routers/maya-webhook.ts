@@ -28,7 +28,7 @@ function say(text: string, voice = "Polly.Joanna"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="auto" timeout="8" action="${action}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="auto" timeout="8" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function noRespUrl(appUrl: string, stage: string, name: string, address: string): string {
@@ -50,7 +50,7 @@ function stageOpening(appUrl: string, name: string, address: string): string {
 
   return `<Response>
 ${gather(respondUrl(appUrl, "discovery", name, address), say(greeting))}
-<Redirect method="POST">${noRespUrl(appUrl, "opening", name, address)}</Redirect>
+<Redirect method="POST">${escXml(noRespUrl(appUrl, "opening", name, address))}</Redirect>
 </Response>`;
 }
 
@@ -77,7 +77,7 @@ function handleStage(
         : `Perfect. I'll be straight with you — we work with a small group of local investors and wanted to reach out about your property. Have you thought at all about selling?`;
       return `<Response>
 ${gather(respondUrl(appUrl, "motivation", name, address), say(pitch))}
-<Redirect method="POST">${noRespUrl(appUrl, "discovery", name, address)}</Redirect>
+<Redirect method="POST">${escXml(noRespUrl(appUrl, "discovery", name, address))}</Redirect>
 </Response>`;
     }
 
@@ -88,7 +88,7 @@ ${gather(respondUrl(appUrl, "motivation", name, address), say(pitch))}
       const question = `That's helpful to know. Quick question — what's the condition of the property right now? Is it move-in ready or does it need some work?`;
       return `<Response>
 ${gather(respondUrl(appUrl, "condition", name, address), say(question))}
-<Redirect method="POST">${noRespUrl(appUrl, "motivation", name, address)}</Redirect>
+<Redirect method="POST">${escXml(noRespUrl(appUrl, "motivation", name, address))}</Redirect>
 </Response>`;
     }
 
@@ -96,7 +96,7 @@ ${gather(respondUrl(appUrl, "condition", name, address), say(question))}
       const question = `Got it, thanks. And if you did decide to sell — what kind of timeline would you be thinking? Like a few months out, or something sooner?`;
       return `<Response>
 ${gather(respondUrl(appUrl, "close", name, address), say(question))}
-<Redirect method="POST">${noRespUrl(appUrl, "condition", name, address)}</Redirect>
+<Redirect method="POST">${escXml(noRespUrl(appUrl, "condition", name, address))}</Redirect>
 </Response>`;
     }
 
@@ -104,7 +104,7 @@ ${gather(respondUrl(appUrl, "close", name, address), say(question))}
       const close = `Honestly, the best next step is just a quick walkthrough — takes about 20 minutes. We give you a real number, no pressure, no obligation. If it works for both sides, great. If not, no worries at all. Would something next week work for you?`;
       return `<Response>
 ${gather(respondUrl(appUrl, "appointment", name, address), say(close))}
-<Redirect method="POST">${noRespUrl(appUrl, "close", name, address)}</Redirect>
+<Redirect method="POST">${escXml(noRespUrl(appUrl, "close", name, address))}</Redirect>
 </Response>`;
     }
 
