@@ -16,9 +16,9 @@ type CallStage = 'idle' | 'connecting' | 'ringing' | 'in_progress' | 'completed'
 interface TranscriptTurn { speaker: 'maya' | 'user'; text: string; time: number; }
 
 const VOICES = [
-  { id: 'Polly.Joanna', label: 'Joanna', style: 'Warm' },
-  { id: 'Polly.Kendra', label: 'Kendra', style: 'Bright' },
-  { id: 'Polly.Matthew', label: 'Matthew', style: 'Pro' },
+  { id: 'Polly.Joanna-Neural', label: 'Joanna', style: 'Warm' },
+  { id: 'Polly.Kendra-Neural', label: 'Kendra', style: 'Bright' },
+  { id: 'Polly.Matthew-Neural', label: 'Matthew', style: 'Pro' },
   { id: 'Polly.Joey', label: 'Joey', style: 'Casual' },
 ];
 
@@ -37,7 +37,7 @@ export default function CallCenter() {
   const [number, setNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
-  const [selectedVoice, setSelectedVoice] = useState('Polly.Joanna');
+  const [selectedVoice, setSelectedVoice] = useState('Polly.Joanna-Neural');
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);

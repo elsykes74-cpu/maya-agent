@@ -23,7 +23,7 @@ function escXml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;");
 }
 
-function say(text: string, voice = "Polly.Joanna"): string {
+function say(text: string, voice = "Polly.Joanna-Neural"): string {
   return `<Say voice="${voice}">${escXml(text)}</Say>`;
 }
 

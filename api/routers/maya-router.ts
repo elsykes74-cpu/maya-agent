@@ -5,12 +5,11 @@ import { placeTwilioOutboundCall } from "../lib/twilio";
 import { env } from "../lib/env";
 
 const VOICES = [
-  { id: "Polly.Joanna", label: "Joanna", gender: "Female", style: "Warm & Professional" },
-  { id: "Polly.Kendra", label: "Kendra", gender: "Female", style: "Bright & Clear" },
-  { id: "Polly.Kimberly", label: "Kimberly", gender: "Female", style: "Friendly & Warm" },
-  { id: "Polly.Salli", label: "Salli", gender: "Female", style: "Youthful & Casual" },
-  { id: "Polly.Ivy", label: "Ivy", gender: "Female", style: "Soft & Gentle" },
-  { id: "Polly.Matthew", label: "Matthew", gender: "Male", style: "Professional & Confident" },
+  { id: "Polly.Joanna-Neural", label: "Joanna", gender: "Female", style: "Warm & Natural" },
+  { id: "Polly.Kendra-Neural", label: "Kendra", gender: "Female", style: "Bright & Clear" },
+  { id: "Polly.Kimberly-Neural", label: "Kimberly", gender: "Female", style: "Friendly & Warm" },
+  { id: "Polly.Salli-Neural", label: "Salli", gender: "Female", style: "Youthful & Casual" },
+  { id: "Polly.Matthew-Neural", label: "Matthew", gender: "Male", style: "Professional & Natural" },
   { id: "Polly.Joey", label: "Joey", gender: "Male", style: "Casual & Conversational" },
 ];
 
