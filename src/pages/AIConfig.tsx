@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Bot, Save, RotateCcw, ChevronDown, ChevronUp, Mic2 } from 'lucide-react';
 import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
@@ -51,25 +51,25 @@ export default function AIConfig() {
   const [fields, setFields] = useState<ConfigFields | null>(null);
   const [configId, setConfigId] = useState<number | null>(null);
 
-  const { isLoading } = trpc.aiConfig.get.useQuery(undefined, {
-    onSuccess: (data: any) => {
-      if (data && !fields) {
-        setConfigId(data.id);
-        setFields({
-          systemPrompt: data.systemPrompt ?? '',
-          openerScript: data.openerScript ?? '',
-          discoveryQuestions: data.discoveryQuestions ?? '',
-          positioningScript: data.positioningScript ?? '',
-          priceAnchorScript: data.priceAnchorScript ?? '',
-          closeScript: data.closeScript ?? '',
-          voicemailScript: data.voicemailScript ?? '',
-          elevenLabsApiKey: data.elevenLabsApiKey ?? '',
-          elevenLabsVoiceId: data.elevenLabsVoiceId ?? '',
-          elevenLabsVoiceName: data.elevenLabsVoiceName ?? '',
-        });
-      }
-    },
-  });
+  const { isLoading, data } = trpc.aiConfig.get.useQuery(undefined);
+
+  useEffect(() => {
+    if (data && !fields) {
+      setConfigId((data as any).id);
+      setFields({
+        systemPrompt: (data as any).systemPrompt ?? '',
+        openerScript: (data as any).openerScript ?? '',
+        discoveryQuestions: (data as any).discoveryQuestions ?? '',
+        positioningScript: (data as any).positioningScript ?? '',
+        priceAnchorScript: (data as any).priceAnchorScript ?? '',
+        closeScript: (data as any).closeScript ?? '',
+        voicemailScript: (data as any).voicemailScript ?? '',
+        elevenLabsApiKey: (data as any).elevenLabsApiKey ?? '',
+        elevenLabsVoiceId: (data as any).elevenLabsVoiceId ?? '',
+        elevenLabsVoiceName: (data as any).elevenLabsVoiceName ?? '',
+      });
+    }
+  }, [data]);
 
   const updateMut = trpc.aiConfig.update.useMutation({
     onSuccess: () => {

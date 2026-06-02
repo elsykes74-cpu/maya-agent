@@ -1,7 +1,5 @@
-import { LEADS, CALLS } from '../data';
-
-const LEADS_KEY = 'maya_leads_v2';
-const CALLS_KEY = 'maya_calls_v2';
+const LEADS_KEY = 'maya_leads_v3';
+const CALLS_KEY = 'maya_calls_v3';
 
 export interface Lead {
   id: number;
@@ -37,9 +35,7 @@ export function loadLeads(): Lead[] {
     const raw = localStorage.getItem(LEADS_KEY);
     if (raw) return JSON.parse(raw);
   } catch { /* ignore */ }
-  const initial = [...LEADS] as Lead[];
-  saveLeads(initial);
-  return initial;
+  return [];
 }
 
 export function saveLeads(leads: Lead[]) {
@@ -51,9 +47,7 @@ export function loadCalls(): CallRecord[] {
     const raw = localStorage.getItem(CALLS_KEY);
     if (raw) return JSON.parse(raw);
   } catch { /* ignore */ }
-  const initial = [...CALLS] as CallRecord[];
-  saveCalls(initial);
-  return initial;
+  return [];
 }
 
 export function saveCalls(calls: CallRecord[]) {
@@ -67,8 +61,7 @@ export function addCallRecord(call: CallRecord) {
   return calls;
 }
 
-let nextId = 1000;
+let nextId = Date.now();
 export function getNextId(): number {
-  nextId++;
-  return nextId;
+  return ++nextId;
 }
