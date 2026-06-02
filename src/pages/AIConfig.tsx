@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Bot, Save, RotateCcw, ChevronDown, ChevronUp, Mic2 } from 'lucide-react';
+import { Bot, Save, RotateCcw, ChevronDown, ChevronUp, Mic2, Phone } from 'lucide-react';
 import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
 import { trpc } from '@/providers/trpc';
 
@@ -25,6 +25,9 @@ interface ConfigFields extends ScriptFields {
   elevenLabsApiKey: string;
   elevenLabsVoiceId: string;
   elevenLabsVoiceName: string;
+  twilioAccountSid: string;
+  twilioAuthToken: string;
+  twilioFromNumber: string;
 }
 
 const SECTIONS: Section[] = [
@@ -67,6 +70,9 @@ export default function AIConfig() {
         elevenLabsApiKey: (data as any).elevenLabsApiKey ?? '',
         elevenLabsVoiceId: (data as any).elevenLabsVoiceId ?? '',
         elevenLabsVoiceName: (data as any).elevenLabsVoiceName ?? '',
+        twilioAccountSid: (data as any).twilioAccountSid ?? '',
+        twilioAuthToken: (data as any).twilioAuthToken ?? '',
+        twilioFromNumber: (data as any).twilioFromNumber ?? '',
       });
     }
   }, [data]);
@@ -158,6 +164,40 @@ export default function AIConfig() {
           </div>
         </div>
       </NeoTile>
+
+      {/* Twilio */}
+      {(() => {
+        const twActive = !!(fields.twilioAccountSid && fields.twilioAuthToken && fields.twilioFromNumber);
+        return (
+          <NeoTile style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <NeoIcon bg={twActive ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.1)'} size={40} round={14}>
+                <Phone size={18} color={twActive ? C.green : C.red} strokeWidth={2} />
+              </NeoIcon>
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>Twilio Calling</p>
+                <p style={{ fontSize: 12, color: twActive ? C.green : C.red, margin: '2px 0 0', fontWeight: 600 }}>
+                  {twActive ? 'Active · Ready to call' : 'Not configured — calls will not work'}
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>Account SID</p>
+                <input value={fields.twilioAccountSid} onChange={e => setField('twilioAccountSid', e.target.value)} placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" style={inputStyle} />
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>Auth Token</p>
+                <input value={fields.twilioAuthToken} onChange={e => setField('twilioAuthToken', e.target.value)} placeholder="Auth token" type="password" style={inputStyle} />
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>From Number (your Twilio number)</p>
+                <input value={fields.twilioFromNumber} onChange={e => setField('twilioFromNumber', e.target.value)} placeholder="+14135551234" style={inputStyle} />
+              </div>
+            </div>
+          </NeoTile>
+        );
+      })()}
 
       {/* Script sections */}
       {SECTIONS.map((section) => {

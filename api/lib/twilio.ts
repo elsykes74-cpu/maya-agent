@@ -84,16 +84,20 @@ export async function placeTwilioOutboundCall(opts: {
   address: string;
   appUrl: string;
   voice?: string;
+  accountSid?: string;
+  authToken?: string;
+  fromNumber?: string;
 }): Promise<TwilioCallResult> {
-  const { accountSid, credentials, fromNumber } = getTwilioEnv();
-  if (!accountSid || !credentials.length || !fromNumber) {
-    const missing = [
-      !accountSid && "TWILIO_ACCOUNT_SID",
-      !credentials.length && "TWILIO_AUTH_TOKEN (or TWILIO_API_KEY + TWILIO_API_SECRET)",
-      !fromNumber && "TWILIO_FROM_NUMBER",
-    ].filter(Boolean).join(", ");
-    return { sid: "", status: "failed", error: `Missing env vars: ${missing}` };
+  const env = getTwilioEnv();
+  const accountSid = opts.accountSid || env.accountSid;
+  const authToken = opts.authToken || env.credentials[0]?.secret || "";
+  const fromNumber = opts.fromNumber || env.fromNumber;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { sid: "", status: "failed", error: "Twilio not configured — add credentials in AI Config." };
   }
+
+  const credential: TwilioCredential = { label: "account-token", user: accountSid, secret: authToken };
 
   const baseUrl = resolveAppUrl(opts.appUrl);
   const params = new URLSearchParams({ name: opts.name, address: opts.address, voice: opts.voice ?? "Google.en-US-Neural2-F" });
@@ -111,29 +115,26 @@ export async function placeTwilioOutboundCall(opts: {
   });
 
   try {
-    for (const credential of credentials) {
-      const res = await postTwilioCall(accountSid, credential, body);
-      if (res.ok) {
-        const data: any = await res.json();
-        return { sid: data.sid, status: data.status };
-      }
-
-      const errText = await res.text();
-      console.error("[twilio] outbound call error:", credential.label, res.status, errText);
-
-      let friendlyError = `Twilio error ${res.status}`;
-      try {
-        const errJson = JSON.parse(errText);
-        if (errJson.message) friendlyError = errJson.message;
-        if (errJson.code === 21219) friendlyError = "The destination number is not verified. Twilio trial accounts can only call verified numbers. Upgrade your Twilio account or verify the number at twilio.com/console.";
-        if (errJson.code === 21211) friendlyError = "Invalid 'To' phone number format. Use E.164 format like +14135551234.";
-        if (errJson.code === 21212) friendlyError = "Invalid 'From' phone number. Check TWILIO_FROM_NUMBER in your Vercel env vars.";
-        if (errJson.code === 20003) friendlyError = "Twilio authentication failed. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in Vercel.";
-      } catch { /* errText not JSON */ }
-
-      if (res.status !== 401) return { sid: "", status: "failed", error: friendlyError };
+    const res = await postTwilioCall(accountSid, credential, body);
+    if (res.ok) {
+      const data: any = await res.json();
+      return { sid: data.sid, status: data.status };
     }
-    return { sid: "", status: "failed", error: "Twilio authentication failed for all credentials." };
+
+    const errText = await res.text();
+    console.error("[twilio] outbound call error:", res.status, errText);
+
+    let friendlyError = `Twilio error ${res.status}`;
+    try {
+      const errJson = JSON.parse(errText);
+      if (errJson.message) friendlyError = errJson.message;
+      if (errJson.code === 21219) friendlyError = "The destination number is not verified. Twilio trial accounts can only call verified numbers.";
+      if (errJson.code === 21211) friendlyError = "Invalid 'To' phone number format. Use E.164 format like +14135551234.";
+      if (errJson.code === 21212) friendlyError = "Invalid 'From' phone number. Check the Twilio From Number in AI Config.";
+      if (errJson.code === 20003) friendlyError = "Twilio authentication failed. Check Account SID and Auth Token in AI Config.";
+    } catch { /* errText not JSON */ }
+
+    return { sid: "", status: "failed", error: friendlyError };
   } catch (err: any) {
     console.error("[twilio] outbound call exception:", err);
     return { sid: "", status: "failed", error: err?.message ?? "Network error reaching Twilio." };

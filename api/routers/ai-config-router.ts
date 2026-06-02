@@ -58,6 +58,9 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
       elevenLabsApiKey: z.string().optional(),
       elevenLabsVoiceId: z.string().optional(),
       elevenLabsVoiceName: z.string().optional(),
+      twilioAccountSid: z.string().optional(),
+      twilioAuthToken: z.string().optional(),
+      twilioFromNumber: z.string().optional(),
     }))
     .mutation(async ({ input }) => {
       const db = getDb();

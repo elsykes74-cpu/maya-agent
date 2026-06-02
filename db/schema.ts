@@ -246,6 +246,10 @@ export const aiConfig = pgTable("ai_config", {
   elevenLabsVoiceId: text("elevenlabs_voice_id"),
   elevenLabsVoiceName: text("elevenlabs_voice_name"),
 
+  twilioAccountSid: text("twilio_account_sid"),
+  twilioAuthToken: text("twilio_auth_token"),
+  twilioFromNumber: text("twilio_from_number"),
+
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
 });
 
