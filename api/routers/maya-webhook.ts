@@ -6,12 +6,13 @@ import { elevenLabsTTSStream } from "../lib/elevenlabs";
 
 function getAppUrl(c: Context): string {
   const proto = c.req.header("x-forwarded-proto") ?? "https";
-  const host = c.req.header("host") ?? "localhost:3000";
+  // x-forwarded-host is the real public hostname in Vercel serverless; host may be internal
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "localhost:3000";
   return `${proto}://${host}`;
 }
 
 function twimlResponse(c: Context, xml: string) {
-  return c.body(xml, 200, { "Content-Type": "text/xml" });
+  return c.body(`<?xml version="1.0" encoding="UTF-8"?>\n${xml}`, 200, { "Content-Type": "text/xml; charset=utf-8" });
 }
 
 function enc(s: string): string {
@@ -19,7 +20,7 @@ function enc(s: string): string {
 }
 
 function escXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;");
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/'/g, "&apos;").replace(/"/g, "&quot;");
 }
 
 function say(text: string, voice = "Google.en-US-Neural2-F"): string {
@@ -27,22 +28,29 @@ function say(text: string, voice = "Google.en-US-Neural2-F"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="1" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="2" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
   return `${appUrl}/api/maya/respond?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`;
 }
 
+function noResponseUrl(appUrl: string, name: string, address: string, voice: string): string {
+  return `${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`;
+}
+
 interface ElevenLabsConfig { apiKey: string; voiceId: string; }
 
 async function getAIConfig(): Promise<{ systemPrompt: string; elevenlabs: ElevenLabsConfig | null }> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("ai_config")
     .select("system_prompt, elevenlabs_api_key, elevenlabs_voice_id")
     .order("id")
     .limit(1)
     .single();
+  if (error) {
+    console.error("[maya] getAIConfig error:", error.message);
+  }
   const elevenlabs =
     data?.elevenlabs_api_key && data?.elevenlabs_voice_id
       ? { apiKey: data.elevenlabs_api_key, voiceId: data.elevenlabs_voice_id }
@@ -55,6 +63,10 @@ function playEl(appUrl: string, text: string, apiKey: string, voiceId: string): 
   return `<Play>${escXml(url)}</Play>`;
 }
 
+function tts(appUrl: string, text: string, voice: string, el: ElevenLabsConfig | null): string {
+  return el ? playEl(appUrl, text, el.apiKey, el.voiceId) : say(text, voice);
+}
+
 async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
   const { data } = await supabase
     .from("maya_conversations")
@@ -65,36 +77,21 @@ async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
 }
 
 async function saveConversation(callSid: string, turns: ConversationTurn[], metadata: Record<string, unknown> = {}) {
-  await supabase.from("maya_conversations").upsert(
+  const { error } = await supabase.from("maya_conversations").upsert(
     { call_sid: callSid, turns, metadata, updated_at: new Date().toISOString() },
     { onConflict: "call_sid" }
   );
+  if (error) console.error("[maya] saveConversation error:", error.message);
 }
 
 async function extractAndSaveOutcome(callSid: string, turns: ConversationTurn[]) {
   try {
     const fullText = turns.map(t => `${t.role}: ${t.content}`).join("\n");
+    const appointmentSet = /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|confirm the detail/i.test(fullText);
 
-    // Extract email addresses from conversation
-    const emailMatch = fullText.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
-    const email = emailMatch?.[0] ?? null;
-
-    // Detect appointment interest
-    const appointmentSet = /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|i'll have erick|erick will|confirm the detail/i.test(fullText);
-
-    // Save to calls table (no lead_id since this is a test call from the app)
-    await supabase.from("calls").insert({
-      lead_id: 1, // placeholder — real calls from leads page will have actual lead_id
-      call_outcome: appointmentSet ? "appointment_set" : "answered",
-      notes: fullText.slice(0, 2000),
-      appointment_set: appointmentSet,
-    });
-
-    if (email) {
-      await supabase.from("maya_conversations")
-        .update({ metadata: { email, appointment_set: appointmentSet } })
-        .eq("call_sid", callSid);
-    }
+    await supabase.from("maya_conversations")
+      .update({ metadata: { appointment_set: appointmentSet, outcome_processed: true } })
+      .eq("call_sid", callSid);
   } catch (err) {
     console.error("[maya] outcome save error:", err);
   }
@@ -122,130 +119,164 @@ export function createMayaWebhookRouter() {
 
   // Inbound calls — generic opener
   app.post("/initial", async (c) => {
-    const appUrl = getAppUrl(c);
-    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
-    const body = await c.req.parseBody();
-    const callSid = (body["CallSid"] as string) ?? "";
-    if (callSid) {
-      await saveConversation(callSid, [
-        { role: "assistant", content: "Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?" }
-      ]);
-    }
-    return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, "", "", voice), say("Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?", voice))}
-<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=&address=&voice=${enc(voice)}`)}</Redirect>
+    console.log("[maya/initial] webhook received");
+    try {
+      const appUrl = getAppUrl(c);
+      const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const body = await c.req.parseBody();
+      const callSid = (body["CallSid"] as string) ?? "";
+
+      const opener = "Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?";
+
+      if (callSid) {
+        saveConversation(callSid, [{ role: "assistant", content: opener }]).catch(err =>
+          console.error("[maya/initial] save error:", err)
+        );
+      }
+
+      let elevenlabs: ElevenLabsConfig | null = null;
+      try { ({ elevenlabs } = await getAIConfig()); } catch {}
+
+      return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlabs))}
+<Redirect method="POST">${escXml(noResponseUrl(appUrl, "", "", voice))}</Redirect>
 </Response>`);
+    } catch (err) {
+      console.error("[maya/initial] fatal:", err);
+      return twimlResponse(c, `<Response><Say>Hi, this is Maya. Please call us back shortly. Thank you!</Say><Hangup/></Response>`);
+    }
   });
 
   // Outbound personalized opener
   app.post("/outbound", async (c) => {
-    const name = c.req.query("name") ?? "";
-    const address = c.req.query("address") ?? "";
-    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
-    const appUrl = getAppUrl(c);
+    console.log("[maya/outbound] webhook received");
+    try {
+      const name = c.req.query("name") ?? "";
+      const address = c.req.query("address") ?? "";
+      const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const appUrl = getAppUrl(c);
+      console.log("[maya/outbound] appUrl:", appUrl, "name:", name, "address:", address);
 
-    const body = await c.req.parseBody();
-    const callSid = (body["CallSid"] as string) ?? "";
+      const body = await c.req.parseBody();
+      const callSid = (body["CallSid"] as string) ?? "";
+      const answeredBy = (body["AnsweredBy"] as string) ?? "";
+      const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
+      console.log("[maya/outbound] callSid:", callSid, "answeredBy:", answeredBy);
 
-    // Machine detection — only leave voicemail if explicitly identified
-    const answeredBy = (body["AnsweredBy"] as string) ?? "";
-    const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
+      let elevenlabs: ElevenLabsConfig | null = null;
+      try { ({ elevenlabs } = await getAIConfig()); } catch (err) {
+        console.error("[maya/outbound] getAIConfig error:", err);
+      }
 
-    const { elevenlabs } = await getAIConfig();
+      if (isMachine) {
+        const vm = name
+          ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. Give us a call back when you get a chance. Thanks!`
+          : `Hi, this is Maya with a quick message about your property. Give us a call back when you get a chance. Thanks!`;
+        return twimlResponse(c, `<Response>${tts(appUrl, vm, voice, elevenlabs)}<Hangup/></Response>`);
+      }
 
-    if (isMachine) {
-      const vm = name
-        ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. Give us a call back when you get a chance. Thanks!`
-        : `Hi, this is Maya with a quick message about your property. Give us a call back when you get a chance. Thanks!`;
-      const vmTts = elevenlabs ? playEl(appUrl, vm, elevenlabs.apiKey, elevenlabs.voiceId) : say(vm, voice);
-      return twimlResponse(c, `<Response>${vmTts}<Hangup/></Response>`);
-    }
+      const opener = name
+        ? `Hey — is this ${name}? This is Maya, I'm calling about the property on ${address}. Did I catch you at a bad time?`
+        : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
 
-    const opener = name
-      ? `Hey — is this ${name}? This is Maya, I'm calling about the property on ${address}. Did I catch you at a bad time?`
-      : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
+      if (callSid) {
+        saveConversation(callSid, [{ role: "assistant", content: opener }], { name, address }).catch(err =>
+          console.error("[maya/outbound] save error:", err)
+        );
+      }
 
-    if (callSid) {
-      await saveConversation(callSid, [
-        { role: "assistant", content: opener }
-      ], { name, address });
-    }
-
-    const openerTts = elevenlabs ? playEl(appUrl, opener, elevenlabs.apiKey, elevenlabs.voiceId) : say(opener, voice);
-
-    return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), openerTts)}
-<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`)}</Redirect>
+      return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, elevenlabs))}
+<Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
 </Response>`);
+    } catch (err) {
+      console.error("[maya/outbound] fatal:", err);
+      return twimlResponse(c, `<Response><Say>Hi there, this is Maya. We'll try you again shortly. Thanks!</Say><Hangup/></Response>`);
+    }
   });
 
   // AI-powered speech response handler
   app.post("/respond", async (c) => {
-    const name = c.req.query("name") ?? "";
-    const address = c.req.query("address") ?? "";
-    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
-    const appUrl = getAppUrl(c);
-
-    const body = await c.req.parseBody();
-    const speech = (body["SpeechResult"] as string) ?? "";
-    const callSid = (body["CallSid"] as string) ?? "";
-
-    // Load conversation history and AI config in parallel
-    const [turns, { systemPrompt, elevenlabs }] = await Promise.all([
-      callSid ? loadConversation(callSid) : Promise.resolve([]),
-      getAIConfig(),
-    ]);
-
-    // Add what the person just said
-    const updatedTurns: ConversationTurn[] = [
-      ...turns,
-      { role: "user", content: speech || "(silence)" },
-    ];
-
-    let mayaResponse: string;
+    console.log("[maya/respond] webhook received");
     try {
-      mayaResponse = await getMayaResponse(systemPrompt, updatedTurns, name, address);
-    } catch (err) {
-      console.error("[maya] Claude error:", err);
-      mayaResponse = "Sorry about that — can you say that again?";
-    }
+      const name = c.req.query("name") ?? "";
+      const address = c.req.query("address") ?? "";
+      const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const appUrl = getAppUrl(c);
 
-    // Check if Claude signaled end of call
-    const endCall = mayaResponse.includes("[END_CALL]");
-    const spoken = mayaResponse.replace("[END_CALL]", "").trim() || "Thank you for your time. Have a great day!";
+      const body = await c.req.parseBody();
+      const speech = (body["SpeechResult"] as string) ?? "";
+      const callSid = (body["CallSid"] as string) ?? "";
+      console.log("[maya/respond] speech:", speech.slice(0, 80), "callSid:", callSid);
 
-    // Save conversation with Maya's response added
-    const finalTurns: ConversationTurn[] = [
-      ...updatedTurns,
-      { role: "assistant", content: spoken },
-    ];
-    if (callSid) {
-      await saveConversation(callSid, finalTurns, { name, address });
-    }
+      const [turns, { systemPrompt, elevenlabs }] = await Promise.all([
+        callSid ? loadConversation(callSid) : Promise.resolve([]),
+        getAIConfig(),
+      ]);
 
-    const tts = elevenlabs ? playEl(appUrl, spoken, elevenlabs.apiKey, elevenlabs.voiceId) : say(spoken, voice);
+      const updatedTurns: ConversationTurn[] = [
+        ...turns,
+        { role: "user", content: speech || "(silence)" },
+      ];
 
-    if (endCall) {
-      return twimlResponse(c, `<Response>${tts}<Hangup/></Response>`);
-    }
+      let mayaResponse: string;
+      try {
+        mayaResponse = await getMayaResponse(systemPrompt, updatedTurns, name, address);
+      } catch (err) {
+        console.error("[maya/respond] Claude error:", err);
+        mayaResponse = "Sorry about that — can you say that again?";
+      }
 
-    return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), tts)}
-<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}&voice=${enc(voice)}`)}</Redirect>
+      const endCall = mayaResponse.includes("[END_CALL]");
+      const spoken = mayaResponse.replace("[END_CALL]", "").trim() || "Thank you for your time. Have a great day!";
+
+      const finalTurns: ConversationTurn[] = [
+        ...updatedTurns,
+        { role: "assistant", content: spoken },
+      ];
+      if (callSid) {
+        saveConversation(callSid, finalTurns, { name, address }).catch(err =>
+          console.error("[maya/respond] save error:", err)
+        );
+      }
+
+      const spokenTts = tts(appUrl, spoken, voice, elevenlabs);
+
+      if (endCall) {
+        return twimlResponse(c, `<Response>${spokenTts}<Hangup/></Response>`);
+      }
+
+      return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address, voice), spokenTts)}
+<Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
 </Response>`);
+    } catch (err) {
+      console.error("[maya/respond] fatal:", err);
+      return twimlResponse(c, `<Response><Say>Sorry, I had a technical issue. Can we try again in a moment?</Say><Hangup/></Response>`);
+    }
   });
 
   // No response — remind once then hang up
   app.post("/no-response", async (c) => {
-    const name = c.req.query("name") ?? "";
-    const address = c.req.query("address") ?? "";
-    const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
-    const appUrl = getAppUrl(c);
+    console.log("[maya/no-response] webhook received");
+    try {
+      const name = c.req.query("name") ?? "";
+      const address = c.req.query("address") ?? "";
+      const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const appUrl = getAppUrl(c);
 
-    return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), say("Sorry, I didn't catch that — are you still there?", voice))}
+      let elevenlabs: ElevenLabsConfig | null = null;
+      try { ({ elevenlabs } = await getAIConfig()); } catch {}
+
+      const prompt = "Sorry, I didn't catch that — are you still there?";
+      return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, elevenlabs))}
 <Hangup/>
 </Response>`);
+    } catch (err) {
+      console.error("[maya/no-response] fatal:", err);
+      return twimlResponse(c, `<Response><Hangup/></Response>`);
+    }
   });
 
   // ElevenLabs audio proxy — streams TTS audio for Twilio <Play>
@@ -279,18 +310,21 @@ ${gather(respondUrl(appUrl, name, address, voice), say("Sorry, I didn't catch th
 
   // Status callback — save outcome when call completes
   app.post("/status", async (c) => {
-    const body = await c.req.parseBody();
-    const callSid = (body["CallSid"] as string) ?? "";
-    const callStatus = (body["CallStatus"] as string) ?? "";
-    console.log(`[maya] call ${callSid} → ${callStatus}`);
+    try {
+      const body = await c.req.parseBody();
+      const callSid = (body["CallSid"] as string) ?? "";
+      const callStatus = (body["CallStatus"] as string) ?? "";
+      console.log(`[maya/status] call ${callSid} → ${callStatus}`);
 
-    if ((callStatus === "completed" || callStatus === "no-answer") && callSid) {
-      const turns = await loadConversation(callSid);
-      if (turns.length > 1) {
-        await extractAndSaveOutcome(callSid, turns);
+      if ((callStatus === "completed" || callStatus === "no-answer") && callSid) {
+        const turns = await loadConversation(callSid);
+        if (turns.length > 1) {
+          await extractAndSaveOutcome(callSid, turns);
+        }
       }
+    } catch (err) {
+      console.error("[maya/status] error:", err);
     }
-
     return c.body(null, 204);
   });
 
