@@ -1,6 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? "" });
+const client = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY ?? "",
+  timeout: 8000, // fail fast — Vercel Hobby functions have a 10s hard limit
+});
 
 export interface ConversationTurn {
   role: "user" | "assistant";
