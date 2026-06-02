@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
-import { placeTwilioOutboundCall } from "../lib/twilio";
+import { placeTwilioOutboundCall, getTwilioEnv } from "../lib/twilio";
 import { env } from "../lib/env";
 
 const VOICES = [
@@ -17,6 +17,16 @@ const activeCalls = new Map<string, { to: string; status: string; startedAt: Dat
 
 export const mayaRouter = createRouter({
   listVoices: publicQuery.query(() => ({ voices: VOICES })),
+
+  checkConfig: publicQuery.query(() => {
+    const { accountSid, credentials, fromNumber } = getTwilioEnv();
+    const missing = [
+      !accountSid && "TWILIO_ACCOUNT_SID",
+      !credentials.length && "TWILIO_AUTH_TOKEN",
+      !fromNumber && "TWILIO_FROM_NUMBER",
+    ].filter(Boolean) as string[];
+    return { twilioConfigured: missing.length === 0, missingVars: missing };
+  }),
 
   placeCall: publicQuery
     .input(z.object({

@@ -47,6 +47,7 @@ export default function CallCenter() {
   const placeCallMut = trpc.maya.placeCall.useMutation();
   const hangUpMut = trpc.maya.hangUp.useMutation();
   const { data: voiceList } = trpc.maya.listVoices.useQuery();
+  const { data: configData } = trpc.maya.checkConfig.useQuery(undefined, { refetchOnWindowFocus: false });
   const { data: transcriptData } = trpc.maya.getTranscript.useQuery(
     { sid: sid ?? undefined },
     { enabled: !!sid && stage === 'in_progress', refetchInterval: 2000 }
@@ -78,7 +79,7 @@ export default function CallCenter() {
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  const [twilioMissing, setTwilioMissing] = useState(false);
+  const twilioMissing = configData ? !configData.twilioConfigured : false;
 
   const placeCall = useCallback(async (phone: string, name = '', address = '') => {
     setError(null);
@@ -93,9 +94,6 @@ export default function CallCenter() {
       const msg: string = e.message || 'Call failed';
       setError(msg);
       setStage('failed');
-      if (msg.toLowerCase().includes('missing env') || msg.toLowerCase().includes('not configured')) {
-        setTwilioMissing(true);
-      }
     }
   }, [placeCallMut, selectedVoice]);
 
