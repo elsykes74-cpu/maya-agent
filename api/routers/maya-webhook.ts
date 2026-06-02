@@ -1,9 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import { supabase } from "../lib/supabase";
+import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
 
 function getAppUrl(c: Context): string {
   const proto = c.req.header("x-forwarded-proto") ?? "https";
@@ -28,170 +26,219 @@ function say(text: string, voice = "Polly.Joanna-Neural"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="auto" timeout="8" action="${escXml(action)}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="auto" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
-function noRespUrl(appUrl: string, stage: string, name: string, address: string): string {
-  return `${appUrl}/api/maya/no-response?stage=${enc(stage)}&name=${enc(name)}&address=${enc(address)}`;
+function respondUrl(appUrl: string, name: string, address: string): string {
+  return `${appUrl}/api/maya/respond?name=${enc(name)}&address=${enc(address)}`;
 }
 
-function respondUrl(appUrl: string, stage: string, name: string, address: string): string {
-  return `${appUrl}/api/maya/respond?stage=${enc(stage)}&name=${enc(name)}&address=${enc(address)}`;
+async function getSystemPrompt(): Promise<string> {
+  const { data } = await supabase
+    .from("ai_config")
+    .select("system_prompt")
+    .order("id")
+    .limit(1)
+    .single();
+  return data?.system_prompt ?? defaultSystemPrompt;
 }
 
-// ---------------------------------------------------------------------------
-// State machine
-// ---------------------------------------------------------------------------
-
-function stageOpening(appUrl: string, name: string, address: string): string {
-  const greeting = name
-    ? `Hey — is this ${name}? This is Maya, I'm calling about the property on ${address}. Did I catch you at a bad time?`
-    : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
-
-  return `<Response>
-${gather(respondUrl(appUrl, "discovery", name, address), say(greeting))}
-<Redirect method="POST">${escXml(noRespUrl(appUrl, "opening", name, address))}</Redirect>
-</Response>`;
+async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
+  const { data } = await supabase
+    .from("maya_conversations")
+    .select("turns")
+    .eq("call_sid", callSid)
+    .single();
+  return (data?.turns as ConversationTurn[]) ?? [];
 }
 
-function handleStage(
-  stage: string,
-  speech: string,
-  appUrl: string,
-  name: string,
-  address: string
-): string {
-  const lower = speech.toLowerCase();
+async function saveConversation(callSid: string, turns: ConversationTurn[], metadata: Record<string, unknown> = {}) {
+  await supabase.from("maya_conversations").upsert(
+    { call_sid: callSid, turns, metadata, updated_at: new Date().toISOString() },
+    { onConflict: "call_sid" }
+  );
+}
 
-  if (/do not call|take me off|stop calling|remove me/.test(lower)) {
-    return `<Response>${say("Of course, I'll remove you from our list right away. Sorry to bother you — have a great day!")}<Hangup/></Response>`;
-  }
+async function extractAndSaveOutcome(callSid: string, turns: ConversationTurn[]) {
+  try {
+    const fullText = turns.map(t => `${t.role}: ${t.content}`).join("\n");
 
-  switch (stage) {
-    case "discovery": {
-      if (/bad time|call back|busy|not now|call me later/.test(lower)) {
-        return `<Response>${say("No worries at all — when would be a better time to reach you? I can call back then.")}<Hangup/></Response>`;
-      }
-      const pitch = address
-        ? `Perfect. I'll be straight with you — we work with a small group of local investors, and ${address} came up on our radar. We're looking to buy directly in the area. Have you thought at all about selling at some point?`
-        : `Perfect. I'll be straight with you — we work with a small group of local investors and wanted to reach out about your property. Have you thought at all about selling?`;
-      return `<Response>
-${gather(respondUrl(appUrl, "motivation", name, address), say(pitch))}
-<Redirect method="POST">${escXml(noRespUrl(appUrl, "discovery", name, address))}</Redirect>
-</Response>`;
+    // Extract email addresses from conversation
+    const emailMatch = fullText.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/);
+    const email = emailMatch?.[0] ?? null;
+
+    // Detect appointment interest
+    const appointmentSet = /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|i'll have erick|erick will|confirm the detail/i.test(fullText);
+
+    // Save to calls table (no lead_id since this is a test call from the app)
+    await supabase.from("calls").insert({
+      lead_id: 1, // placeholder — real calls from leads page will have actual lead_id
+      call_outcome: appointmentSet ? "appointment_set" : "answered",
+      notes: fullText.slice(0, 2000),
+      appointment_set: appointmentSet,
+    });
+
+    if (email) {
+      await supabase.from("maya_conversations")
+        .update({ metadata: { email, appointment_set: appointmentSet } })
+        .eq("call_sid", callSid);
     }
-
-    case "motivation": {
-      if (/not interested|not selling|not looking|no thanks|not really|definitely not/.test(lower)) {
-        return `<Response>${say("I totally understand. Most people I talk to aren't actively looking — I just wanted to see if there was ever a scenario where it might make sense. If things change, feel free to reach out anytime. Have a great day!")}<Hangup/></Response>`;
-      }
-      const question = `That's helpful to know. Quick question — what's the condition of the property right now? Is it move-in ready or does it need some work?`;
-      return `<Response>
-${gather(respondUrl(appUrl, "condition", name, address), say(question))}
-<Redirect method="POST">${escXml(noRespUrl(appUrl, "motivation", name, address))}</Redirect>
-</Response>`;
-    }
-
-    case "condition": {
-      const question = `Got it, thanks. And if you did decide to sell — what kind of timeline would you be thinking? Like a few months out, or something sooner?`;
-      return `<Response>
-${gather(respondUrl(appUrl, "close", name, address), say(question))}
-<Redirect method="POST">${escXml(noRespUrl(appUrl, "condition", name, address))}</Redirect>
-</Response>`;
-    }
-
-    case "close": {
-      const close = `Honestly, the best next step is just a quick walkthrough — takes about 20 minutes. We give you a real number, no pressure, no obligation. If it works for both sides, great. If not, no worries at all. Would something next week work for you?`;
-      return `<Response>
-${gather(respondUrl(appUrl, "appointment", name, address), say(close))}
-<Redirect method="POST">${escXml(noRespUrl(appUrl, "close", name, address))}</Redirect>
-</Response>`;
-    }
-
-    case "appointment": {
-      if (/yes|sure|works|okay|ok|sounds good|fine|yeah|yep|absolutely|perfect|great/.test(lower)) {
-        const confirm = `Perfect — I'll have Erick reach out to confirm the details. What's the best email address to send the confirmation to?`;
-        return `<Response>${gather(respondUrl(appUrl, "email", name, address), say(confirm))}<Hangup/></Response>`;
-      }
-      return `<Response>${say("I completely understand. No pressure at all. If you ever want to explore your options, we'd love to connect. Thanks so much for your time — have a wonderful day!")}<Hangup/></Response>`;
-    }
-
-    case "email": {
-      return `<Response>${say("Perfect, thank you so much. We'll be in touch shortly. Have a wonderful day!")}<Hangup/></Response>`;
-    }
-
-    default:
-      return `<Response><Hangup/></Response>`;
+  } catch (err) {
+    console.error("[maya] outcome save error:", err);
   }
 }
 
-// ---------------------------------------------------------------------------
-// Router
-// ---------------------------------------------------------------------------
+const defaultSystemPrompt = `ROLE:
+You are Maya, a real estate acquisitions representative working on behalf of a local investment group in Western Massachusetts.
+
+OBJECTIVE:
+Call property owners, identify motivation and distress, pre-qualify deal viability, and set appointments for a property walkthrough. You are not closing a sale — you are opening a relationship.
+
+COMPLIANCE RULES:
+- Never represent yourself as the guaranteed end buyer
+- Never discuss contract terms
+- Never make price guarantees on the call
+- Position the team as 'local buyers working with a network of investment partners'
+- If asked if you are an agent: 'I work with a buyer group directly — we're not listing it, we're looking to buy.'
+- Stay conversational. Never sound scripted.
+
+TONE:
+Calm, confident, empathetic. You are solving a problem, not selling a product. Never rush. Never argue. Always end by moving the conversation forward.`;
 
 export function createMayaWebhookRouter() {
   const app = new Hono();
 
-  // Inbound generic opener — Twilio points here for calls to your number
+  // Inbound calls — generic opener
   app.post("/initial", async (c) => {
     const appUrl = getAppUrl(c);
-    return twimlResponse(c, stageOpening(appUrl, "", ""));
+    const body = await c.req.parseBody();
+    const callSid = (body["CallSid"] as string) ?? "";
+    if (callSid) {
+      await saveConversation(callSid, [
+        { role: "assistant", content: "Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?" }
+      ]);
+    }
+    return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, "", ""), say("Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?"))}
+<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=&address=`)}</Redirect>
+</Response>`);
   });
 
-  // Outbound personalized opener — placeTwilioOutboundCall sets webhook to
-  // /api/maya/outbound?name=X&address=Y
+  // Outbound personalized opener
   app.post("/outbound", async (c) => {
     const name = c.req.query("name") ?? "";
     const address = c.req.query("address") ?? "";
     const appUrl = getAppUrl(c);
 
-    // Answering machine: leave voicemail then hang up
-    // Only treat as machine if Twilio explicitly identifies it — "unknown" means
-    // detection timed out, which usually means a human answered quickly.
     const body = await c.req.parseBody();
+    const callSid = (body["CallSid"] as string) ?? "";
+
+    // Machine detection — only leave voicemail if explicitly identified
     const answeredBy = (body["AnsweredBy"] as string) ?? "";
     const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
+
     if (isMachine) {
       const vm = name
-        ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. You can call us back, or I'll try you again soon. Thanks!`
+        ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. Give us a call back when you get a chance. Thanks!`
         : `Hi, this is Maya with a quick message about your property. Give us a call back when you get a chance. Thanks!`;
       return twimlResponse(c, `<Response>${say(vm)}<Hangup/></Response>`);
     }
 
-    return twimlResponse(c, stageOpening(appUrl, name, address));
+    const opener = name
+      ? `Hey — is this ${name}? This is Maya, I'm calling about the property on ${address}. Did I catch you at a bad time?`
+      : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
+
+    if (callSid) {
+      await saveConversation(callSid, [
+        { role: "assistant", content: opener }
+      ], { name, address });
+    }
+
+    return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address), say(opener))}
+<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}`)}</Redirect>
+</Response>`);
   });
 
-  // Speech response handler for all stages
+  // AI-powered speech response handler
   app.post("/respond", async (c) => {
-    const stage = c.req.query("stage") ?? "discovery";
     const name = c.req.query("name") ?? "";
     const address = c.req.query("address") ?? "";
     const appUrl = getAppUrl(c);
 
     const body = await c.req.parseBody();
     const speech = (body["SpeechResult"] as string) ?? "";
+    const callSid = (body["CallSid"] as string) ?? "";
 
-    return twimlResponse(c, handleStage(stage, speech, appUrl, name, address));
+    // Load conversation history and system prompt in parallel
+    const [turns, systemPrompt] = await Promise.all([
+      callSid ? loadConversation(callSid) : Promise.resolve([]),
+      getSystemPrompt(),
+    ]);
+
+    // Add what the person just said
+    const updatedTurns: ConversationTurn[] = [
+      ...turns,
+      { role: "user", content: speech || "(silence)" },
+    ];
+
+    let mayaResponse: string;
+    try {
+      mayaResponse = await getMayaResponse(systemPrompt, updatedTurns, name, address);
+    } catch (err) {
+      console.error("[maya] Claude error:", err);
+      mayaResponse = "Sorry about that — can you say that again?";
+    }
+
+    // Check if Claude signaled end of call
+    const endCall = mayaResponse.includes("[END_CALL]");
+    const spoken = mayaResponse.replace("[END_CALL]", "").trim() || "Thank you for your time. Have a great day!";
+
+    // Save conversation with Maya's response added
+    const finalTurns: ConversationTurn[] = [
+      ...updatedTurns,
+      { role: "assistant", content: spoken },
+    ];
+    if (callSid) {
+      await saveConversation(callSid, finalTurns, { name, address });
+    }
+
+    if (endCall) {
+      return twimlResponse(c, `<Response>${say(spoken)}<Hangup/></Response>`);
+    }
+
+    return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address), say(spoken))}
+<Redirect method="POST">${escXml(`${appUrl}/api/maya/no-response?name=${enc(name)}&address=${enc(address)}`)}</Redirect>
+</Response>`);
   });
 
-  // Silence / no response handler
+  // No response — remind once then hang up
   app.post("/no-response", async (c) => {
-    const stage = c.req.query("stage") ?? "opening";
     const name = c.req.query("name") ?? "";
     const address = c.req.query("address") ?? "";
     const appUrl = getAppUrl(c);
 
-    const twiml = `<Response>
-${gather(respondUrl(appUrl, stage, name, address), say("Sorry, I didn't catch that. Are you still there?"))}
+    return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address), say("Sorry, I didn't catch that — are you still there?"))}
 <Hangup/>
-</Response>`;
-    return twimlResponse(c, twiml);
+</Response>`);
   });
 
-  // Status callback — Twilio posts call completion events here
+  // Status callback — save outcome when call completes
   app.post("/status", async (c) => {
     const body = await c.req.parseBody();
-    console.log(`[maya] call ${body["CallSid"]} → ${body["CallStatus"]}`);
+    const callSid = (body["CallSid"] as string) ?? "";
+    const callStatus = (body["CallStatus"] as string) ?? "";
+    console.log(`[maya] call ${callSid} → ${callStatus}`);
+
+    if ((callStatus === "completed" || callStatus === "no-answer") && callSid) {
+      const turns = await loadConversation(callSid);
+      if (turns.length > 1) {
+        await extractAndSaveOutcome(callSid, turns);
+      }
+    }
+
     return c.body(null, 204);
   });
 

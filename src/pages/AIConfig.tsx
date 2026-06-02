@@ -1,65 +1,155 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Bot, Volume2, Globe } from 'lucide-react';
-import { C, NeoTile, NeoIcon, NeoButton, BackBtn } from '@/components/Neo';
+import { Bot, Save, RotateCcw, ChevronDown, ChevronUp } from 'lucide-react';
+import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
+import { trpc } from '@/providers/trpc';
+
+interface Section {
+  key: keyof ConfigFields;
+  label: string;
+  description: string;
+  rows: number;
+}
+
+interface ConfigFields {
+  systemPrompt: string;
+  openerScript: string;
+  discoveryQuestions: string;
+  positioningScript: string;
+  priceAnchorScript: string;
+  closeScript: string;
+  voicemailScript: string;
+}
+
+const SECTIONS: Section[] = [
+  { key: 'systemPrompt', label: 'Maya\'s Persona & Rules', description: 'Core instructions defining who Maya is, her tone, compliance rules, and objectives.', rows: 12 },
+  { key: 'openerScript', label: 'Opening Script', description: 'What Maya says when someone picks up. Use [Name] and [Street Address] as placeholders.', rows: 8 },
+  { key: 'discoveryQuestions', label: 'Discovery Questions', description: 'Questions Maya uses to uncover motivation, condition, and timeline.', rows: 8 },
+  { key: 'positioningScript', label: 'Positioning', description: 'How Maya positions the buyer group when the person shows interest.', rows: 5 },
+  { key: 'priceAnchorScript', label: 'Price Conversation', description: 'How Maya handles price discussions without making guarantees.', rows: 6 },
+  { key: 'closeScript', label: 'Closing / Appointment', description: 'How Maya asks for and locks in the walkthrough appointment.', rows: 6 },
+  { key: 'voicemailScript', label: 'Voicemail Script', description: 'What Maya leaves when she reaches voicemail.', rows: 5 },
+];
 
 export default function AIConfig() {
   const navigate = useNavigate();
-  const [voice, setVoice] = useState('alloy');
-  const [lang, setLang] = useState('English');
-  const [greeting, setGreeting] = useState(
-    "Hello, this is your AI real estate assistant. I work with local investors who buy houses for cash, as-is, and can close in as little as 14 days. Do you have a few minutes to talk?"
-  );
+  const [expanded, setExpanded] = useState<string | null>('systemPrompt');
+  const [saved, setSaved] = useState(false);
+  const [fields, setFields] = useState<ConfigFields | null>(null);
+  const [configId, setConfigId] = useState<number | null>(null);
+
+  const { isLoading } = trpc.aiConfig.get.useQuery(undefined, {
+    onSuccess: (data: any) => {
+      if (data && !fields) {
+        setConfigId(data.id);
+        setFields({
+          systemPrompt: data.systemPrompt ?? '',
+          openerScript: data.openerScript ?? '',
+          discoveryQuestions: data.discoveryQuestions ?? '',
+          positioningScript: data.positioningScript ?? '',
+          priceAnchorScript: data.priceAnchorScript ?? '',
+          closeScript: data.closeScript ?? '',
+          voicemailScript: data.voicemailScript ?? '',
+        });
+      }
+    },
+  });
+
+  const updateMut = trpc.aiConfig.update.useMutation({
+    onSuccess: () => {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    },
+  });
+
+  const handleSave = () => {
+    if (!fields || configId == null) return;
+    updateMut.mutate({ id: configId, ...fields });
+  };
+
+  const setField = (key: keyof ConfigFields, val: string) => {
+    setFields(f => f ? { ...f, [key]: val } : f);
+  };
+
+  if (isLoading || !fields) {
+    return (
+      <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
+        <p style={{ color: C.muted, fontWeight: 600 }}>Loading config…</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: '16px 20px 24px' }}>
+      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
         <BackBtn onClick={() => navigate(-1)} />
-        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>AI Agent Config</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Maya's Script</h1>
       </div>
 
-      <NeoTile style={{ background: `linear-gradient(135deg, ${C.teal}, ${C.blue})`, textAlign: 'center', color: '#fff', marginBottom: 24, padding: 28 }}>
-        <div style={{ width: 64, height: 64, borderRadius: 22, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-          <Bot size={30} color="#fff" strokeWidth={1.5} />
-        </div>
-        <p style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>AI Calling Agent</p>
-        <p style={{ fontSize: 13, opacity: 0.65, margin: '6px 0 0', fontWeight: 500 }}>Western Massachusetts Real Estate</p>
+      {/* Hero */}
+      <NeoTile style={{ background: `linear-gradient(135deg, ${C.purple}, #4F46E5)`, textAlign: 'center', color: '#fff', marginBottom: 24, padding: 24 }}>
+        <NeoIcon bg="rgba(255,255,255,0.2)" size={56} round={18} style={{ margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Bot size={26} color="#fff" strokeWidth={1.5} />
+        </NeoIcon>
+        <p style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>Claude-Powered AI Brain</p>
+        <p style={{ fontSize: 13, opacity: 0.7, margin: '6px 0 0', fontWeight: 500 }}>Edit Maya's instructions below — changes take effect on the next call</p>
       </NeoTile>
 
-      <p className="maya-section-title">Voice</p>
-      <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
-          <NeoIcon bg={C.tealS} size={36} round={12} style={{ marginRight: 14 }}><Volume2 size={18} color={C.teal} strokeWidth={2} /></NeoIcon>
-          <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: C.text }}>Voice</span>
-          <select value={voice} onChange={e => setVoice(e.target.value)} className="neo-select" aria-label="Select voice">
-            <option value="alloy">Alloy (Neutral)</option>
-            <option value="echo">Echo (Male)</option>
-            <option value="nova">Nova (Female)</option>
-            <option value="shimmer">Shimmer (Female)</option>
-          </select>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', padding: '16px 20px' }}>
-          <NeoIcon bg={C.purpleS} size={36} round={12} style={{ marginRight: 14 }}><Globe size={18} color={C.purple} strokeWidth={2} /></NeoIcon>
-          <span style={{ flex: 1, fontSize: 16, fontWeight: 600, color: C.text }}>Language</span>
-          <select value={lang} onChange={e => setLang(e.target.value)} className="neo-select" aria-label="Select language">
-            <option>English</option>
-            <option>Spanish</option>
-          </select>
-        </div>
-      </NeoTile>
+      {/* Script sections */}
+      {SECTIONS.map((section) => {
+        const isOpen = expanded === section.key;
+        return (
+          <NeoTile key={section.key} style={{ marginBottom: 12, padding: 0, overflow: 'hidden' }}>
+            <button
+              onClick={() => setExpanded(isOpen ? null : section.key)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+            >
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>{section.label}</p>
+                {!isOpen && <p style={{ fontSize: 12, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{section.description}</p>}
+              </div>
+              {isOpen ? <ChevronUp size={18} color={C.muted} /> : <ChevronDown size={18} color={C.muted} />}
+            </button>
+            {isOpen && (
+              <div style={{ padding: '0 16px 16px' }}>
+                <p style={{ fontSize: 12, color: C.muted, margin: '0 0 10px', fontWeight: 500 }}>{section.description}</p>
+                <textarea
+                  value={fields[section.key]}
+                  onChange={e => setField(section.key, e.target.value)}
+                  rows={section.rows}
+                  style={{
+                    width: '100%', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12,
+                    padding: '12px 14px', fontSize: 13, resize: 'vertical',
+                    background: 'rgba(0,0,0,0.02)', color: C.text, lineHeight: 1.6,
+                    fontWeight: 500, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            )}
+          </NeoTile>
+        );
+      })}
 
-      <p className="maya-section-title" style={{ marginTop: 24 }}>Greeting Script</p>
-      <NeoTile>
-        <textarea
-          value={greeting}
-          onChange={e => setGreeting(e.target.value)}
-          rows={6}
-          aria-label="Greeting script"
-          style={{ width: '100%', border: 'none', outline: 'none', fontSize: 15, resize: 'none', background: 'transparent', color: C.text, lineHeight: 1.6, fontWeight: 500 }}
-        />
-      </NeoTile>
+      {/* Save button */}
+      <button
+        onClick={handleSave}
+        disabled={updateMut.isLoading}
+        style={{
+          width: '100%', height: 52, borderRadius: 16, marginTop: 8,
+          background: saved ? `linear-gradient(135deg, ${C.green}, #28A745)` : `linear-gradient(135deg, ${C.purple}, #4F46E5)`,
+          color: '#fff', border: 'none', fontSize: 16, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          cursor: updateMut.isLoading ? 'wait' : 'pointer',
+          transition: 'background 0.3s',
+        }}
+      >
+        {saved ? <><RotateCcw size={18} /> Saved!</> : <><Save size={18} /> {updateMut.isLoading ? 'Saving…' : 'Save Changes'}</>}
+      </button>
 
-      <NeoButton style={{ marginTop: 24 }} onClick={() => {}}>Save Configuration</NeoButton>
+      <p style={{ fontSize: 12, color: C.muted, textAlign: 'center', margin: '12px 0 0', fontWeight: 500 }}>
+        Changes are saved to your database and used on the next call.
+      </p>
       <div style={{ height: 20 }} />
     </div>
   );
