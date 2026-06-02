@@ -27,7 +27,7 @@ function say(text: string, voice = "Google.en-US-Neural2-F"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="auto" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="1" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
