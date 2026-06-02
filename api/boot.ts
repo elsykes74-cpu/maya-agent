@@ -172,32 +172,39 @@ app.get("/api/auth/google/url", oauthLimiter, async (c) => {
 
 // Env-dump endpoint (development / diagnostic only)
 app.get("/__env-debug", async (c) => {
-  // Called AFTER module loads so env is populated
   const issues = validateEnv();
-  const allKeys = Object.keys(process.env).sort();
-  const snapshot: Record<string, string | undefined> = {};
-  for (const k of allKeys) snapshot[k] = process.env[k];
   return c.json(
     {
       NODE_ENV: process.env.NODE_ENV,
-      PORT: process.env.PORT,
       validateEnvMissing: issues,
       envProblems: (issues.length ? "MISSING: " + issues.join(", ") : "OK"),
-      required: {
+      keys: {
         APP_ID: !!process.env.APP_ID,
-        APP_SECRET: !!process.env.APP_SECRET,
         DATABASE_URL: !!process.env.DATABASE_URL,
-        KIMI_AUTH_URL: !!process.env.KIMI_AUTH_URL,
-        KIMI_OPEN_URL: !!process.env.KIMI_OPEN_URL,
-        VAPI_API_KEY: !!process.env.VAPI_API_KEY,
+        SUPABASE_URL: !!process.env.SUPABASE_URL,
+        SUPABASE_ANON_KEY: !!process.env.SUPABASE_ANON_KEY,
+        ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
         ELEVENLABS_API_KEY: !!process.env.ELEVENLABS_API_KEY,
-        NODE_ENV: !!process.env.NODE_ENV,
+        TWILIO_ACCOUNT_SID: !!process.env.TWILIO_ACCOUNT_SID,
+        TWILIO_AUTH_TOKEN: !!process.env.TWILIO_AUTH_TOKEN,
+        APP_URL: process.env.APP_URL || "(not set)",
+        VERCEL_URL: process.env.VERCEL_URL || "(not set)",
       },
-      totalKeys: allKeys.length,
     },
     200,
     { "Cache-Control": "no-store" },
   );
+});
+
+// Maya webhook smoke-test — hit this URL manually to get a quick TwiML response
+app.all("/__maya-test", async (c) => {
+  const proto = c.req.header("x-forwarded-proto") ?? "https";
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "unknown";
+  const appUrl = `${proto}://${host}`;
+  const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response><Say>Maya webhook is reachable. Anthropic key is ${hasAnthropicKey ? "present" : "missing"}. App URL is ${appUrl}.</Say><Hangup/></Response>`;
+  return c.body(xml, 200, { "Content-Type": "text/xml; charset=utf-8" });
 });
 
 // Kimi OAuth callback

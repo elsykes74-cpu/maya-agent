@@ -2,7 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY ?? "",
-  timeout: 8000, // fail fast — Vercel Hobby functions have a 10s hard limit
+  // Cold start (3-5s) + Supabase (0.5s) + Claude must fit inside Vercel's 10s limit
+  timeout: 4500,
 });
 
 export interface ConversationTurn {

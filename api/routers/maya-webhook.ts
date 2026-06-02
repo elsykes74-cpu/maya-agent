@@ -198,7 +198,14 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
   // AI-powered speech response handler
   app.post("/respond", async (c) => {
     console.log("[maya/respond] webhook received");
-    try {
+
+    // Safety deadline: respond within 7s from handler entry so Vercel's 10s limit is never hit
+    let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 7000);
+    });
+
+    const work = (async () => {
       const name = c.req.query("name") ?? "";
       const address = c.req.query("address") ?? "";
       const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
@@ -250,9 +257,24 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
 ${gather(respondUrl(appUrl, name, address, voice), spokenTts)}
 <Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
 </Response>`);
+    })();
+
+    try {
+      const result = await Promise.race([work, deadline]);
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      return result;
     } catch (err) {
-      console.error("[maya/respond] fatal:", err);
-      return twimlResponse(c, `<Response><Say>Sorry, I had a technical issue. Can we try again in a moment?</Say><Hangup/></Response>`);
+      if (deadlineTimer) clearTimeout(deadlineTimer);
+      const isDeadline = err instanceof Error && err.message === "handler_deadline";
+      console.error(isDeadline ? "[maya/respond] deadline exceeded" : "[maya/respond] fatal:", err);
+      const appUrl = getAppUrl(c);
+      const name = c.req.query("name") ?? "";
+      const address = c.req.query("address") ?? "";
+      const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      return twimlResponse(c, `<Response>
+${gather(respondUrl(appUrl, name, address, voice), say("Sorry, one moment — can you say that again?", voice))}
+<Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
+</Response>`);
     }
   });
 
