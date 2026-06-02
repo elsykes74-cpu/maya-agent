@@ -4,7 +4,7 @@
     {
       "src": "api/vercel.js",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["dist/**"] }
+      "config": { "includeFiles": ["dist/**"], "maxDuration": 30 }
     },
     {
       "src": "package.json",
@@ -12,11 +12,6 @@
       "config": { "distDir": "dist/public" }
     }
   ],
-  "functions": {
-    "api/vercel.js": {
-      "maxDuration": 30
-    }
-  },
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/vercel.js" },
     { "handle": "filesystem" },
