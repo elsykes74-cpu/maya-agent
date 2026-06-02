@@ -170,8 +170,9 @@ app.get("/api/auth/google/url", oauthLimiter, async (c) => {
 	return c.json({ authUrl: url });
 });
 
-// Env-dump endpoint (development / diagnostic only)
+// Env-dump endpoint — dev only, blocked in production
 app.get("/__env-debug", async (c) => {
+  if (env.isProduction) return c.json({ error: "Not Found" }, 404);
   const issues = validateEnv();
   return c.json(
     {
@@ -196,8 +197,9 @@ app.get("/__env-debug", async (c) => {
   );
 });
 
-// Maya webhook smoke-test — hit this URL manually to get a quick TwiML response
+// Maya webhook smoke-test — dev only, blocked in production
 app.all("/__maya-test", async (c) => {
+  if (env.isProduction) return c.json({ error: "Not Found" }, 404);
   const proto = c.req.header("x-forwarded-proto") ?? "https";
   const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "unknown";
   const appUrl = `${proto}://${host}`;
