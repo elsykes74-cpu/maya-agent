@@ -146,9 +146,12 @@ export function createMayaWebhookRouter() {
     const appUrl = getAppUrl(c);
 
     // Answering machine: leave voicemail then hang up
+    // Only treat as machine if Twilio explicitly identifies it — "unknown" means
+    // detection timed out, which usually means a human answered quickly.
     const body = await c.req.parseBody();
     const answeredBy = (body["AnsweredBy"] as string) ?? "";
-    if (answeredBy && answeredBy !== "human") {
+    const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
+    if (isMachine) {
       const vm = name
         ? `Hey ${name}, this is Maya calling about the property on ${address}. Nothing urgent — I just wanted to reach out about something that might be worth a quick conversation. You can call us back, or I'll try you again soon. Thanks!`
         : `Hi, this is Maya with a quick message about your property. Give us a call back when you get a chance. Thanks!`;
@@ -189,7 +192,7 @@ ${gather(respondUrl(appUrl, stage, name, address), say("Sorry, I didn't catch th
   app.post("/status", async (c) => {
     const body = await c.req.parseBody();
     console.log(`[maya] call ${body["CallSid"]} → ${body["CallStatus"]}`);
-    return c.text("", 204);
+    return c.body(null, 204);
   });
 
   return app;
