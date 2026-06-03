@@ -152,6 +152,7 @@ export const campaignsRouter = createRouter({
       const host = ctx.req.headers.get("x-forwarded-host") ?? ctx.req.headers.get("host") ?? "";
       const appUrl = host ? `${proto}://${host}` : env.appUrl;
 
+
       const twilioReady = isTwilioConfigured();
       const config = await getCallingConfig();
       if (!twilioReady && (!config || !config.apiKey)) {

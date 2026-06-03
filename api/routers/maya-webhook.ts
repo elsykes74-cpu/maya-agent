@@ -40,6 +40,7 @@ const twilioGuard: MiddlewareHandler = async (c, next) => {
   return next();
 };
 
+
 function getAppUrl(c: Context): string {
   const proto = c.req.header("x-forwarded-proto") ?? "https";
   // x-forwarded-host is the real public hostname in Vercel serverless; host may be internal
