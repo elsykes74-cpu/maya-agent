@@ -54,7 +54,7 @@ export default function AIConfig() {
   const [fields, setFields] = useState<ConfigFields | null>(null);
   const [configId, setConfigId] = useState<number | null>(null);
 
-  const { isLoading, data } = trpc.aiConfig.get.useQuery(undefined);
+  const { isLoading, data, isError } = trpc.aiConfig.get.useQuery(undefined, { retry: 2 });
 
   useEffect(() => {
     if (data && !fields) {
@@ -92,6 +92,23 @@ export default function AIConfig() {
   const setField = (key: keyof ConfigFields, val: string) => {
     setFields(f => f ? { ...f, [key]: val } : f);
   };
+
+  if (isError) {
+    return (
+      <div style={{ padding: '28px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+          <BackBtn onClick={() => navigate(-1)} />
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Maya's Script</h1>
+        </div>
+        <div style={{ background: 'rgba(255,59,48,0.08)', borderRadius: 16, padding: '24px 20px', textAlign: 'center' }}>
+          <p style={{ fontSize: 16, fontWeight: 700, color: C.red, margin: '0 0 8px' }}>Could not load config</p>
+          <p style={{ fontSize: 14, color: C.muted, fontWeight: 500, margin: 0 }}>
+            The server is not responding. Check that your environment variables are set in Vercel and redeploy.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading || !fields) {
     return (
