@@ -41,7 +41,15 @@ function noResponseUrl(appUrl: string, name: string, address: string, voice: str
 
 interface ElevenLabsConfig { apiKey: string; voiceId: string; }
 
-async function getAIConfig(): Promise<{ systemPrompt: string; elevenlabs: ElevenLabsConfig | null }> {
+interface AIConfigResult { systemPrompt: string; elevenlabs: ElevenLabsConfig | null; }
+let aiConfigCache: AIConfigResult | null = null;
+let aiConfigCachedAt = 0;
+const AI_CONFIG_TTL = 60_000; // re-fetch at most once per minute
+
+async function getAIConfig(): Promise<AIConfigResult> {
+  const now = Date.now();
+  if (aiConfigCache && now - aiConfigCachedAt < AI_CONFIG_TTL) return aiConfigCache;
+
   const { data, error } = await supabase
     .from("ai_config")
     .select("system_prompt, elevenlabs_api_key, elevenlabs_voice_id")
@@ -55,7 +63,10 @@ async function getAIConfig(): Promise<{ systemPrompt: string; elevenlabs: Eleven
     data?.elevenlabs_api_key && data?.elevenlabs_voice_id
       ? { apiKey: data.elevenlabs_api_key, voiceId: data.elevenlabs_voice_id }
       : null;
-  return { systemPrompt: data?.system_prompt ?? defaultSystemPrompt, elevenlabs };
+  const result: AIConfigResult = { systemPrompt: data?.system_prompt ?? defaultSystemPrompt, elevenlabs };
+  aiConfigCache = result;
+  aiConfigCachedAt = now;
+  return result;
 }
 
 function playEl(appUrl: string, text: string, apiKey: string, voiceId: string): string {
@@ -199,12 +210,12 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
   app.post("/respond", async (c) => {
     console.log("[maya/respond] webhook received");
 
-    // Safety deadline: Vercel's 10s function limit starts at request arrival, not handler entry.
-    // Cold start can take 3-6s before this code runs, leaving only 4-7s for the handler.
-    // Fire at 4s from handler entry so the fallback TwiML is always sent before Vercel kills us.
+    // Safety deadline: Vercel's 10s limit starts at request arrival, not handler entry.
+    // Cold start (3-5s) + this deadline must fit in 10s total.
+    // With AI config cached after first call, Supabase latency drops to ~0 on subsequent turns.
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
     const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 4000);
+      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 5000);
     });
 
     const work = (async () => {
