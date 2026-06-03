@@ -59,10 +59,10 @@ async function getAIConfig(): Promise<AIConfigResult> {
   if (error) {
     console.error("[maya] getAIConfig error:", error.message);
   }
-  const elevenlabs =
-    data?.elevenlabs_api_key && data?.elevenlabs_voice_id
-      ? { apiKey: data.elevenlabs_api_key, voiceId: data.elevenlabs_voice_id }
-      : null;
+  // Prefer ELEVENLABS_API_KEY env var over Supabase value (Supabase may hold a rotated/disabled key)
+  const apiKey = (process.env.ELEVENLABS_API_KEY || data?.elevenlabs_api_key || "").trim();
+  const voiceId = (data?.elevenlabs_voice_id || "").trim();
+  const elevenlabs = apiKey && voiceId ? { apiKey, voiceId } : null;
   const result: AIConfigResult = { systemPrompt: data?.system_prompt ?? defaultSystemPrompt, elevenlabs };
   aiConfigCache = result;
   aiConfigCachedAt = now;
