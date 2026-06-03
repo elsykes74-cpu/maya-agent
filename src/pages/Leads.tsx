@@ -1,631 +1,209 @@
-import { useState } from 'react'
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Badge } from '@/components/ui/badge'
-import { Textarea } from '@/components/ui/textarea'
-import {
-  Search,
-  Plus,
-  Flame,
-  Thermometer,
-  Snowflake,
-  Phone,
-  MessageSquare,
-  Calendar,
-  MoreHorizontal,
-  Trash2,
-  Edit3,
-  Eye,
-  Target,
-} from 'lucide-react'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Link } from 'react-router'
+import { useState, useEffect } from 'react';
+import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles } from 'lucide-react';
+import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet } from '@/components/Neo';
+import { loadLeads, saveLeads, addCallRecord, getNextId } from '@/lib/persistence';
+import type { Lead } from '@/lib/persistence';
 
 export default function Leads() {
-  const [search, setSearch] = useState('')
-  const [stageFilter, setStageFilter] = useState('all')
-  const [motivationFilter, setMotivationFilter] = useState('all')
-  const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingLead, setEditingLead] = useState<any>(null)
-  const [detailLead, setDetailLead] = useState<any>(null)
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmData, setConfirmData] = useState<{ title: string; desc: string; onConfirm: () => void } | null>(null);
 
-  const { data: leadsData, refetch } = trpc.leads.list.useQuery({
-    search: search || undefined,
-    stage: stageFilter,
-    motivation: motivationFilter,
-    limit: 50,
-  })
+  useEffect(() => { setLeads(loadLeads()); }, []);
+  useEffect(() => { if (leads.length > 0) saveLeads(leads); }, [leads]);
 
-  const { data: sources } = trpc.leads.sources.useQuery()
-  const { data: profiles } = trpc.leads.profiles.useQuery()
+  const filtered = search
+    ? leads.filter(l => l.sellerName.toLowerCase().includes(search.toLowerCase()) || l.propertyAddress.toLowerCase().includes(search.toLowerCase()))
+    : filter === 'all' ? leads : leads.filter(l => l.motivationLevel === filter);
 
-  const createLead = trpc.leads.create.useMutation({ onSuccess: () => { refetch(); setDialogOpen(false) } })
-  const updateLead = trpc.leads.update.useMutation({ onSuccess: () => { refetch(); setDialogOpen(false); setEditingLead(null) } })
-  const deleteLead = trpc.leads.delete.useMutation({ onSuccess: () => refetch() })
+  const tabs = [
+    { k: 'all', l: 'All', n: leads.length },
+    { k: 'hot', l: '🔥 Hot', n: leads.filter(l => l.motivationLevel === 'hot').length },
+    { k: 'warm', l: 'Warm', n: leads.filter(l => l.motivationLevel === 'warm').length },
+    { k: 'cold', l: 'Cold', n: leads.filter(l => l.motivationLevel === 'cold').length },
+  ];
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    const data: any = {
-      sellerName: formData.get('sellerName') as string,
-      phone: formData.get('phone') as string,
-      email: formData.get('email') as string || undefined,
-      propertyAddress: formData.get('propertyAddress') as string,
-      city: formData.get('city') as string,
-      zipCode: formData.get('zipCode') as string,
-      motivationLevel: formData.get('motivationLevel') as any,
-      timeline: formData.get('timeline') as string,
-      occupancyStatus: formData.get('occupancyStatus') as any || undefined,
-      condition: formData.get('condition') as any || undefined,
-      estimatedRepairs: formData.get('estimatedRepairs') as string || undefined,
-      beds: formData.get('beds') ? Number(formData.get('beds')) : undefined,
-      baths: formData.get('baths') as string || undefined,
-      squareFootage: formData.get('squareFootage') ? Number(formData.get('squareFootage')) : undefined,
-      askingPrice: formData.get('askingPrice') as string || undefined,
-      arv: formData.get('arv') as string || undefined,
-      mao: formData.get('mao') as string || undefined,
-      notes: formData.get('notes') as string || undefined,
-      pipelineStage: formData.get('pipelineStage') as any || 'lead',
-      sourceId: formData.get('sourceId') ? Number(formData.get('sourceId')) : undefined,
-      profileId: formData.get('profileId') ? Number(formData.get('profileId')) : undefined,
-      // Lead Finder fields
-      leadType: formData.get('leadType') as any || 'other',
-      ownerMailingAddress: formData.get('ownerMailingAddress') as string || undefined,
-      county: formData.get('county') as string || undefined,
-      yearBuilt: formData.get('yearBuilt') ? Number(formData.get('yearBuilt')) : undefined,
-      assessedValue: formData.get('assessedValue') as string || undefined,
-      estimatedValue: formData.get('estimatedValue') as string || undefined,
-      ownershipYears: formData.get('ownershipYears') ? Number(formData.get('ownershipYears')) : undefined,
-      taxStatus: formData.get('taxStatus') as string || undefined,
-      isVacant: formData.get('isVacant') === 'on',
-      isAbsentee: formData.get('isAbsentee') === 'on',
-      isProbate: formData.get('isProbate') === 'on',
-      hasTaxDelinquency: formData.get('hasTaxDelinquency') === 'on',
-      isPreForeclosure: formData.get('isPreForeclosure') === 'on',
-      hasCodeViolations: formData.get('hasCodeViolations') === 'on',
-      isExpiredListing: formData.get('isExpiredListing') === 'on',
-      isFsbo: formData.get('isFsbo') === 'on',
-      isOutOfState: formData.get('isOutOfState') === 'on',
-      isMultifamilyLandlord: formData.get('isMultifamilyLandlord') === 'on',
-      hasVisibleDistress: formData.get('hasVisibleDistress') === 'on',
-    }
-
-    if (editingLead) {
-      updateLead.mutate({ ...data, id: editingLead.id })
-    } else {
-      createLead.mutate(data)
-    }
-  }
-
-  const openEdit = (lead: any) => {
-    setEditingLead(lead)
-    setDialogOpen(true)
-  }
-
-  const openNew = () => {
-    setEditingLead(null)
-    setDialogOpen(true)
-  }
-
-  const LEAD_TYPE_LABELS: Record<string, string> = {
-    vacant: 'Vacant',
-    absentee_owner: 'Absentee',
-    probate: 'Probate',
-    tax_delinquent: 'Tax Delinquent',
-    pre_foreclosure: 'Pre-Foreclosure',
-    tired_landlord: 'Tired Landlord',
-    code_violation: 'Code Violation',
-    expired_listing: 'Expired Listing',
-    fsbo: 'FSBO',
-    high_equity: 'High Equity',
-    inherited: 'Inherited',
-    fire_damaged: 'Fire Damaged',
-    long_term_owner: 'Long-Term Owner',
-    other: 'Other',
-  }
-
-  const getScoreBadge = (score: number | null) => {
-    const s = score ?? 0
-    if (s >= 80) return <Badge className="bg-red-500 text-white text-xs px-1.5 py-0"><Flame className="w-2.5 h-2.5 mr-0.5 inline" />{s}</Badge>
-    if (s >= 60) return <Badge className="bg-amber-500 text-white text-xs px-1.5 py-0">{s}</Badge>
-    if (s >= 40) return <Badge className="bg-blue-500 text-white text-xs px-1.5 py-0">{s}</Badge>
-    if (s > 0)  return <Badge variant="secondary" className="text-xs px-1.5 py-0">{s}</Badge>
-    return null
-  }
-
-  const getMotivationBadge = (level: string | null) => {
-    switch (level) {
-      case 'hot': return <Badge className="bg-red-500"><Flame className="w-3 h-3 mr-1" /> HOT</Badge>
-      case 'warm': return <Badge className="bg-amber-500"><Thermometer className="w-3 h-3 mr-1" /> WARM</Badge>
-      case 'cold': return <Badge className="bg-cyan-500"><Snowflake className="w-3 h-3 mr-1" /> COLD</Badge>
-      default: return <Badge variant="secondary">Unknown</Badge>
-    }
-  }
-
-  const getStageBadge = (stage: string | null) => {
-    const colors: Record<string, string> = {
-      lead: 'bg-slate-500',
-      outreach: 'bg-blue-500',
-      scoring: 'bg-indigo-500',
-      hot_routing: 'bg-red-500',
-      warm_nurture: 'bg-amber-500',
-      cold_drip: 'bg-cyan-500',
-      appointment: 'bg-emerald-500',
-      close: 'bg-green-600',
-    }
-    return <Badge className={colors[stage || 'lead'] || 'bg-slate-500'}>{(stage || 'lead').replace(/_/g, ' ').toUpperCase()}</Badge>
-  }
+  const deleteLead = (id: number) => {
+    const lead = leads.find(l => l.id === id);
+    if (!lead) return;
+    setConfirmData({
+      title: 'Delete Lead',
+      desc: `Remove ${lead.sellerName} from your leads? This cannot be undone.`,
+      onConfirm: () => { setLeads(p => p.filter(l => l.id !== id)); setConfirmOpen(false); },
+    });
+    setConfirmOpen(true);
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Filters & Actions */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex flex-col sm:flex-row gap-3 flex-1 w-full sm:w-auto">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <Input
-              placeholder="Search leads..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Select value={stageFilter} onValueChange={setStageFilter}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="Pipeline Stage" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Stages</SelectItem>
-              <SelectItem value="lead">Lead</SelectItem>
-              <SelectItem value="outreach">Outreach</SelectItem>
-              <SelectItem value="scoring">Scoring</SelectItem>
-              <SelectItem value="hot_routing">Hot Routing</SelectItem>
-              <SelectItem value="warm_nurture">Warm Nurture</SelectItem>
-              <SelectItem value="cold_drip">Cold Drip</SelectItem>
-              <SelectItem value="appointment">Appointment</SelectItem>
-              <SelectItem value="close">Close</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={motivationFilter} onValueChange={setMotivationFilter}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue placeholder="Motivation" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="hot">HOT</SelectItem>
-              <SelectItem value="warm">WARM</SelectItem>
-              <SelectItem value="cold">COLD</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={openNew} className="bg-emerald-600 hover:bg-emerald-700">
-              <Plus className="w-4 h-4 mr-2" /> Add Lead
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{editingLead ? 'Edit Lead' : 'Add New Lead'}</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Seller Name *</Label>
-                  <Input name="sellerName" defaultValue={editingLead?.sellerName || ''} required />
-                </div>
-                <div className="space-y-2">
-                  <Label>Phone</Label>
-                  <Input name="phone" defaultValue={editingLead?.phone || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Email</Label>
-                  <Input name="email" type="email" defaultValue={editingLead?.email || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Property Address *</Label>
-                  <Input name="propertyAddress" defaultValue={editingLead?.propertyAddress || ''} required />
-                </div>
-                <div className="space-y-2">
-                  <Label>City</Label>
-                  <Input name="city" defaultValue={editingLead?.city || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>ZIP Code</Label>
-                  <Input name="zipCode" defaultValue={editingLead?.zipCode || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Lead Source</Label>
-                  <Select name="sourceId" defaultValue={String(editingLead?.sourceId || '')}>
-                    <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {sources?.map((s: { id: number; name: string }) => (
-                        <SelectItem key={s.id} value={String(s.id)}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Lead Profile</Label>
-                  <Select name="profileId" defaultValue={String(editingLead?.profileId || '')}>
-                    <SelectTrigger><SelectValue placeholder="Select profile" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">None</SelectItem>
-                      {profiles?.map((p: { id: number; name: string }) => (
-                        <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Motivation Level</Label>
-                  <Select name="motivationLevel" defaultValue={editingLead?.motivationLevel || 'cold'}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="hot">HOT</SelectItem>
-                      <SelectItem value="warm">WARM</SelectItem>
-                      <SelectItem value="cold">COLD</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Timeline</Label>
-                  <Input name="timeline" defaultValue={editingLead?.timeline || ''} placeholder="e.g., 30 days" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Occupancy</Label>
-                  <Select name="occupancyStatus" defaultValue={editingLead?.occupancyStatus || ''}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Unknown</SelectItem>
-                      <SelectItem value="owner_occupied">Owner Occupied</SelectItem>
-                      <SelectItem value="tenant">Tenant</SelectItem>
-                      <SelectItem value="vacant">Vacant</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Condition</Label>
-                  <Select name="condition" defaultValue={editingLead?.condition || ''}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Unknown</SelectItem>
-                      <SelectItem value="move_in_ready">Move-in Ready</SelectItem>
-                      <SelectItem value="light_rehab">Light Rehab</SelectItem>
-                      <SelectItem value="medium_rehab">Medium Rehab</SelectItem>
-                      <SelectItem value="heavy_rehab">Heavy Rehab</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Est. Repairs ($)</Label>
-                  <Input name="estimatedRepairs" defaultValue={editingLead?.estimatedRepairs || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Asking Price ($)</Label>
-                  <Input name="askingPrice" defaultValue={editingLead?.askingPrice || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>ARV ($)</Label>
-                  <Input name="arv" defaultValue={editingLead?.arv || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Beds</Label>
-                  <Input name="beds" defaultValue={editingLead?.beds || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Baths</Label>
-                  <Input name="baths" defaultValue={editingLead?.baths || ''} />
-                </div>
-                <div className="space-y-2">
-                  <Label>Sq. Ft.</Label>
-                  <Input name="squareFootage" defaultValue={editingLead?.squareFootage || ''} type="number" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Pipeline Stage</Label>
-                  <Select name="pipelineStage" defaultValue={editingLead?.pipelineStage || 'lead'}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="lead">Lead</SelectItem>
-                      <SelectItem value="outreach">Outreach</SelectItem>
-                      <SelectItem value="scoring">Scoring</SelectItem>
-                      <SelectItem value="hot_routing">Hot Routing</SelectItem>
-                      <SelectItem value="warm_nurture">Warm Nurture</SelectItem>
-                      <SelectItem value="cold_drip">Cold Drip</SelectItem>
-                      <SelectItem value="appointment">Appointment</SelectItem>
-                      <SelectItem value="close">Close</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {/* Lead Finder: Lead Type + Motivation Indicators */}
-              <div className="border-t pt-4 mt-2">
-                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
-                  <Target className="w-4 h-4 text-emerald-600" /> Lead Finder — Motivation Indicators
-                </p>
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="space-y-2">
-                    <Label>Lead Type</Label>
-                    <Select name="leadType" defaultValue={editingLead?.leadType || 'other'}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="other">Other / Unknown</SelectItem>
-                        <SelectItem value="vacant">Vacant Property</SelectItem>
-                        <SelectItem value="absentee_owner">Absentee Owner</SelectItem>
-                        <SelectItem value="probate">Probate / Estate</SelectItem>
-                        <SelectItem value="tax_delinquent">Tax Delinquent</SelectItem>
-                        <SelectItem value="pre_foreclosure">Pre-Foreclosure</SelectItem>
-                        <SelectItem value="tired_landlord">Tired Landlord</SelectItem>
-                        <SelectItem value="code_violation">Code Violation</SelectItem>
-                        <SelectItem value="expired_listing">Expired Listing</SelectItem>
-                        <SelectItem value="fsbo">FSBO</SelectItem>
-                        <SelectItem value="high_equity">High Equity</SelectItem>
-                        <SelectItem value="inherited">Inherited</SelectItem>
-                        <SelectItem value="fire_damaged">Fire Damaged</SelectItem>
-                        <SelectItem value="long_term_owner">Long-Term Owner</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Ownership Years</Label>
-                    <Input name="ownershipYears" type="number" defaultValue={editingLead?.ownershipYears || ''} placeholder="e.g. 18" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>County</Label>
-                    <Input name="county" defaultValue={editingLead?.county || ''} placeholder="Hampden, Hampshire…" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Year Built</Label>
-                    <Input name="yearBuilt" type="number" defaultValue={editingLead?.yearBuilt || ''} placeholder="e.g. 1965" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Assessed Value ($)</Label>
-                    <Input name="assessedValue" type="number" defaultValue={editingLead?.assessedValue || ''} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Est. Value ($)</Label>
-                    <Input name="estimatedValue" type="number" defaultValue={editingLead?.estimatedValue || ''} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Owner Mailing Address</Label>
-                    <Input name="ownerMailingAddress" defaultValue={editingLead?.ownerMailingAddress || ''} placeholder="If different from property" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Tax / Foreclosure Status</Label>
-                    <Input name="taxStatus" defaultValue={editingLead?.taxStatus || ''} placeholder="e.g. 2 years delinquent" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-3 gap-x-4">
-                  {[
-                    { name: 'isVacant', label: 'Vacant (+20)' },
-                    { name: 'isAbsentee', label: 'Absentee Owner (+15)' },
-                    { name: 'isProbate', label: 'Probate / Estate (+20)' },
-                    { name: 'hasTaxDelinquency', label: 'Tax Delinquent (+20)' },
-                    { name: 'isPreForeclosure', label: 'Pre-Foreclosure (+25)' },
-                    { name: 'hasCodeViolations', label: 'Code Violations (+15)' },
-                    { name: 'isExpiredListing', label: 'Expired Listing (+15)' },
-                    { name: 'isFsbo', label: 'FSBO (+10)' },
-                    { name: 'isOutOfState', label: 'Out-of-State Owner (+10)' },
-                    { name: 'isMultifamilyLandlord', label: 'Multifamily Landlord (+10)' },
-                    { name: 'hasVisibleDistress', label: 'Visible Distress (+10)' },
-                  ].map(({ name, label }) => (
-                    <label key={name} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        name={name}
-                        defaultChecked={!!editingLead?.[name]}
-                        className="w-4 h-4 rounded accent-emerald-600"
-                      />
-                      <span className="text-xs text-slate-600 dark:text-slate-400">{label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Notes</Label>
-                <Textarea name="notes" defaultValue={editingLead?.notes || ''} rows={3} />
-              </div>
-              <DialogFooter>
-                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700">
-                  {editingLead ? 'Update Lead' : 'Create Lead'}
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
+    <div style={{ padding: '28px 20px 20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>Leads</h1>
+        <button onClick={() => setShowAdd(true)} className="press-sm" aria-label="Add new lead" style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+          <NeoIcon bg={C.tealS} size={48}><Plus size={22} color={C.teal} strokeWidth={2.5} /></NeoIcon>
+        </button>
       </div>
 
-      {/* Leads Table */}
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Seller</TableHead>
-                <TableHead>Property</TableHead>
-                <TableHead>Score</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Motivation</TableHead>
-                <TableHead>Stage</TableHead>
-                <TableHead>Asking Price</TableHead>
-                <TableHead>ARV</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {leadsData?.items?.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-slate-500 py-12">
-                    No leads found. Add your first lead to get started.
-                  </TableCell>
-                </TableRow>
-              )}
-              {leadsData?.items?.map((lead: any) => (
-                <TableRow key={lead.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50" onClick={() => setDetailLead(lead)}>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium text-sm">{lead.sellerName}</p>
-                      <p className="text-xs text-slate-500">{lead.phone}</p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm">{lead.propertyAddress}</p>
-                    <p className="text-xs text-slate-500">{lead.city}, {lead.state}</p>
-                  </TableCell>
-                  <TableCell>{getScoreBadge(lead.leadScore)}</TableCell>
-                  <TableCell>
-                    {lead.leadType && lead.leadType !== 'other' ? (
-                      <span className="text-xs text-slate-600 dark:text-slate-400">
-                        {LEAD_TYPE_LABELS[lead.leadType] ?? lead.leadType}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-slate-300">—</span>
-                    )}
-                  </TableCell>
-                  <TableCell>{getMotivationBadge(lead.motivationLevel)}</TableCell>
-                  <TableCell>{getStageBadge(lead.pipelineStage)}</TableCell>
-                  <TableCell>
-                    {lead.askingPrice ? `$${Number(lead.askingPrice).toLocaleString()}` : '-'}
-                  </TableCell>
-                  <TableCell>
-                    {lead.arv ? `$${Number(lead.arv).toLocaleString()}` : '-'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" onClick={(e) => e.stopPropagation()}>
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setDetailLead(lead)}>
-                          <Eye className="w-4 h-4 mr-2" /> View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => openEdit(lead)}>
-                          <Edit3 className="w-4 h-4 mr-2" /> Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link to={`/calls?leadId=${lead.id}`} className="flex items-center cursor-pointer">
-                            <Phone className="w-4 h-4 mr-2" /> Log Call
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link to={`/sms?leadId=${lead.id}`} className="flex items-center cursor-pointer">
-                            <MessageSquare className="w-4 h-4 mr-2" /> Send SMS
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem asChild>
-                          <Link to={`/deals?leadId=${lead.id}`} className="flex items-center cursor-pointer">
-                            <Calendar className="w-4 h-4 mr-2" /> Analyze Deal
-                          </Link>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-red-600"
-                          onClick={() => {
-                            if (confirm('Delete this lead?')) deleteLead.mutate({ id: lead.id })
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="neo-search" style={{ marginBottom: 16 }}>
+        <Search size={18} color={C.muted} strokeWidth={2} />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search leads..." aria-label="Search leads" />
+      </div>
 
-      {/* Lead Detail Dialog */}
-      <Dialog open={!!detailLead} onOpenChange={() => setDetailLead(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {detailLead?.sellerName}
-              {detailLead?.motivationLevel && getMotivationBadge(detailLead.motivationLevel)}
-            </DialogTitle>
-          </DialogHeader>
-          {detailLead && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-slate-500">Property</p>
-                  <p className="font-medium">{detailLead.propertyAddress}</p>
-                  <p>{detailLead.city}, {detailLead.state} {detailLead.zipCode}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Contact</p>
-                  <p className="font-medium">{detailLead.phone}</p>
-                  <p>{detailLead.email}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Timeline</p>
-                  <p className="font-medium">{detailLead.timeline || 'Not specified'}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Occupancy</p>
-                  <p className="font-medium capitalize">{(detailLead.occupancyStatus || 'unknown').replace('_', ' ')}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Condition</p>
-                  <p className="font-medium capitalize">{(detailLead.condition || 'unknown').replace('_', ' ')}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Est. Repairs</p>
-                  <p className="font-medium">{detailLead.estimatedRepairs ? `$${Number(detailLead.estimatedRepairs).toLocaleString()}` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">Asking Price</p>
-                  <p className="font-medium">{detailLead.askingPrice ? `$${Number(detailLead.askingPrice).toLocaleString()}` : '-'}</p>
-                </div>
-                <div>
-                  <p className="text-slate-500">ARV</p>
-                  <p className="font-medium">{detailLead.arv ? `$${Number(detailLead.arv).toLocaleString()}` : '-'}</p>
-                </div>
-              </div>
-              {detailLead.keyPainPoints && (
-                <div>
-                  <p className="text-slate-500 text-sm">Pain Points</p>
-                  <p className="text-sm bg-slate-50 dark:bg-slate-800 p-2 rounded">{detailLead.keyPainPoints}</p>
-                </div>
-              )}
-              {detailLead.notes && (
-                <div>
-                  <p className="text-slate-500 text-sm">Notes</p>
-                  <p className="text-sm bg-slate-50 dark:bg-slate-800 p-2 rounded">{detailLead.notes}</p>
-                </div>
-              )}
-              <div className="flex gap-2 pt-2">
-                <Link to={`/calls?leadId=${detailLead.id}`}>
-                  <Button size="sm" variant="outline"><Phone className="w-4 h-4 mr-1" /> Log Call</Button>
-                </Link>
-                <Link to={`/sms?leadId=${detailLead.id}`}>
-                  <Button size="sm" variant="outline"><MessageSquare className="w-4 h-4 mr-1" /> SMS</Button>
-                </Link>
-                <Link to={`/deals?leadId=${detailLead.id}`}>
-                  <Button size="sm" variant="outline"><Calendar className="w-4 h-4 mr-1" /> Deal Analysis</Button>
-                </Link>
-                <Link to={`/lead-finder`}>
-                  <Button size="sm" variant="outline"><Target className="w-4 h-4 mr-1" /> Lead Finder</Button>
-                </Link>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 20 }} className="hide-scrollbar">
+        {tabs.map(t => (
+          <button key={t.k} onClick={() => setFilter(t.k)}
+            className={`${filter === t.k ? 'neo-pressed' : 'neo-raised-sm'} press-sm`}
+            aria-pressed={filter === t.k}
+            style={{ padding: '10px 18px', fontSize: 15, fontWeight: 700, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer', color: filter === t.k ? C.teal : C.muted, borderRadius: 16 }}>
+            {t.l} <span style={{ opacity: 0.6 }}>({t.n})</span>
+          </button>
+        ))}
+      </div>
+
+      {filtered.map(l => (
+        <LeadCard key={l.id} lead={l} onDelete={() => deleteLead(l.id)} onCallRecord={(rec) => { addCallRecord(rec); }} />
+      ))}
+
+      {filtered.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <NeoIcon bg={C.tealS} size={64} round={20} style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Search size={28} color={C.teal} strokeWidth={1.5} />
+          </NeoIcon>
+          <p style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: '0 0 4px' }}>No leads found</p>
+          <p style={{ fontSize: 14, color: C.muted, margin: '0 0 16px' }}>Try adjusting filters or add a new lead</p>
+          <button onClick={() => setShowAdd(true)} className="maya-tile press-sm" style={{ padding: '12px 24px', borderRadius: 16, background: C.teal, color: '#fff', border: 'none', fontSize: 15, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={16} strokeWidth={2.5} /> Add Lead
+          </button>
+        </div>
+      )}
+
+      <div style={{ height: 20 }} />
+
+      {showAdd && <AddLeadSheet onClose={() => setShowAdd(false)} onAdd={(lead) => { setLeads(p => [lead, ...p]); setShowAdd(false); }} />}
+      {confirmData && <ConfirmSheet open={confirmOpen} title={confirmData.title} desc={confirmData.desc} danger onConfirm={confirmData.onConfirm} onCancel={() => setConfirmOpen(false)} />}
     </div>
-  )
+  );
+}
+
+function LeadCard({ lead, onDelete, onCallRecord }: { lead: Lead; onDelete: () => void; onCallRecord: (r: any) => void }) {
+  const [calling, setCalling] = useState(false);
+  const [callResult, setCallResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  const callWithMaya = async () => {
+    setCalling(true);
+    setCallResult(null);
+    try {
+      const res = await fetch('/api/trpc/maya.placeCall', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ json: { to: lead.phone, name: lead.sellerName, address: lead.propertyAddress } }),
+        credentials: 'include',
+      });
+      const data = await res.json();
+      const sid = data?.result?.data?.json?.sid;
+      if (sid) {
+        onCallRecord({ id: Date.now(), leadName: lead.sellerName, phone: lead.phone, outcome: 'connected', duration: 0, transcript: `Maya called ${lead.sellerName}`, notes: null, createdAt: new Date().toISOString() });
+        setCallResult({ ok: true, msg: `Call placed! SID: ${sid.slice(0, 12)}...` });
+      } else {
+        throw new Error(data?.error?.message || 'Call failed');
+      }
+    } catch (e: any) {
+      setCallResult({ ok: false, msg: e.message || 'Call failed — check Twilio settings' });
+    }
+    setCalling(false);
+  };
+
+  return (
+    <NeoTile style={{ marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{lead.sellerName}</p>
+          <p style={{ fontSize: 13, color: C.muted, margin: '3px 0 0', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500 }}>
+            <MapPin size={12} strokeWidth={2} /> {lead.propertyAddress}
+          </p>
+        </div>
+        <MotTag level={lead.motivationLevel} />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
+        {lead.timeline && <QTag icon={<Clock size={14} color={C.blue} strokeWidth={2} />} label="Timeline" value={lead.timeline} bg={C.blueS} />}
+        {lead.askingPrice && <QTag icon={<Banknote size={14} color={C.green} strokeWidth={2} />} label="Asking" value={`$${Number(lead.askingPrice).toLocaleString()}`} bg={C.greenS} />}
+        {lead.arv && <QTag icon={<HomeDot color={C.purple} />} label="ARV" value={`$${Number(lead.arv).toLocaleString()}`} bg={C.purpleS} />}
+        {lead.estimatedRepairs && Number(lead.estimatedRepairs) > 0 && <QTag icon={<Wrench size={14} color={C.orange} strokeWidth={2} />} label="Repairs" value={`$${Number(lead.estimatedRepairs).toLocaleString()}`} bg={C.orangeS} />}
+        {lead.beds > 0 && <QTag icon={<HomeDot color={C.teal} />} label="Beds/Baths" value={`${lead.beds}bd/${lead.baths}ba`} bg={C.tealS} />}
+        {lead.condition && <QTag icon={<Thermometer size={14} color={C.pink} strokeWidth={2} />} label="Condition" value={lead.condition} bg={C.pinkS} />}
+      </div>
+
+      {lead.keyPainPoints && (
+        <div className="neo-pressed-sm" style={{ marginTop: 12, padding: 12 }}>
+          <p style={{ fontSize: 12, color: C.red, fontWeight: 700, margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Motivation</p>
+          <p style={{ fontSize: 14, color: C.text, margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{lead.keyPainPoints}</p>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        <a href={`tel:${lead.phone.replace(/\D/g, '')}`} className="maya-tile press-sm" aria-label={`Call ${lead.sellerName}`} style={{ flex: 1, height: 48, borderRadius: 14, background: C.teal, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', textDecoration: 'none', boxShadow: `0 4px 16px ${C.teal}30` }}>
+          <PhoneCall size={16} strokeWidth={2.5} /> Call Now
+        </a>
+        <button onClick={callWithMaya} disabled={calling} className="maya-tile press-sm" aria-label={`Call ${lead.sellerName} with Maya`} style={{ flex: 1.3, height: 48, borderRadius: 14, background: calling ? C.orange : `linear-gradient(135deg, ${C.purple}, #7C3AED)`, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', padding: 0, opacity: calling ? 0.7 : 1 }}>
+          {calling ? <><Sparkles size={16} className="pulse-glow" /> Calling…</> : <><Bot size={16} strokeWidth={2} /> Call with Maya</>}
+        </button>
+        <button onClick={onDelete} className="neo-pressed-sm press-sm" aria-label={`Delete ${lead.sellerName}`} style={{ width: 48, height: 48, borderRadius: 14, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14zM10 11v6M14 11v6"/></svg>
+        </button>
+      </div>
+
+      {callResult && (
+        <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: callResult.ok ? C.greenS : C.redS, color: callResult.ok ? C.green : C.red, lineHeight: 1.5 }}>
+          {callResult.msg}
+        </div>
+      )}
+    </NeoTile>
+  );
+}
+
+function AddLeadSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (lead: Lead) => void }) {
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [phone, setPhone] = useState('');
+  const [mot, setMot] = useState<'hot' | 'warm' | 'cold'>('hot');
+
+  const save = () => {
+    if (!name.trim() || !phone.trim()) return;
+    onAdd({ id: getNextId(), sellerName: name.trim(), propertyAddress: address.trim() || 'Address not provided', phone: phone.trim(), email: null, motivationLevel: mot, timeline: 'Unknown', askingPrice: '', arv: '', estimatedRepairs: '', beds: 0, baths: 0, condition: '', keyPainPoints: '' });
+  };
+
+  return <>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,28,30,0.3)', zIndex: 40, backdropFilter: 'blur(4px)' }} onClick={onClose} />
+    <div className="neo-sheet" style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, zIndex: 50, padding: 28, borderRadius: '28px 28px 0 0' }}>
+      <div style={{ width: 40, height: 5, borderRadius: 3, background: '#C7C7CC', margin: '0 auto 24px' }} />
+      <h2 style={{ fontSize: 24, fontWeight: 800, color: C.text, margin: '0 0 20px' }}>Add Lead</h2>
+      {[
+        { label: 'Name *', val: name, set: setName, ph: 'e.g., Jane Smith' },
+        { label: 'Phone *', val: phone, set: setPhone, ph: '(413) 555-0000' },
+        { label: 'Property Address', val: address, set: setAddress, ph: '123 Main St, Springfield, MA' },
+      ].map(f => (
+        <div key={f.label} style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6, display: 'block' }}>{f.label}</label>
+          <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph} className="neo-input" style={{ height: 48 }} />
+        </div>
+      ))}
+      <div style={{ marginBottom: 24 }}>
+        <label style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 6, display: 'block' }}>Motivation</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {(['hot', 'warm', 'cold'] as const).map(m => (
+            <button key={m} onClick={() => setMot(m)} className={`${m === 'hot' ? 'maya-tag-hot' : m === 'warm' ? 'maya-tag-warm' : 'maya-tag-cold'} press-sm`} style={{ flex: 1, padding: '10px 0', borderRadius: 14, fontSize: 14, fontWeight: 700, textTransform: 'capitalize', border: 'none', cursor: 'pointer', opacity: mot === m ? 1 : 0.4 }}>
+              {m === 'hot' && '🔥'}{m}
+            </button>
+          ))}
+        </div>
+      </div>
+      <button onClick={save} disabled={!name.trim() || !phone.trim()} className="maya-tile press-sm" style={{ width: '100%', height: 52, borderRadius: 16, background: C.teal, color: '#fff', border: 'none', fontSize: 16, fontWeight: 700, cursor: 'pointer', padding: 0, opacity: name.trim() && phone.trim() ? 1 : 0.45 }}>
+        Save Lead
+      </button>
+      <button onClick={onClose} style={{ width: '100%', marginTop: 10, height: 44, background: 'transparent', color: C.muted, border: 'none', fontSize: 16, fontWeight: 700, cursor: 'pointer', borderRadius: 16 }}>Cancel</button>
+    </div>
+  </>;
 }

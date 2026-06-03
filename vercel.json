@@ -5,7 +5,8 @@
       "src": "api/vercel.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["dist/**"]
+        "includeFiles": ["dist/**"],
+        "maxDuration": 30
       }
     },
     {
@@ -18,6 +19,7 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/vercel.js" },
-    { "src": "/(.*)", "dest": "/dist/public/$1" }
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }

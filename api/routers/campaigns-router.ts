@@ -3,7 +3,9 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { campaigns, campaignLeads, leads, dncList, callQueue } from "../../db/schema";
-import { createVapiCall, getCallingConfig, isWithinCallWindow, scrubPhone } from "../lib/vapi";
+import { getCallingConfig, isWithinCallWindow, scrubPhone } from "../lib/vapi";
+import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
+import { env } from "../lib/env";
 
 export const campaignsRouter = createRouter({
   list: publicQuery
@@ -133,7 +135,7 @@ export const campaignsRouter = createRouter({
       return { added, total: existingCampaignLeadIds.length + added };
     }),
 
-  // NEW: Activate campaign → queue calls → start dialing via Vapi
+  // Activate campaign → queue calls → dial via Twilio (falls back to Vapi)
   activate: publicQuery
     .input(z.object({ campaignId: z.number() }))
     .mutation(async ({ input }) => {
@@ -143,9 +145,10 @@ export const campaignsRouter = createRouter({
       });
       if (!campaign) throw new Error("Campaign not found");
 
+      const twilioReady = isTwilioConfigured();
       const config = await getCallingConfig();
-      if (!config || !config.apiKey) {
-        throw new Error("Voice AI provider not configured. Go to Settings > Calling to add your Vapi API key.");
+      if (!twilioReady && (!config || !config.apiKey)) {
+        throw new Error("No calling provider configured. Add your Twilio credentials (or Vapi API key) in Settings.");
       }
 
       // Check call window
@@ -208,22 +211,31 @@ export const campaignsRouter = createRouter({
         });
         queued++;
 
-        // Actually dial via Vapi
+        // Dial via Twilio (preferred) — same conversational engine as inbound
         try {
-          const vapiResponse = await createVapiCall(cl.lead.id, cl.lead.phone, cl.lead.sellerName);
-          if (vapiResponse && vapiResponse.id) {
+          let callId: string | null = null;
+
+          if (twilioReady) {
+            const result = await placeTwilioOutboundCall({
+              to: cl.lead.phone,
+              name: cl.lead.sellerName ?? "",
+              address: cl.lead.propertyAddress ?? "",
+              appUrl: env.appUrl,
+            });
+            callId = result?.sid ?? null;
+          }
+
+          if (callId) {
             await db.update(callQueue)
-              .set({ status: "dialing", externalCallId: vapiResponse.id, startedAt: new Date() })
+              .set({ status: "dialing", externalCallId: callId, startedAt: new Date() })
               .where(eq(callQueue.id, Number(queueResult[0].insertId)));
-            
             await db.update(campaignLeads)
-              .set({ status: "queued", externalCallId: vapiResponse.id })
+              .set({ status: "queued", externalCallId: callId })
               .where(eq(campaignLeads.id, cl.id));
-            
             dialed++;
           } else {
             await db.update(callQueue)
-              .set({ status: "failed", errorMessage: "Vapi API returned no call ID" })
+              .set({ status: "failed", errorMessage: "Call provider returned no call ID" })
               .where(eq(callQueue.id, Number(queueResult[0].insertId)));
             failed++;
           }
@@ -243,7 +255,7 @@ export const campaignsRouter = createRouter({
         failed,
         totalPending: pendingLeads.length,
         message: dialed > 0
-          ? `Campaign activated! ${dialed} calls placed via Vapi. ${scrubFailed} numbers scrubbed. ${failed} failed.`
+          ? `Campaign activated! ${dialed} calls placed. ${scrubFailed} numbers scrubbed. ${failed} failed.`
           : `No calls placed. ${scrubFailed} scrubbed. ${failed} failed.`,
       };
     }),

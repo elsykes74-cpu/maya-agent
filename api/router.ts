@@ -10,6 +10,7 @@ import { callingConfigRouter } from "./routers/calling-config-router";
 import { campaignsRouter } from "./routers/campaigns-router";
 import { dncRouter } from "./routers/dnc-router";
 import { webhooksRouter } from "./routers/webhooks-router";
+import { mayaRouter } from "./routers/maya-router";
 import { leadFinderRouter } from "./routers/lead-finder-router";
 
 export const appRouter = createRouter({
@@ -26,6 +27,7 @@ export const appRouter = createRouter({
   campaigns: campaignsRouter,
   dnc: dncRouter,
   webhooks: webhooksRouter,
+  maya: mayaRouter,
 });
 
 export type AppRouter = typeof appRouter;

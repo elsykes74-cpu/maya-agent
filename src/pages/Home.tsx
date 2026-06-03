@@ -1,241 +1,234 @@
-import { trpc } from '@/providers/trpc'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Progress } from '@/components/ui/progress'
-import {
-  Flame,
-  Thermometer,
-  Snowflake,
-  Phone,
-  CalendarCheck,
-  TrendingUp,
-  ArrowRight,
-  DollarSign,
-  CheckCircle2
-} from 'lucide-react'
-import { Link } from 'react-router'
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router';
+import { PhoneCall, Users, Zap, Calendar, Flame, Upload, CheckCircle } from 'lucide-react';
+import { C, NeoTile, NeoIcon, SectionTitle, MotTag } from '@/components/Neo';
+import { AgentTile } from '@/components/AgentTile';
+import { MayaHeader, QuickActionBar } from '@/components/MayaHeader';
+import type { AgentData } from '@/components/Neo';
+import { loadLeads, loadCalls, saveLeads, type Lead, type CallRecord } from '@/lib/persistence';
+
+const AGENTS: AgentData[] = [
+  { id: 'instagram', title: 'Instagram', icon: 'Zap', iconColor: '#E4405F', iconBg: '#FCE4EC', status: 'online', count: 3 },
+  { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#7B61FF', iconBg: '#EDE9FE', status: 'online' },
+  { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#14B8A6', iconBg: '#F0FDF9', status: 'online' },
+  { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#25D366', iconBg: '#E8F5E9', status: 'busy' },
+  { id: 'facebook', title: 'Facebook', icon: 'TrendingUp', iconColor: '#1877F2', iconBg: '#E3F2FD', status: 'online' },
+  { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FF9F0A', iconBg: '#FFFBF0', status: 'paused' },
+  { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#8B5CF6', iconBg: '#FAF5FF', status: 'online' },
+  { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#34C759', iconBg: '#F0FFF5', status: 'online' },
+];
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if (ch === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+    else { current += ch; }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+function parseLeadsFromCSV(text: string): Lead[] {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/['"]/g, '').trim());
+
+  const col = (cols: string[], ...keys: string[]) => {
+    for (const k of keys) {
+      const idx = headers.findIndex(h => h.includes(k));
+      if (idx >= 0 && cols[idx]) return cols[idx].replace(/^["']|["']$/g, '').trim();
+    }
+    return '';
+  };
+
+  const leads: Lead[] = [];
+  const baseId = Date.now();
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVLine(lines[i]);
+    const name = col(cols, 'name', 'seller', 'owner', 'contact') || cols[0]?.trim() || '';
+    if (!name) continue;
+
+    const motRaw = col(cols, 'motivation', 'priority', 'level', 'status').toLowerCase();
+    const motivationLevel = motRaw.includes('hot') || motRaw.includes('high') ? 'hot'
+      : motRaw.includes('cold') || motRaw.includes('low') ? 'cold' : 'warm';
+
+    leads.push({
+      id: baseId + i,
+      sellerName: name,
+      phone: col(cols, 'phone', 'mobile', 'cell', 'number'),
+      propertyAddress: col(cols, 'address', 'property', 'street', 'location'),
+      email: col(cols, 'email', 'mail') || null,
+      motivationLevel,
+      timeline: col(cols, 'timeline', 'timeframe', 'when'),
+      askingPrice: col(cols, 'asking', 'price', 'value'),
+      arv: col(cols, 'arv', 'after repair'),
+      estimatedRepairs: col(cols, 'repair', 'rehab', 'fix'),
+      beds: parseInt(col(cols, 'bed', 'br', 'bedroom')) || 0,
+      baths: parseInt(col(cols, 'bath', 'ba', 'bathroom')) || 0,
+      condition: col(cols, 'condition', 'state'),
+      keyPainPoints: col(cols, 'pain', 'notes', 'note', 'motivation', 'reason'),
+    });
+  }
+  return leads;
+}
 
 export default function Home() {
-  const { data: stats, isLoading: statsLoading } = trpc.leads.stats.useQuery()
-  const { data: callStats } = trpc.calls.stats.useQuery()
-  const { data: apptStats } = trpc.appointments.stats.useQuery()
-  const { data: leadsData } = trpc.leads.list.useQuery({ limit: 5, motivation: 'hot' })
+  const navigate = useNavigate();
+  const [uploaded, setUploaded] = useState<{ name: string; count: number } | null>(null);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const hours = new Date().getHours();
+  const greeting = hours < 12 ? 'Good Morning' : hours < 17 ? 'Good Afternoon' : 'Good Evening';
 
-  const pipelineStages = [
-    { stage: 'lead', label: 'Lead Source', color: 'bg-slate-500' },
-    { stage: 'outreach', label: 'Outreach', color: 'bg-blue-500' },
-    { stage: 'scoring', label: 'Scoring', color: 'bg-indigo-500' },
-    { stage: 'hot_routing', label: 'Hot Routing', color: 'bg-red-500' },
-    { stage: 'warm_nurture', label: 'Warm Nurture', color: 'bg-amber-500' },
-    { stage: 'cold_drip', label: 'Cold Drip', color: 'bg-cyan-500' },
-    { stage: 'appointment', label: 'Appointment', color: 'bg-emerald-500' },
-    { stage: 'close', label: 'Close', color: 'bg-green-600' },
-  ]
+  useEffect(() => {
+    setLeads(loadLeads());
+    setCalls(loadCalls());
+  }, []);
 
-  if (statsLoading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {[1,2,3,4].map(i => (
-            <Card key={i} className="animate-pulse"><CardContent className="h-32 bg-slate-200 dark:bg-slate-800 rounded" /></Card>
-          ))}
-        </div>
-      </div>
-    )
-  }
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const newLeads = parseLeadsFromCSV(text);
+      if (newLeads.length > 0) {
+        const merged = [...loadLeads(), ...newLeads];
+        saveLeads(merged);
+        setLeads(merged);
+        setUploaded({ name: file.name, count: newLeads.length });
+        setTimeout(() => setUploaded(null), 4000);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const hot = leads.filter(l => l.motivationLevel === 'hot');
+  const recentCalls = calls.slice(0, 3);
 
   return (
-    <div className="space-y-6">
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-l-4 border-l-red-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <Flame className="w-4 h-4 text-red-500" /> HOT Leads
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.hot || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Motivated, timeline &lt;30 days</p>
-          </CardContent>
-        </Card>
+    <div style={{ padding: '28px 20px 20px' }}>
+      <MayaHeader greeting={greeting} title="Maya" subtitle="Your AI Agent Command Center" status="online" statusLabel="Agent Online" />
 
-        <Card className="border-l-4 border-l-amber-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <Thermometer className="w-4 h-4 text-amber-500" /> WARM Leads
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.warm || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">1-6 month timeline</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-cyan-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <Snowflake className="w-4 h-4 text-cyan-500" /> COLD Leads
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.cold || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">No urgency, retail expectations</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-emerald-500">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-slate-500 flex items-center gap-2">
-              <CalendarCheck className="w-4 h-4 text-emerald-500" /> Appointments
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold text-slate-900 dark:text-white">{stats?.appointments || 0}</div>
-            <p className="text-xs text-slate-500 mt-1">Walkthroughs scheduled</p>
-          </CardContent>
-        </Card>
+      {/* KPI Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
+        <KpiButton icon={<Users size={16} color={C.red} />} value={hot.length} label="Hot" onClick={() => navigate('/leads')} />
+        <KpiButton icon={<PhoneCall size={16} color={C.teal} />} value={calls.length} label="Calls" onClick={() => navigate('/calls')} />
+        <KpiButton icon={<Zap size={16} color={C.orange} />} value={leads.length} label="Leads" onClick={() => navigate('/leads')} />
+        <KpiButton icon={<Calendar size={16} color={C.purple} />} value={0} label="Appts" onClick={() => navigate('/appointments')} />
       </div>
 
-      {/* Pipeline Overview */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-emerald-600" />
-            Pipeline Overview
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {pipelineStages.map((stage) => {
-              const count = stats?.byStage?.find((s: { stage: string | null; count: number }) => s.stage === stage.stage)?.count || 0
-              const total = stats?.total || 1
-              const pct = Math.round((count / total) * 100)
-              return (
-                <div key={stage.stage} className="flex items-center gap-4">
-                  <div className="w-28 text-sm font-medium text-slate-700 dark:text-slate-300">{stage.label}</div>
-                  <div className="flex-1">
-                    <Progress value={pct} className="h-2" />
-                  </div>
-                  <div className="w-16 text-right text-sm font-semibold text-slate-900 dark:text-white">{count}</div>
-                  <div className="w-12 text-right text-xs text-slate-500">{pct}%</div>
-                </div>
-              )
-            })}
+      {/* Agent Hub */}
+      <SectionTitle>Agent Hub</SectionTitle>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 24 }}>
+        {AGENTS.map((agent, i) => (
+          <AgentTile key={agent.id} {...agent} className={`s-${Math.min(i + 1, 6)}`} onClick={() => {
+            if (agent.id === 'calls') navigate('/calls');
+            else if (agent.id === 'leads') navigate('/leads');
+            else if (agent.id === 'messages') navigate('/sms');
+            else if (agent.id === 'workflow') navigate('/ai-config');
+            else if (agent.id === 'camera') navigate('/appointments');
+          }} />
+        ))}
+      </div>
+
+      {/* Upload Leads */}
+      <SectionTitle>Data</SectionTitle>
+      <input type="file" ref={fileRef} accept=".csv,.txt" onChange={handleFile} style={{ display: 'none' }} />
+      <button
+        onClick={() => fileRef.current?.click()}
+        className="maya-tile press-sm"
+        aria-label="Upload leads from CSV"
+        style={{ width: '100%', height: 64, borderRadius: 20, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 24, background: uploaded ? `linear-gradient(135deg, ${C.green}, #28A745)` : `linear-gradient(135deg, ${C.blue}, ${C.teal})`, color: '#fff', padding: 0, transition: 'background 0.3s' }}
+      >
+        {uploaded ? (
+          <><CheckCircle size={22} strokeWidth={2.5} /><span style={{ fontSize: 16, fontWeight: 700 }}>{uploaded.count} leads imported from {uploaded.name}</span></>
+        ) : (
+          <><Upload size={22} strokeWidth={2.5} /><span style={{ fontSize: 16, fontWeight: 700 }}>Upload Leads (CSV)</span></>
+        )}
+      </button>
+
+      {/* Quick Actions */}
+      <SectionTitle>Quick Actions</SectionTitle>
+      <QuickActionBar actions={[
+        { label: 'Call', icon: <PhoneCall size={18} color="#fff" />, bg: C.teal, onClick: () => navigate('/calls') },
+        { label: 'Lead', icon: <Users size={18} color="#fff" />, bg: C.green, onClick: () => navigate('/leads') },
+        { label: 'Campaign', icon: <Zap size={18} color="#fff" />, bg: C.orange, onClick: () => navigate('/campaigns') },
+        { label: 'Schedule', icon: <Calendar size={18} color="#fff" />, bg: C.purple, onClick: () => navigate('/appointments') },
+      ]} />
+
+      {/* Recent Calls */}
+      {recentCalls.length > 0 && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <SectionTitle>Recent Calls</SectionTitle>
+            <button onClick={() => navigate('/calls')} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.teal, cursor: 'pointer', marginBottom: 14 }}>See All</button>
           </div>
-        </CardContent>
-      </Card>
+          <NeoTile style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
+            {recentCalls.map((c, i) => (
+              <button key={c.id} onClick={() => navigate('/calls')} className="press-sm" aria-label={`Call from ${c.leadName}`} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '16px 20px', borderBottom: i < recentCalls.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none', border: 'none', background: 'none', width: '100%', textAlign: 'left', cursor: 'pointer' }}>
+                <NeoIcon bg={c.outcome === 'connected' ? C.greenS : c.outcome === 'voicemail' ? C.orangeS : C.redS} size={44}>
+                  <PhoneCall size={20} color={c.outcome === 'connected' ? C.green : c.outcome === 'voicemail' ? C.orange : C.red} strokeWidth={2} />
+                </NeoIcon>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>{c.leadName}</p>
+                  <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>
+                    {c.outcome === 'connected' ? 'Connected' : c.outcome === 'voicemail' ? 'Voicemail' : 'No Answer'} · {new Date(c.createdAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                  </p>
+                </div>
+                {c.duration > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: C.tertiary }}>{c.duration}s</span>}
+              </button>
+            ))}
+          </NeoTile>
+        </>
+      )}
 
-      {/* Bottom Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Hot Leads */}
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Flame className="w-5 h-5 text-red-500" />
-              HOT Leads — Erick Calls Same Day
-            </CardTitle>
-            <Link to="/leads?motivation=hot">
-              <Button variant="ghost" size="sm" className="text-emerald-600">
-                View All <ArrowRight className="w-4 h-4 ml-1" />
-              </Button>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {leadsData?.items?.length === 0 && (
-                <p className="text-sm text-slate-500 text-center py-8">No hot leads yet. Import leads to get started.</p>
+      {/* Hot Leads */}
+      {hot.length > 0 && (
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <SectionTitle icon={<Flame size={14} color={C.red} />}>Hot Leads</SectionTitle>
+            <button onClick={() => navigate('/leads')} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.teal, cursor: 'pointer', marginBottom: 14 }}>See All</button>
+          </div>
+          {hot.slice(0, 3).map(l => (
+            <button key={l.id} onClick={() => navigate('/leads')} className="maya-tile press-sm" aria-label={l.sellerName} style={{ marginBottom: 12, padding: 18, border: 'none', width: '100%', textAlign: 'left', cursor: 'pointer', display: 'block' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <p style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: 0 }}>{l.sellerName}</p>
+                  <p style={{ fontSize: 13, color: C.muted, margin: '3px 0 0', fontWeight: 500 }}>{l.propertyAddress}</p>
+                </div>
+                <MotTag level={l.motivationLevel} />
+              </div>
+              {l.keyPainPoints && (
+                <div className="neo-pressed-sm" style={{ marginTop: 10, padding: 10 }}>
+                  <p style={{ fontSize: 12, color: C.red, fontWeight: 700, margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Motivation</p>
+                  <p style={{ fontSize: 14, color: C.text, margin: '2px 0 0', fontWeight: 500 }}>{l.keyPainPoints}</p>
+                </div>
               )}
-              {leadsData?.items?.map((lead: { id: number; sellerName: string; propertyAddress: string; timeline: string | null; askingPrice: string | null; phone: string | null }) => (
-                <div key={lead.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <div>
-                    <p className="font-medium text-sm text-slate-900 dark:text-white">{lead.sellerName}</p>
-                    <p className="text-xs text-slate-500">{lead.propertyAddress}</p>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">HOT</span>
-                      {lead.timeline && <span className="text-xs text-slate-500">{lead.timeline}</span>}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    {lead.askingPrice && (
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                        ${Number(lead.askingPrice).toLocaleString()}
-                      </p>
-                    )}
-                    <p className="text-xs text-slate-500">{lead.phone}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+            </button>
+          ))}
+        </>
+      )}
 
-        {/* Quick Stats */}
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Phone className="w-5 h-5 text-blue-600" />
-                Call Performance
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{callStats?.total || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Total Calls</p>
-                </div>
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-emerald-600">{callStats?.answered || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Answered</p>
-                </div>
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-amber-600">{callStats?.voicemail || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Voicemails</p>
-                </div>
-                <div className="text-center p-3 bg-slate-50 dark:bg-slate-800 rounded-lg">
-                  <p className="text-2xl font-bold text-purple-600">{callStats?.appointments || 0}</p>
-                  <p className="text-xs text-slate-500 mt-1">Appts Set</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <DollarSign className="w-5 h-5 text-emerald-600" />
-                Deal Progress
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CalendarCheck className="w-4 h-4 text-blue-500" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">Scheduled</span>
-                  </div>
-                  <span className="text-sm font-semibold">{apptStats?.scheduled || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">Completed</span>
-                  </div>
-                  <span className="text-sm font-semibold">{apptStats?.completed || 0}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-600" />
-                    <span className="text-sm text-slate-700 dark:text-slate-300">Contracts Signed</span>
-                  </div>
-                  <span className="text-sm font-semibold">{apptStats?.contracts || 0}</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+      <div style={{ height: 20 }} />
     </div>
-  )
+  );
+}
+
+function KpiButton({ icon, value, label, onClick }: { icon: React.ReactNode; value: number; label: string; onClick?: () => void }) {
+  return (
+    <button onClick={onClick} className="neo-pressed-sm press-sm" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 8px', gap: 4, border: 'none', cursor: 'pointer' }}>
+      {icon}
+      <p style={{ fontSize: 20, fontWeight: 800, color: '#1C1C1E', margin: 0, letterSpacing: '-0.5px' }}>{value}</p>
+      <p style={{ fontSize: 11, color: '#8E8E93', margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</p>
+    </button>
+  );
 }

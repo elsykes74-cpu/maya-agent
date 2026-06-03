@@ -11,6 +11,7 @@ import SMSSequences from './pages/SMSSequences'
 import Settings from './pages/Settings'
 import Campaigns from './pages/Campaigns'
 import DNCLists from './pages/DNCLists'
+import More from './pages/More'
 import CallQueue from './pages/CallQueue'
 import LeadFinder from './pages/LeadFinder'
 import Layout from './components/Layout'
@@ -25,8 +26,8 @@ export default function App() {
         <Route path="/leads" element={<Leads />} />
         <Route path="/lead-finder" element={<LeadFinder />} />
         <Route path="/campaigns" element={<Campaigns />} />
-        <Route path="/call-queue" element={<CallQueue />} />
         <Route path="/calls" element={<CallCenter />} />
+        <Route path="/more" element={<More />} />
         <Route path="/appointments" element={<Appointments />} />
         <Route path="/deals" element={<DealAnalysis />} />
         <Route path="/ai-config" element={<AIConfig />} />

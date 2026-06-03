@@ -8,7 +8,6 @@ process.on('unhandledRejection', (reason) => {
 });
 
 import { Hono } from "hono";
-import { bodyLimit } from "hono/body-limit";
 import { setCookie, getCookie, deleteCookie } from "hono/cookie";
 import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
@@ -23,11 +22,12 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
+import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
-import { telegramApp } from "./telegram-webhook";
+import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
-import { registerAllWebhooks } from "./telegram-webhook";
 import { createOAuthCallbackHandler } from "./kimi/auth";
+import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
 import {
 	getGoogleAuthUrl,
@@ -67,15 +67,7 @@ const oauthLimiter = rateLimiter({
 });
 
 // ---------------------------------------------------------------------------
-// Body limits
-// ---------------------------------------------------------------------------
-const trpcBodyLimit = bodyLimit({
-	maxSize: 1 * 1024 * 1024,
-	onError: (c) => c.json({ error: "Payload too large" }, 413),
-});
-
-// ---------------------------------------------------------------------------
-// Google OAuth — start
+// Google OAuth - start
 // ---------------------------------------------------------------------------
 const OAUTH_STATE_COOKIE = "g_oauth_state";
 const OAUTH_REDIRECT_COOKIE = "g_oauth_redirect";
@@ -152,7 +144,7 @@ app.get("/api/oauth/google", oauthLimiter, async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Google OAuth — callback
+// Google OAuth - callback
 // ---------------------------------------------------------------------------
 app.get("/api/oauth/google/callback", oauthLimiter, async (c) => {
 	const guard = requireGoogleConfigured(c);
@@ -357,7 +349,6 @@ app.get("/api/admin/setup", async (c) => {
 	if (!appUrl || appUrl.includes("localhost")) {
 		results.webhooks = "⚠️ APP_URL not set — set it to your Vercel domain and re-run";
 	} else {
-		const { registerAllWebhooks } = await import("./telegram-webhook");
 		await registerAllWebhooks(appUrl);
 		results.webhooks = `✅ Webhooks registered to ${appUrl}`;
 	}
@@ -371,51 +362,61 @@ app.get("/api/admin/setup", async (c) => {
 	return c.json({ ok: true, ...results }, 200, { "Cache-Control": "no-store" });
 });
 
-// Env-dump endpoint (development / diagnostic only)
+// Env-dump endpoint — dev only, blocked in production
 app.get("/__env-debug", async (c) => {
-  // Called AFTER module loads so env is populated
+  if (env.isProduction) return c.json({ error: "Not Found" }, 404);
   const issues = validateEnv();
-  const allKeys = Object.keys(process.env).sort();
-  const snapshot: Record<string, string | undefined> = {};
-  for (const k of allKeys) snapshot[k] = process.env[k];
   return c.json(
     {
       NODE_ENV: process.env.NODE_ENV,
-      PORT: process.env.PORT,
       validateEnvMissing: issues,
       envProblems: (issues.length ? "MISSING: " + issues.join(", ") : "OK"),
-      required: {
+      keys: {
         APP_ID: !!process.env.APP_ID,
-        APP_SECRET: !!process.env.APP_SECRET,
         DATABASE_URL: !!process.env.DATABASE_URL,
-        KIMI_AUTH_URL: !!process.env.KIMI_AUTH_URL,
-        KIMI_OPEN_URL: !!process.env.KIMI_OPEN_URL,
-        VAPI_API_KEY: !!process.env.VAPI_API_KEY,
+        SUPABASE_URL: !!process.env.SUPABASE_URL,
+        SUPABASE_ANON_KEY: !!process.env.SUPABASE_ANON_KEY,
+        ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
         ELEVENLABS_API_KEY: !!process.env.ELEVENLABS_API_KEY,
-        NODE_ENV: !!process.env.NODE_ENV,
+        TWILIO_ACCOUNT_SID: !!process.env.TWILIO_ACCOUNT_SID,
+        TWILIO_AUTH_TOKEN: !!process.env.TWILIO_AUTH_TOKEN,
+        APP_URL: process.env.APP_URL || "(not set)",
+        VERCEL_URL: process.env.VERCEL_URL || "(not set)",
       },
-      totalKeys: allKeys.length,
     },
     200,
     { "Cache-Control": "no-store" },
   );
 });
 
+// Maya webhook smoke-test — dev only, blocked in production
+app.all("/__maya-test", async (c) => {
+  if (env.isProduction) return c.json({ error: "Not Found" }, 404);
+  const proto = c.req.header("x-forwarded-proto") ?? "https";
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "unknown";
+  const appUrl = `${proto}://${host}`;
+  const hasAnthropicKey = !!process.env.ANTHROPIC_API_KEY;
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response><Say>Maya webhook is reachable. Anthropic key is ${hasAnthropicKey ? "present" : "missing"}. App URL is ${appUrl}.</Say><Hangup/></Response>`;
+  return c.body(xml, 200, { "Content-Type": "text/xml; charset=utf-8" });
+});
+
 // Kimi OAuth callback
 app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 
 // ---------------------------------------------------------------------------
-// Twilio inbound call webhook — returns TwiML that connects to the VAPI assistant
-// Set this URL as the webhook for your Twilio number's "A call comes in" handler
+// Maya Twilio webhook - mount before tRPC so /api/maya/* is handled here
+// ---------------------------------------------------------------------------
+app.route("/api/maya", createMayaWebhookRouter());
+
+// ---------------------------------------------------------------------------
+// Twilio inbound call webhook — connects to VAPI assistant
 // ---------------------------------------------------------------------------
 app.post("/api/twilio/voice", async (c) => {
 	const { getCallingConfig } = await import("./lib/vapi");
 	const config = await getCallingConfig().catch(() => null);
 	const assistantId = config?.assistantId || process.env.VAPI_ASSISTANT_ID || "8f0c5749-74f5-4757-8377-10e10f47dd25";
-	const appUrl = (env.appUrl || "").replace(/\/$/, "");
 
-	// Connect the call to VAPI via SIP
-	// VAPI exposes a SIP endpoint per assistant: sip.vapi.ai
 	const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -426,7 +427,6 @@ app.post("/api/twilio/voice", async (c) => {
 	return c.text(twiml, 200, { "Content-Type": "text/xml" });
 });
 
-// Twilio call status callback
 app.post("/api/twilio/status", async (c) => {
 	const body = await c.req.parseBody().catch(() => ({}));
 	console.log("[twilio/status]", body);
@@ -434,14 +434,14 @@ app.post("/api/twilio/status", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Telegram webhook
+// Telegram multi-bot webhook
 // ---------------------------------------------------------------------------
 app.route("/api/telegram", telegramApp);
 
 // ---------------------------------------------------------------------------
 // tRPC
 // ---------------------------------------------------------------------------
-app.all("/api/trpc/*", trpcBodyLimit, async (c) =>
+app.all("/api/trpc/*", async (c) =>
 	fetchRequestHandler({
 		endpoint: "/api/trpc",
 		req: c.req.raw,
@@ -450,10 +450,27 @@ app.all("/api/trpc/*", trpcBodyLimit, async (c) =>
 	}),
 );
 
+// ---------------------------------------------------------------------------
+// Telegram webhook + setup
+// ---------------------------------------------------------------------------
+app.post("/api/telegram/webhook", handleTelegramWebhook);
+
+app.get("/api/telegram/setup", async (c) => {
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "";
+  const proto = c.req.header("x-forwarded-proto") ?? "https";
+  const appUrl = `${proto}://${host}`;
+  try {
+    await registerAllWebhooks(appUrl);
+    return c.json({ ok: true, appUrl });
+  } catch (err: any) {
+    return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  }
+});
+
 app.all("/api/*", (c) => c.json({ error: "Not Found" }, 404));
 
 // ---------------------------------------------------------------------------
-// SPA fallback — no external static files, just serve index.html
+// SPA fallback - no external static files, just serve index.html
 // ---------------------------------------------------------------------------
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.resolve(__dirname, "./public");

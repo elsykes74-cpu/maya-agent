@@ -24,8 +24,10 @@ dist-ssr
 *.sw?
 # Environment variables
 .env
+.env.bak
 .env.local
 .env.*.local
+*.bak
 # Database
 *.db
 *.sqlite
