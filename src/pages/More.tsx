@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
-import { Calendar, TrendingUp, MessageSquare, Shield, Bot, Settings, LogOut, Key } from 'lucide-react';
+import { Calendar, TrendingUp, MessageSquare, Shield, Bot, Settings, LogOut } from 'lucide-react';
 import { C, NeoTile, NeoIcon } from '@/components/Neo';
 
 const ITEMS = [
@@ -8,8 +8,7 @@ const ITEMS = [
   { icon: TrendingUp, label: 'Deal Analysis', path: '/deals', description: 'MAO calculator', color: C.green, bg: C.greenS },
   { icon: MessageSquare, label: 'SMS Sequences', path: '/sms', description: '2 templates', color: C.blue, bg: C.blueS },
   { icon: Shield, label: 'DNC Lists', path: '/dnc', description: '3 numbers', color: C.red, bg: C.redS },
-  { icon: Bot, label: 'AI Agent Config', path: '/ai-config', description: 'Voice & script', color: C.orange, bg: C.orangeS },
-  { icon: Key, label: 'API Keys', path: '/ai-config', description: 'Twilio & ElevenLabs', color: C.teal, bg: C.tealS },
+  { icon: Bot, label: 'AI Agent Config', path: '/ai-config', description: 'Voice, script & API keys', color: C.orange, bg: C.orangeS },
   { icon: Settings, label: 'Settings', path: '/settings', description: 'Account & preferences', color: C.muted, bg: '#F3F4F7' },
 ];
 

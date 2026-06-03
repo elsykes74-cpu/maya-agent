@@ -8,14 +8,14 @@ import type { AgentData } from '@/components/Neo';
 import { loadLeads, loadCalls, saveLeads, type Lead, type CallRecord } from '@/lib/persistence';
 
 const AGENTS: AgentData[] = [
-  { id: 'instagram', title: 'Instagram', icon: 'Zap', iconColor: '#E4405F', iconBg: '#FCE4EC', status: 'online', count: 3 },
-  { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#7B61FF', iconBg: '#EDE9FE', status: 'online' },
-  { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#14B8A6', iconBg: '#F0FDF9', status: 'online' },
-  { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#25D366', iconBg: '#E8F5E9', status: 'busy' },
-  { id: 'facebook', title: 'Facebook', icon: 'TrendingUp', iconColor: '#1877F2', iconBg: '#E3F2FD', status: 'online' },
-  { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FF9F0A', iconBg: '#FFFBF0', status: 'paused' },
-  { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#8B5CF6', iconBg: '#FAF5FF', status: 'online' },
-  { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#34C759', iconBg: '#F0FFF5', status: 'online' },
+  { id: 'instagram', title: 'Instagram', icon: 'Instagram', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #E1306C 0%, #F77737 55%, #FCAF45 100%)', status: 'online', count: 3 },
+  { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #8B5CF6 0%, #6D28D9 100%)', status: 'online' },
+  { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #2DD4BF 0%, #14B8A6 50%, #0D9488 100%)', status: 'online' },
+  { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #25D366 0%, #128C7E 100%)', status: 'busy' },
+  { id: 'facebook', title: 'Facebook', icon: 'Facebook', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #4F8EF7 0%, #1877F2 50%, #1251A6 100%)', status: 'online' },
+  { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #FFB340 0%, #FF9500 100%)', status: 'paused' },
+  { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #BF5AF2 0%, #9333EA 50%, #7C3AED 100%)', status: 'online' },
+  { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #4CD964 0%, #34C759 50%, #28A745 100%)', status: 'online' },
 ];
 
 function parseCSVLine(line: string): string[] {
@@ -136,6 +136,9 @@ export default function Home() {
             else if (agent.id === 'messages') navigate('/sms');
             else if (agent.id === 'workflow') navigate('/ai-config');
             else if (agent.id === 'camera') navigate('/appointments');
+            else if (agent.id === 'instagram') navigate('/leads');
+            else if (agent.id === 'whatsapp') navigate('/sms');
+            else if (agent.id === 'facebook') navigate('/campaigns');
           }} />
         ))}
       </div>
