@@ -3,7 +3,7 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { campaigns, campaignLeads, leads, dncList, callQueue } from "../../db/schema";
-import { getCallingConfig, isWithinCallWindow, scrubPhone } from "../lib/vapi";
+import { getCallingConfig, isWithinCallWindow, scrubPhone, createVapiCall } from "../lib/vapi";
 import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
 import { env } from "../lib/env";
 
@@ -138,12 +138,20 @@ export const campaignsRouter = createRouter({
   // Activate campaign → queue calls → dial via Twilio (falls back to Vapi)
   activate: publicQuery
     .input(z.object({ campaignId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const campaign = await db.query.campaigns.findFirst({
         where: eq(campaigns.id, input.campaignId),
       });
       if (!campaign) throw new Error("Campaign not found");
+
+      // Derive app URL from the incoming request headers so campaign webhooks
+      // always point at the real host, not the APP_URL env var fallback (which
+      // defaults to http://localhost:3000 if unset).
+      const proto = ctx.req.headers.get("x-forwarded-proto") ?? "https";
+      const host = ctx.req.headers.get("x-forwarded-host") ?? ctx.req.headers.get("host") ?? "";
+      const appUrl = host ? `${proto}://${host}` : env.appUrl;
+
 
       const twilioReady = isTwilioConfigured();
       const config = await getCallingConfig();
@@ -211,7 +219,7 @@ export const campaignsRouter = createRouter({
         });
         queued++;
 
-        // Dial via Twilio (preferred) — same conversational engine as inbound
+        // Dial via Twilio (preferred) or fall back to Vapi
         try {
           let callId: string | null = null;
 
@@ -220,9 +228,12 @@ export const campaignsRouter = createRouter({
               to: cl.lead.phone,
               name: cl.lead.sellerName ?? "",
               address: cl.lead.propertyAddress ?? "",
-              appUrl: env.appUrl,
+              appUrl,
             });
             callId = result?.sid ?? null;
+          } else {
+            const result = await createVapiCall(cl.leadId, cl.lead.phone, cl.lead.sellerName ?? "");
+            callId = result?.id ?? null;
           }
 
           if (callId) {

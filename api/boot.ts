@@ -22,6 +22,8 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
+import { leads } from "../db/schema";
+import { notify } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
@@ -339,6 +341,15 @@ app.get("/api/admin/setup", async (c) => {
 			  created_at   TIMESTAMP    NOT NULL DEFAULT NOW()
 			)
 		`);
+		await db.execute(sql`
+			ALTER TABLE ai_config
+			  ADD COLUMN IF NOT EXISTS elevenlabs_api_key   TEXT,
+			  ADD COLUMN IF NOT EXISTS elevenlabs_voice_id  TEXT,
+			  ADD COLUMN IF NOT EXISTS elevenlabs_voice_name TEXT,
+			  ADD COLUMN IF NOT EXISTS twilio_account_sid   TEXT,
+			  ADD COLUMN IF NOT EXISTS twilio_auth_token    TEXT,
+			  ADD COLUMN IF NOT EXISTS twilio_from_number   TEXT
+		`);
 		results.migration = "✅ DB migration applied";
 	} catch (err: any) {
 		results.migration = `❌ Migration failed: ${err?.message ?? err}`;
@@ -464,6 +475,101 @@ app.get("/api/telegram/setup", async (c) => {
     return c.json({ ok: true, appUrl });
   } catch (err: any) {
     return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Lead intake — accepts form submissions from meridianhomesma.com
+// ---------------------------------------------------------------------------
+const INTAKE_ORIGIN = "https://meridianhomesma.com";
+const INTAKE_CORS = {
+  "Access-Control-Allow-Origin": INTAKE_ORIGIN,
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, x-intake-secret",
+};
+
+app.options("/api/lead-intake", (c) => c.body(null, 204, INTAKE_CORS));
+
+app.post("/api/lead-intake", async (c) => {
+  // Validate shared secret
+  const secret = process.env.LEAD_INTAKE_SECRET || env.appSecret;
+  const provided = c.req.header("x-intake-secret") ?? c.req.query("secret") ?? "";
+  if (secret && provided !== secret) {
+    return c.json({ error: "Unauthorized" }, 401, INTAKE_CORS);
+  }
+
+  let body: Record<string, string | undefined>;
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("application/json")) {
+    body = await c.req.json().catch(() => ({}));
+  } else {
+    const raw = await c.req.parseBody().catch(() => ({}));
+    body = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, String(v)]));
+  }
+
+  const sellerName = (body.name ?? body.sellerName ?? body.full_name ?? "").trim();
+  const phone = (body.phone ?? body.tel ?? "").trim();
+  const email = (body.email ?? "").trim();
+  const propertyAddress = (body.address ?? body.propertyAddress ?? body.property_address ?? "").trim();
+  const city = (body.city ?? "").trim();
+  const state = (body.state ?? "MA").trim();
+  const zipCode = (body.zip ?? body.zipCode ?? body.zip_code ?? "").trim();
+  const timeline = (body.timeline ?? "").trim();
+  const askingPriceRaw = body.asking_price ?? body.askingPrice ?? body.price ?? "";
+  const bedsRaw = body.beds ?? body.bedrooms ?? "";
+  const bathsRaw = body.baths ?? body.bathrooms ?? "";
+  const conditionRaw = body.condition ?? "";
+
+  if (!sellerName || !propertyAddress) {
+    return c.json({ error: "name and address are required" }, 400, INTAKE_CORS);
+  }
+
+  const noteParts: string[] = ["Source: meridianhomesma.com"];
+  if (body.message ?? body.notes) noteParts.push(String(body.message ?? body.notes ?? "").trim());
+  if (body.reason ?? body.motivation) noteParts.push(`Reason: ${body.reason ?? body.motivation}`);
+  const notes = noteParts.filter(Boolean).join("\n");
+
+  const conditionMap: Record<string, string> = {
+    excellent: "move_in_ready", good: "move_in_ready", fair: "light_rehab",
+    poor: "medium_rehab", bad: "heavy_rehab",
+  };
+  const condition = (conditionMap[conditionRaw.toLowerCase()] ?? conditionRaw) || undefined;
+
+  try {
+    const db = getDb();
+    const result = await db.insert(leads).values({
+      sellerName,
+      phone: phone || null,
+      email: email || null,
+      propertyAddress,
+      city: city || null,
+      state: state || "MA",
+      zipCode: zipCode || null,
+      timeline: timeline || null,
+      askingPrice: askingPriceRaw ? String(parseFloat(askingPriceRaw.replace(/[^0-9.]/g, ""))) : null,
+      beds: bedsRaw ? parseInt(bedsRaw, 10) || null : null,
+      baths: bathsRaw ? String(parseFloat(bathsRaw)) : null,
+      condition: (condition as any) || null,
+      notes: notes || null,
+      pipelineStage: "lead",
+      motivationLevel: "cold",
+    });
+
+    const leadId = Number((result as any)[0]?.insertId ?? 0);
+
+    await notify(
+      `🌐 <b>New Website Lead</b>\n` +
+      `<b>${sellerName}</b> — ${propertyAddress}${city ? `, ${city}` : ""}${state ? ` ${state}` : ""}\n` +
+      `${phone ? `📞 ${phone}` : "No phone"}${email ? `  📧 ${email}` : ""}\n` +
+      `${timeline ? `⏰ Timeline: ${timeline}` : ""}` +
+      `${askingPriceRaw ? `\n💰 Asking: ${askingPriceRaw}` : ""}` +
+      `\n🆔 Lead #${leadId} — queued for review`
+    ).catch(() => null);
+
+    return c.json({ ok: true, leadId }, 201, INTAKE_CORS);
+  } catch (err) {
+    console.error("[lead-intake]", err);
+    return c.json({ error: "Failed to save lead" }, 500, INTAKE_CORS);
   }
 });
 

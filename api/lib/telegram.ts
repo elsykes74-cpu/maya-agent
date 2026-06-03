@@ -2,6 +2,16 @@ import { env } from "./env";
 
 const botUrl = (token: string) => `https://api.telegram.org/bot${token}`;
 
+// Compatibility shim for older code that uses sendTelegramMessage/notify
+export async function sendTelegramMessage(chatId: string | number, text: string): Promise<void> {
+  return sendMessage(String(chatId), text, { parse_mode: "HTML" });
+}
+
+export async function notify(text: string): Promise<void> {
+  if (!env.telegramChatId) return;
+  return sendTelegramMessage(env.telegramChatId, text);
+}
+
 export async function sendMessage(
   chatId: string,
   text: string,
