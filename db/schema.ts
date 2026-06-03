@@ -69,6 +69,14 @@ export const callQueueOutcomeEnum = pgEnum("call_queue_outcome", [
   "answered", "voicemail", "no_answer", "busy", "appointment_set", "not_interested", "dnc", "failed",
 ]);
 
+export const leadTypeEnum = pgEnum("lead_type", [
+  "vacant", "absentee_owner", "probate", "tax_delinquent", "pre_foreclosure",
+  "tired_landlord", "code_violation", "expired_listing", "fsbo", "high_equity",
+  "inherited", "fire_damaged", "long_term_owner", "other",
+]);
+
+export const confidenceLevelEnum = pgEnum("confidence_level", ["high", "medium", "low"]);
+
 // ── Tables ───────────────────────────────────────────────────────────────────
 
 export const users = pgTable("users", {
@@ -152,6 +160,48 @@ export const leads = pgTable("leads", {
 
   notes: text("notes"),
 
+  // ── Lead Finder Bot fields ──────────────────────────────────────────────────
+  leadType: leadTypeEnum("lead_type").default("other"),
+  leadScore: integer("lead_score").default(0),
+
+  ownerMailingAddress: text("owner_mailing_address"),
+  county: varchar("county", { length: 100 }),
+  yearBuilt: integer("year_built"),
+  lotSize: varchar("lot_size", { length: 50 }),
+  assessedValue: numeric("assessed_value", { precision: 12, scale: 2 }),
+  estimatedValue: numeric("estimated_value", { precision: 12, scale: 2 }),
+  estimatedEquity: numeric("estimated_equity", { precision: 12, scale: 2 }),
+  lastSaleDate: timestamp("last_sale_date"),
+  lastSalePrice: numeric("last_sale_price", { precision: 12, scale: 2 }),
+  taxStatus: varchar("tax_status", { length: 100 }),
+  foreclosureStatus: varchar("foreclosure_status", { length: 100 }),
+  ownershipYears: integer("ownership_years"),
+
+  isVacant: boolean("is_vacant").default(false),
+  isAbsentee: boolean("is_absentee").default(false),
+  isProbate: boolean("is_probate").default(false),
+  hasCodeViolations: boolean("has_code_violations").default(false),
+  hasTaxDelinquency: boolean("has_tax_delinquency").default(false),
+  isPreForeclosure: boolean("is_pre_foreclosure").default(false),
+  isFsbo: boolean("is_fsbo").default(false),
+  isExpiredListing: boolean("is_expired_listing").default(false),
+  isOutOfState: boolean("is_out_of_state").default(false),
+  isMultifamilyLandlord: boolean("is_multifamily_landlord").default(false),
+  hasVisibleDistress: boolean("has_visible_distress").default(false),
+
+  callOpening: text("call_opening"),
+  smsOpener: text("sms_opener"),
+  outreachAngle: text("outreach_angle"),
+  confidenceLevel: confidenceLevelEnum("confidence_level").default("medium"),
+  dateFound: timestamp("date_found"),
+
+  // ── Research & Messaging fields ──────────────────────────────────────────────
+  researchSummary: text("research_summary"),
+  callBriefing: text("call_briefing"),
+  distressSignals: text("distress_signals"),
+  webMentions: text("web_mentions"),
+  // ────────────────────────────────────────────────────────────────────────────
+
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
   createdBy: bigint("created_by", { mode: "number" }),
@@ -159,6 +209,17 @@ export const leads = pgTable("leads", {
 
 export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
+
+export const followUpMessages = pgTable("follow_up_messages", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  messageType: varchar("message_type", { length: 50 }).notNull(),
+  tone: varchar("tone", { length: 50 }).default("friendly"),
+  content: text("content").notNull(),
+  createdBy: varchar("created_by", { length: 50 }).default("ladyjaye"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type FollowUpMessage = typeof followUpMessages.$inferSelect;
 
 export const calls = pgTable("calls", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

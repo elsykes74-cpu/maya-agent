@@ -13,6 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,9 +23,11 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
+import { getDb } from "./queries/connection";
+import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
+import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
-import { registerWebhook } from "./lib/telegram";
 import { Session, Paths } from "../contracts/constants";
 import {
 	getGoogleAuthUrl,
@@ -72,6 +75,48 @@ const OAUTH_REDIRECT_COOKIE = "g_oauth_redirect";
 const requireGoogleConfigured = (c: Context) => {
 	if (!env.googleClientId || !env.googleClientSecret) {
 		return c.json({ error: "Google OAuth not configured" }, 500);
+	}
+	return null;
+};
+
+const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
+// Models that require paid usage credits (1M context tier) — block these by default
+const BLOCKED_MODELS = new Set([
+	"claude-sonnet-4-5-20250929",
+	"claude-opus-4-8",
+	"claude-opus-4-5-20250929",
+]);
+
+type ClaudeMessage = {
+	role: "user" | "assistant";
+	content: string | Array<Record<string, unknown>>;
+};
+
+type ClaudeRequestBody = {
+	model?: string;
+	maxTokens?: number;
+	temperature?: number;
+	system?: string;
+	prompt?: string;
+	messages?: ClaudeMessage[];
+};
+
+const getBearerToken = (c: Context): string => {
+	const auth = c.req.header("authorization") ?? "";
+	const match = auth.match(/^Bearer\s+(.+)$/i);
+	return match?.[1]?.trim() ?? "";
+};
+
+const requireClaudeEndpointAuth = (c: Context) => {
+	const expected = env.claudeEndpointSecret || env.appSecret;
+	if (!expected) {
+		return c.json({ error: "Claude endpoint secret not configured" }, 503);
+	}
+
+	const provided = getBearerToken(c) || c.req.header("x-maya-agent-secret") || "";
+	if (provided !== expected) {
+		return c.json({ error: "Unauthorized" }, 401);
 	}
 	return null;
 };
@@ -170,6 +215,153 @@ app.get("/api/auth/google/url", oauthLimiter, async (c) => {
 	return c.json({ authUrl: url });
 });
 
+// Claude health and proxy endpoints
+app.get("/api/claude/health", (c) =>
+	c.json(
+		{
+			ok: true,
+			configured: Boolean(env.anthropicApiKey),
+			protected: Boolean(env.claudeEndpointSecret || env.appSecret),
+			model: BLOCKED_MODELS.has(process.env.CLAUDE_MODEL ?? "") ? DEFAULT_CLAUDE_MODEL : (process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL),
+		},
+		200,
+		{ "Cache-Control": "no-store" },
+	),
+);
+
+app.post("/api/claude/messages", async (c) => {
+	const authError = requireClaudeEndpointAuth(c);
+	if (authError) return authError;
+
+	if (!env.anthropicApiKey) {
+		return c.json({ error: "Anthropic API key not configured" }, 503);
+	}
+
+	let body: ClaudeRequestBody;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json({ error: "Invalid JSON body" }, 400);
+	}
+
+	const messages = body.messages ?? (body.prompt ? [{ role: "user" as const, content: body.prompt }] : undefined);
+	if (!messages?.length) {
+		return c.json({ error: "Provide prompt or messages" }, 400);
+	}
+
+	const maxTokens = Math.min(Math.max(Number(body.maxTokens ?? 1024), 1), 4096);
+	const requestedModel = body.model || process.env.CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL;
+	const resolvedModel = BLOCKED_MODELS.has(requestedModel) ? DEFAULT_CLAUDE_MODEL : requestedModel;
+	const payload = {
+		model: resolvedModel,
+		max_tokens: maxTokens,
+		temperature: typeof body.temperature === "number" ? body.temperature : undefined,
+		system: body.system || undefined,
+		messages,
+	};
+
+	const response = await fetch(CLAUDE_API_URL, {
+		method: "POST",
+		headers: {
+			"content-type": "application/json",
+			"x-api-key": env.anthropicApiKey,
+			"anthropic-version": "2023-06-01",
+		},
+		body: JSON.stringify(payload),
+	});
+
+	const data = await response.json().catch(() => null);
+	if (!response.ok) {
+		console.error("[claude/messages]", response.status, data);
+		return c.json({ error: "Claude request failed", status: response.status, details: data }, 502);
+	}
+
+	return c.json(data, 200, { "Cache-Control": "no-store" });
+});
+
+app.get("/api/db/health", async (c) => {
+	try {
+		const db = getDb();
+		await db.execute(sql`select 1 as ok`);
+		return c.json(
+			{
+				ok: true,
+				configured: Boolean(env.databaseUrl),
+			},
+			200,
+			{ "Cache-Control": "no-store" },
+		);
+	} catch (err) {
+		console.error("[db/health]", err);
+		const message = err instanceof Error ? err.message : "Database health check failed";
+		return c.json(
+			{
+				ok: false,
+				configured: Boolean(env.databaseUrl),
+				error: message,
+			},
+			503,
+			{ "Cache-Control": "no-store" },
+		);
+	}
+});
+
+// ── One-tap bot setup (migration + webhook registration) ──────────────────
+// Visit: GET /api/admin/setup?secret=<APP_SECRET>
+app.get("/api/admin/setup", async (c) => {
+	const provided = c.req.query("secret") ?? "";
+	const expected = env.appSecret || env.claudeEndpointSecret;
+	if (!expected || provided !== expected) {
+		return c.json({ error: "Unauthorized — add ?secret=YOUR_APP_SECRET to the URL" }, 401);
+	}
+
+	const results: Record<string, string> = {};
+
+	// 1. Run DB migration
+	try {
+		const db = getDb();
+		await db.execute(sql`
+			ALTER TABLE leads
+			  ADD COLUMN IF NOT EXISTS research_summary  TEXT,
+			  ADD COLUMN IF NOT EXISTS call_briefing     TEXT,
+			  ADD COLUMN IF NOT EXISTS distress_signals  TEXT,
+			  ADD COLUMN IF NOT EXISTS web_mentions      TEXT,
+			  ADD COLUMN IF NOT EXISTS created_by        BIGINT
+		`);
+		await db.execute(sql`
+			CREATE TABLE IF NOT EXISTS follow_up_messages (
+			  id           BIGSERIAL PRIMARY KEY,
+			  lead_id      BIGINT       NOT NULL,
+			  message_type VARCHAR(50)  NOT NULL,
+			  tone         VARCHAR(50)  DEFAULT 'friendly',
+			  content      TEXT         NOT NULL,
+			  created_by   VARCHAR(50)  DEFAULT 'ladyjaye',
+			  created_at   TIMESTAMP    NOT NULL DEFAULT NOW()
+			)
+		`);
+		results.migration = "✅ DB migration applied";
+	} catch (err: any) {
+		results.migration = `❌ Migration failed: ${err?.message ?? err}`;
+	}
+
+	// 2. Register Telegram webhooks
+	const appUrl = (env.appUrl || "").replace(/\/$/, "");
+	if (!appUrl || appUrl.includes("localhost")) {
+		results.webhooks = "⚠️ APP_URL not set — set it to your Vercel domain and re-run";
+	} else {
+		await registerAllWebhooks(appUrl);
+		results.webhooks = `✅ Webhooks registered to ${appUrl}`;
+	}
+
+	// 3. API key status
+	results.braveApiKey     = env.braveApiKey      ? "✅ set" : "❌ missing — set BRAVE_API_KEY";
+	results.anthropicApiKey = env.anthropicApiKey  ? "✅ set" : "❌ missing — set ANTHROPIC_API_KEY";
+	results.quickkickToken  = process.env.TELEGRAM_BOT_TOKEN         ? "✅ set" : "❌ missing";
+	results.ladyjayeToken   = process.env.TELEGRAM_BOT_TOKEN_LADYJAYE ? "✅ set" : "❌ missing";
+
+	return c.json({ ok: true, ...results }, 200, { "Cache-Control": "no-store" });
+});
+
 // Env-dump endpoint — dev only, blocked in production
 app.get("/__env-debug", async (c) => {
   if (env.isProduction) return c.json({ error: "Not Found" }, 404);
@@ -218,6 +410,35 @@ app.get(Paths.oauthCallback, createOAuthCallbackHandler());
 app.route("/api/maya", createMayaWebhookRouter());
 
 // ---------------------------------------------------------------------------
+// Twilio inbound call webhook — connects to VAPI assistant
+// ---------------------------------------------------------------------------
+app.post("/api/twilio/voice", async (c) => {
+	const { getCallingConfig } = await import("./lib/vapi");
+	const config = await getCallingConfig().catch(() => null);
+	const assistantId = config?.assistantId || process.env.VAPI_ASSISTANT_ID || "8f0c5749-74f5-4757-8377-10e10f47dd25";
+
+	const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Sip>sip:${assistantId}@sip.vapi.ai</Sip>
+  </Connect>
+</Response>`;
+
+	return c.text(twiml, 200, { "Content-Type": "text/xml" });
+});
+
+app.post("/api/twilio/status", async (c) => {
+	const body = await c.req.parseBody().catch(() => ({}));
+	console.log("[twilio/status]", body);
+	return c.text("ok");
+});
+
+// ---------------------------------------------------------------------------
+// Telegram multi-bot webhook
+// ---------------------------------------------------------------------------
+app.route("/api/telegram", telegramApp);
+
+// ---------------------------------------------------------------------------
 // tRPC
 // ---------------------------------------------------------------------------
 app.all("/api/trpc/*", async (c) =>
@@ -237,10 +458,10 @@ app.post("/api/telegram/webhook", handleTelegramWebhook);
 app.get("/api/telegram/setup", async (c) => {
   const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "";
   const proto = c.req.header("x-forwarded-proto") ?? "https";
-  const webhookUrl = `${proto}://${host}/api/telegram/webhook`;
+  const appUrl = `${proto}://${host}`;
   try {
-    await registerWebhook(webhookUrl);
-    return c.json({ ok: true, webhookUrl });
+    await registerAllWebhooks(appUrl);
+    return c.json({ ok: true, appUrl });
   } catch (err: any) {
     return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
   }
@@ -275,7 +496,8 @@ app.notFound((c) => {
 // ---------------------------------------------------------------------------
 // Production bootstrap
 // ---------------------------------------------------------------------------
-// On Vercel (serverless), skip TCP server. On Railway/VPS, start the Node server.
+// On Vercel (serverless), skip TCP server — requests come via app.fetch exported below.
+// On Railway/VPS, start the persistent Node.js HTTP server.
 if (env.isProduction && !process.env.VERCEL) {
   if (!loadIndex()) {
     throw new Error(
@@ -287,6 +509,13 @@ if (env.isProduction && !process.env.VERCEL) {
     const port = Number.parseInt(process.env.PORT ?? "3000", 10);
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
+      startDailyDigestScheduler();
+      // Auto-register Telegram webhooks so bots don't go silent after redeploys
+      if (env.appUrl && !env.appUrl.includes("localhost")) {
+        registerAllWebhooks(env.appUrl).catch((err) =>
+          console.error("[boot] webhook registration error:", err)
+        );
+      }
     });
   } catch (err) {
     console.error("[boot] FATAL:", err);

@@ -2,8 +2,13 @@ import { getDb } from "../queries/connection";
 import { callingConfig, leads, dncList } from "../../db/schema";
 import { eq } from "drizzle-orm";
 
+const DEFAULT_VAPI_ASSISTANT_ID = "8f0c5749-74f5-4757-8377-10e10f47dd25";
+
 export interface VapiCallRequest {
   assistantId?: string;
+  assistantOverrides?: {
+    variableValues?: Record<string, string | number | boolean | null>;
+  };
   assistant?: {
     name?: string;
     voice?: {
@@ -43,6 +48,7 @@ export async function getCallingConfig() {
   if (!config) {
     await db.insert(callingConfig).values({
       provider: "vapi",
+      assistantId: DEFAULT_VAPI_ASSISTANT_ID,
       maxDailyCalls: 100,
       callWindowStart: "09:00",
       callWindowEnd: "19:00",
@@ -66,6 +72,44 @@ export async function getAIConfigForCall() {
   return config;
 }
 
+function resolveVapiCallEndpoint(endpoint?: string | null): string {
+  const trimmed = endpoint?.trim();
+  if (!trimmed) return "https://api.vapi.ai/call";
+  return trimmed.endsWith("/call") ? trimmed : `${trimmed.replace(/\/$/, "")}/call`;
+}
+
+function buildAssistantVariables(lead: any, sellerName: string) {
+  const propertyAddress = lead.propertyAddress || "";
+  const street = propertyAddress.split(",")[0] || propertyAddress;
+
+  return {
+    name: sellerName,
+    sellerName,
+    propertyAddress,
+    street,
+    agentName: "Erick",
+    city: lead.city || "",
+    state: lead.state || "MA",
+    zipCode: lead.zipCode || "",
+    motivationLevel: lead.motivationLevel || "",
+    timeline: lead.timeline || "",
+    condition: lead.condition || "",
+    askingPrice: lead.askingPrice || "",
+    arv: lead.arv || "",
+    leadScore: lead.leadScore || 0,
+    leadType: lead.leadType || "",
+    outreachAngle: lead.outreachAngle || "",
+  };
+}
+
+function personalize(text: string, variables: ReturnType<typeof buildAssistantVariables>): string {
+  return text
+    .replace(/\[Name\]/g, String(variables.sellerName || ""))
+    .replace(/\[Street Address\]/g, String(variables.propertyAddress || ""))
+    .replace(/\[Street\]/g, String(variables.street || ""))
+    .replace(/\[Agent Name\]/g, "Erick");
+}
+
 export async function createVapiCall(leadId: number, phone: string, sellerName: string): Promise<VapiCallResponse | null> {
   const config = await getCallingConfig();
   if (!config || !config.apiKey) {
@@ -73,26 +117,12 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
     return null;
   }
 
-  const ai = await getAIConfigForCall();
   const db = getDb();
   const lead = await db.query.leads.findFirst({ where: eq(leads.id, leadId) });
   if (!lead) return null;
 
-  const propertyAddress = lead.propertyAddress || "";
-  const street = propertyAddress.split(",")[0] || propertyAddress;
-
-  // Personalize the system prompt with lead data
-  const personalizedPrompt = ai.systemPrompt
-    .replace(/\[Name\]/g, sellerName)
-    .replace(/\[Street Address\]/g, propertyAddress)
-    .replace(/\[Street\]/g, street)
-    .replace(/\[Agent Name\]/g, "Erick");
-
-  const opener = ai.openerScript
-    .replace(/\[Name\]/g, sellerName)
-    .replace(/\[Street Address\]/g, propertyAddress)
-    .replace(/\[Street\]/g, street)
-    .replace(/\[Agent Name\]/g, "Erick");
+  const variables = buildAssistantVariables(lead, sellerName);
+  const assistantId = config.assistantId || process.env.VAPI_ASSISTANT_ID || DEFAULT_VAPI_ASSISTANT_ID;
 
   const body: VapiCallRequest = {
     phoneNumberId: config.fromPhoneNumber || undefined,
@@ -101,7 +131,19 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
       name: sellerName,
     },
     maxDurationSeconds: 300,
-    assistant: {
+  };
+
+  if (assistantId) {
+    body.assistantId = assistantId;
+    body.assistantOverrides = {
+      variableValues: variables,
+    };
+  } else {
+    const ai = await getAIConfigForCall();
+    const personalizedPrompt = personalize(ai.systemPrompt, variables);
+    const opener = personalize(ai.openerScript, variables);
+
+    body.assistant = {
       name: "Real Estate Acquisitions",
       voice: {
         provider: "11labs",
@@ -157,10 +199,10 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
         ],
       },
       firstMessage: opener,
-    },
-  };
+    };
+  }
 
-  const res = await fetch(config.apiEndpoint || "https://api.vapi.ai/call", {
+  const res = await fetch(resolveVapiCallEndpoint(config.apiEndpoint), {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${config.apiKey}`,

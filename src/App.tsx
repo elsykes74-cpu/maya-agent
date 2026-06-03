@@ -12,6 +12,8 @@ import Settings from './pages/Settings'
 import Campaigns from './pages/Campaigns'
 import DNCLists from './pages/DNCLists'
 import More from './pages/More'
+import CallQueue from './pages/CallQueue'
+import LeadFinder from './pages/LeadFinder'
 import Layout from './components/Layout'
 
 export default function App() {
@@ -22,6 +24,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
         <Route path="/leads" element={<Leads />} />
+        <Route path="/lead-finder" element={<LeadFinder />} />
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/calls" element={<CallCenter />} />
         <Route path="/more" element={<More />} />

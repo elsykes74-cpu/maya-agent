@@ -1,150 +1,208 @@
 import { env } from "./env";
 
-const botUrl = () => `https://api.telegram.org/bot${env.telegramBotToken}`;
+const botUrl = (token: string) => `https://api.telegram.org/bot${token}`;
 
-// ---------------------------------------------------------------------------
-// Core send
-// ---------------------------------------------------------------------------
-export async function sendTelegramMessage(
-  chatId: string | number,
+export async function sendMessage(
+  chatId: string,
   text: string,
+  opts: { parse_mode?: "HTML"; disable_web_page_preview?: boolean; token?: string; [k: string]: unknown } = {}
 ): Promise<void> {
-  if (!env.telegramBotToken || !chatId) return;
+  const token = opts.token ?? env.telegramBotToken;
+  if (!token || !chatId) return;
+  const { token: _t, ...rest } = opts;
   try {
-    const res = await fetch(`${botUrl()}/sendMessage`, {
+    const res = await fetch(`${botUrl(token)}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+      body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true, ...rest }),
     });
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("[telegram] sendMessage failed:", res.status, err);
-    }
+    if (!res.ok) console.error("[telegram] sendMessage error:", await res.text());
   } catch (err) {
-    console.error("[telegram] sendMessage error:", err);
+    console.error("[telegram] sendMessage fetch error:", err);
   }
 }
 
-// Broadcast to the configured owner chat
-export async function notify(text: string): Promise<void> {
-  if (!env.telegramChatId) return;
-  await sendTelegramMessage(env.telegramChatId, text);
+export async function sendAlert(text: string, bot: "quickkick" | "ladyjaye" = "quickkick"): Promise<void> {
+  const token = bot === "ladyjaye" ? env.telegramBotTokenLadyJaye : env.telegramBotToken;
+  const chatId = bot === "ladyjaye" ? env.telegramChatIdLadyJaye : env.telegramChatId;
+  if (!token || !chatId) return;
+  await sendMessage(chatId, text, { parse_mode: "HTML", token });
 }
 
-// ---------------------------------------------------------------------------
-// Register webhook with Telegram
-// ---------------------------------------------------------------------------
-export async function registerWebhook(webhookUrl: string): Promise<void> {
-  if (!env.telegramBotToken) return;
-  const res = await fetch(`${botUrl()}/setWebhook`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: webhookUrl }),
-  });
-  const json = await res.json() as any;
-  console.log("[telegram] setWebhook:", json);
+export async function registerWebhook(token: string, webhookUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${botUrl(token)}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+    });
+    const data = await res.json().catch(() => null) as any;
+    if (!res.ok || !data?.ok) {
+      console.error("[telegram] setWebhook failed:", data);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("[telegram] setWebhook fetch error:", err);
+    return false;
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Notification: new lead created
-// ---------------------------------------------------------------------------
-export async function notifyNewLead(lead: {
-  id: number;
-  sellerName: string;
-  phone?: string | null;
-  propertyAddress: string;
-  motivationLevel?: string | null;
-  pipelineStage?: string | null;
-}): Promise<void> {
-  const motivation = lead.motivationLevel ?? "unknown";
-  const emoji = motivation === "hot" ? "🔥" : motivation === "warm" ? "♨️" : "❄️";
-  const text = [
-    `${emoji} <b>New Lead Added</b>`,
-    `👤 ${lead.sellerName}`,
-    `📍 ${lead.propertyAddress}`,
-    lead.phone ? `📞 ${lead.phone}` : null,
-    `📊 ${motivation.toUpperCase()} · ${lead.pipelineStage ?? "lead"}`,
-    `🆔 #${lead.id}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-  await notify(text);
+export async function getWebhookInfo(token: string): Promise<any> {
+  try {
+    const res = await fetch(`${botUrl(token)}/getWebhookInfo`);
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
 }
 
-// ---------------------------------------------------------------------------
-// Notification: call complete + follow-up brief
-// ---------------------------------------------------------------------------
-export async function notifyCallComplete(params: {
-  leadName: string;
-  leadId: number;
-  phone: string;
-  outcome: string;
-  duration: number;
-  appointmentSet: boolean;
-  painSignals?: string;
-  askingPrice?: string | null;
-}): Promise<void> {
-  const outcomeEmoji: Record<string, string> = {
-    appointment_set: "✅",
-    answered: "📞",
-    voicemail: "📬",
-    no_answer: "📵",
-    busy: "🔴",
-    not_interested: "🚫",
-    dnc: "⛔",
-    disconnected: "❌",
-  };
-  const emoji = outcomeEmoji[params.outcome] ?? "📞";
+export function scoreEmoji(score: number): string {
+  if (score >= 80) return "🔥";
+  if (score >= 60) return "⚡";
+  if (score >= 40) return "❄️";
+  return "📋";
+}
 
-  const durationStr =
-    params.duration > 0
-      ? `${Math.floor(params.duration / 60)}m ${params.duration % 60}s`
-      : "—";
+export function priorityLabel(score: number): string {
+  if (score >= 80) return "HOT";
+  if (score >= 60) return "WARM";
+  if (score >= 40) return "NURTURE";
+  return "LOW";
+}
 
-  const lines = [
-    `${emoji} <b>Call Complete — ${params.leadName}</b>`,
-    `📞 ${params.phone}`,
-    `📊 Outcome: <b>${params.outcome.replace(/_/g, " ").toUpperCase()}</b>`,
-    `⏱ Duration: ${durationStr}`,
+export function getMotivationFlags(lead: any): string[] {
+  const f: string[] = [];
+  if (lead.isPreForeclosure) f.push("Pre-Foreclosure");
+  if (lead.hasTaxDelinquency) f.push("Tax Delinquent");
+  if (lead.isProbate) f.push("Probate");
+  if (lead.isVacant) f.push("Vacant");
+  if (lead.isAbsentee) f.push("Absentee Owner");
+  if (lead.hasCodeViolations) f.push("Code Violation");
+  if (lead.isExpiredListing) f.push("Expired Listing");
+  if (lead.isFsbo) f.push("FSBO");
+  if (lead.isOutOfState) f.push("Out of State");
+  return f;
+}
+
+export function formatLeadCard(lead: any, short = false): string {
+  const score = lead.leadScore ?? 0;
+  const flags = getMotivationFlags(lead);
+
+  let msg = `${scoreEmoji(score)} <b>${priorityLabel(score)} — Score ${score}/100</b>\n`;
+  msg += `<b>ID #${lead.id}</b>  |  ${lead.sellerName}\n`;
+  msg += `📍 ${lead.propertyAddress}`;
+  if (lead.city) msg += `, ${lead.city} MA`;
+  msg += "\n";
+  if (lead.phone) msg += `📞 ${lead.phone}\n`;
+  if (flags.length) msg += `⚠️ <i>${flags.join(" · ")}</i>\n`;
+
+  if (!short) {
+    if (lead.arv && Number(lead.arv) > 0)
+      msg += `💰 ARV: $${Number(lead.arv).toLocaleString()}\n`;
+    if (lead.estimatedRepairs && Number(lead.estimatedRepairs) > 0)
+      msg += `🔧 Repairs: $${Number(lead.estimatedRepairs).toLocaleString()}\n`;
+    if (lead.callOpening)
+      msg += `\n💬 <i>"${lead.callOpening}"</i>`;
+  }
+
+  return msg;
+}
+
+export function formatScoreBreakdown(lead: any): string {
+  const score = lead.leadScore ?? 0;
+  const rows: [string, boolean, number][] = [
+    ["Pre-Foreclosure", !!lead.isPreForeclosure, 25],
+    ["Tax Delinquent", !!lead.hasTaxDelinquency, 20],
+    ["Probate / Estate", !!lead.isProbate, 20],
+    ["Vacant Property", !!lead.isVacant, 20],
+    ["Absentee Owner", !!lead.isAbsentee, 15],
+    ["Code Violations", !!lead.hasCodeViolations, 15],
+    ["Expired Listing", !!lead.isExpiredListing, 15],
+    ["FSBO", !!lead.isFsbo, 10],
+    ["15+ Yrs Ownership", (lead.ownershipYears ?? 0) >= 15, 10],
+    ["Out-of-State Owner", !!lead.isOutOfState, 10],
+    ["Multifamily Landlord", !!lead.isMultifamilyLandlord, 10],
+    ["Visible Distress", !!lead.hasVisibleDistress, 10],
   ];
 
-  if (params.appointmentSet) lines.push("🗓 Appointment booked!");
-  if (params.askingPrice) lines.push(`💰 Asking price: $${params.askingPrice}`);
-  if (params.painSignals) lines.push(`⚠️ Pain signals: ${params.painSignals}`);
+  let msg = `${scoreEmoji(score)} <b>Score Breakdown — #${lead.id}</b>\n`;
+  msg += `${lead.sellerName}  ·  ${lead.propertyAddress}\n`;
+  msg += `<b>Total: ${score}/100  (${priorityLabel(score)})</b>\n\n`;
 
-  lines.push("", "<b>📋 Follow-Up Brief</b>");
-  lines.push(buildFollowUpBrief(params));
-  lines.push(`\n🆔 Lead #${params.leadId}`);
+  for (const [label, active, pts] of rows) {
+    if (active) msg += `✅ ${label} +${pts}\n`;
+  }
+  if (!rows.some(([, a]) => a)) msg += `<i>No motivation indicators set yet.</i>\n`;
 
-  await notify(lines.join("\n"));
+  if (lead.outreachAngle)
+    msg += `\n🎯 <i>${lead.outreachAngle}</i>`;
+
+  return msg;
 }
 
-function buildFollowUpBrief(params: {
-  outcome: string;
-  appointmentSet: boolean;
-  painSignals?: string;
-  askingPrice?: string | null;
-}): string {
-  if (params.appointmentSet) {
-    return "Appointment booked. Send confirmation, pull comps, review pain signals before the meeting.";
+export function formatDailyDigest(
+  stats: { hot: number; warm: number; nurture: number; low: number; total: number },
+  hotLeads: any[],
+  warmLeads: any[]
+): string {
+  const now = new Date().toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric",
+    timeZone: "America/New_York",
+  });
+
+  let msg = `🌅 <b>Western Mass Lead Bot — Daily Digest</b>\n`;
+  msg += `<i>${now}</i>\n\n`;
+  msg += `📊 <b>Pipeline</b>  🔥 ${stats.hot} HOT  ⚡ ${stats.warm} WARM  ❄️ ${stats.nurture} NURTURE  📋 ${stats.low} LOW\n`;
+  msg += `Total: ${stats.total} leads\n`;
+
+  if (hotLeads.length > 0) {
+    msg += `\n🔥 <b>HOT LEADS — Call Today</b>\n${"─".repeat(22)}\n`;
+    for (const lead of hotLeads.slice(0, 5)) {
+      msg += "\n" + formatLeadCard(lead, true);
+    }
   }
-  switch (params.outcome) {
-    case "voicemail":
-      return "Left voicemail. Follow up with SMS in 2–4 hrs. Retry tomorrow morning.";
-    case "no_answer":
-      return "No answer. Retry in 3 hrs. Send SMS intro. Flag for 3-touch sequence.";
-    case "not_interested":
-      return "Declined. Move to cold drip. Set 30-day callback. Note objections for future outreach.";
-    case "dnc":
-      return "Added to DNC. No further contact.";
-    case "busy":
-      return "Line busy. Retry in 1 hour.";
-    case "disconnected":
-      return "Number may be disconnected. Verify contact info before retrying.";
-    default:
-      if (params.painSignals) {
-        return `Connected. Key pain: ${params.painSignals}. Send offer within 24h.`;
-      }
-      return "Connected. Send follow-up SMS with offer summary within 24h.";
+
+  if (warmLeads.length > 0) {
+    msg += `\n\n⚡ <b>WARM LEADS — Call This Week</b>\n${"─".repeat(22)}\n`;
+    for (const lead of warmLeads.slice(0, 3)) {
+      msg += "\n" + formatLeadCard(lead, true);
+    }
   }
+
+  if (!hotLeads.length && !warmLeads.length) {
+    msg += "\n📭 No scored leads. Add leads in the web app and click Re-Score All.";
+  } else {
+    msg += `\n\n💡 /outreach [id] for scripts  ·  /score [id] for breakdown`;
+  }
+
+  return msg;
+}
+
+export function helpText(): string {
+  return (
+    `🏠 <b>Western Mass Wholesale Bot — @Quickkickbot</b>\n\n` +
+    `/hot — HOT leads (score 80+) · Call same day\n` +
+    `/warm — WARM leads (60–79) · Call this week\n` +
+    `/leads — Last 5 leads added\n` +
+    `/digest — Full morning digest with stats\n` +
+    `/outreach [id] — Call opening + SMS for a lead\n` +
+    `/score [id] — Score breakdown for a lead\n` +
+    `/help — Show this message\n\n` +
+    `🔔 Automatic alerts fire when a new HOT lead is scored.`
+  );
+}
+
+export function helpTextLadyJaye(): string {
+  return (
+    `💼 <b>Western Mass Wholesale Bot — @LadyJaye</b>\n\n` +
+    `/hot — HOT leads (score 80+) · Call same day\n` +
+    `/warm — WARM leads (60–79) · Call this week\n` +
+    `/leads — Last 5 leads added\n` +
+    `/digest — Full morning digest with stats\n` +
+    `/outreach [id] — Call opening + SMS for a lead\n` +
+    `/score [id] — Score breakdown for a lead\n` +
+    `/help — Show this message\n\n` +
+    `🔔 Automatic alerts fire when a new HOT lead is scored.`
+  );
 }

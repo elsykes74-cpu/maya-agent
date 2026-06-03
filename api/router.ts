@@ -11,11 +11,13 @@ import { campaignsRouter } from "./routers/campaigns-router";
 import { dncRouter } from "./routers/dnc-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { mayaRouter } from "./routers/maya-router";
+import { leadFinderRouter } from "./routers/lead-finder-router";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
   auth: authRouter,
   leads: leadsRouter,
+  leadFinder: leadFinderRouter,
   calls: callsRouter,
   sms: smsRouter,
   appointments: appointmentsRouter,

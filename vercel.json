@@ -4,12 +4,17 @@
     {
       "src": "api/vercel.js",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["dist/**"], "maxDuration": 30 }
+      "config": {
+        "includeFiles": ["dist/**"],
+        "maxDuration": 30
+      }
     },
     {
       "src": "package.json",
       "use": "@vercel/static-build",
-      "config": { "distDir": "dist/public" }
+      "config": {
+        "distDir": "dist/public"
+      }
     }
   ],
   "routes": [

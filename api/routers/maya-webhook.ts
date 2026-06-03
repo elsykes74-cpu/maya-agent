@@ -69,13 +69,13 @@ async function getAIConfig(): Promise<AIConfigResult> {
   return result;
 }
 
-function playEl(appUrl: string, text: string, apiKey: string, voiceId: string): string {
-  const url = `${appUrl}/api/maya/audio?text=${enc(text)}&vid=${enc(voiceId)}&key=${enc(apiKey)}`;
+function playEl(appUrl: string, text: string, voiceId: string): string {
+  const url = `${appUrl}/api/maya/audio?text=${enc(text)}&vid=${enc(voiceId)}`;
   return `<Play>${escXml(url)}</Play>`;
 }
 
 function tts(appUrl: string, text: string, voice: string, el: ElevenLabsConfig | null): string {
-  return el ? playEl(appUrl, text, el.apiKey, el.voiceId) : say(text, voice);
+  return el ? playEl(appUrl, text, el.voiceId) : say(text, voice);
 }
 
 async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
@@ -315,13 +315,26 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
   });
 
   // ElevenLabs audio proxy — streams TTS audio for Twilio <Play>
+  // API key is never exposed in the URL; it's fetched server-side from config/env.
   app.get("/audio", async (c) => {
     const text = c.req.query("text") ?? "";
     const voiceId = c.req.query("vid") ?? "";
-    const apiKey = c.req.query("key") ?? "";
 
-    if (!text || !voiceId || !apiKey) {
+    if (!text || !voiceId) {
       return c.body("Missing params", 400);
+    }
+
+    let apiKey: string;
+    try {
+      const config = await getAIConfig();
+      apiKey = config.elevenlabs?.apiKey ?? "";
+    } catch {
+      apiKey = "";
+    }
+
+    if (!apiKey) {
+      console.error("[elevenlabs] audio proxy: no API key configured");
+      return c.body("TTS not configured", 502);
     }
 
     try {

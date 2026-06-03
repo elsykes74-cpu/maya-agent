@@ -2,7 +2,8 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { calls } from "../../db/schema";
+import { calls, leads } from "../../db/schema";
+import { createVapiCall, scrubPhone, getCallingConfig } from "../lib/vapi";
 
 export const callsRouter = createRouter({
   list: publicQuery
@@ -101,6 +102,27 @@ export const callsRouter = createRouter({
       const db = getDb();
       await db.delete(calls).where(eq(calls.id, input.id));
       return { success: true };
+    }),
+
+  // Dial a single lead via VAPI — same AI conversational flow as inbound
+  dial: publicQuery
+    .input(z.object({ leadId: z.number() }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const lead = await db.query.leads.findFirst({ where: eq(leads.id, input.leadId) });
+      if (!lead) throw new Error("Lead not found");
+      if (!lead.phone) throw new Error("Lead has no phone number");
+
+      const config = await getCallingConfig();
+      if (!config?.apiKey) throw new Error("VAPI not configured — add VAPI_API_KEY in calling config");
+
+      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+      if (!scrub.pass) throw new Error(`Call blocked: ${scrub.reason}`);
+
+      const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName);
+      if (!vapiCall) throw new Error("VAPI call failed to start");
+
+      return { ok: true, callId: vapiCall.id, status: vapiCall.status };
     }),
 
   stats: publicQuery.query(async () => {

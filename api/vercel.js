@@ -1,4 +1,4 @@
-// Vercel Node.js serverless entry - bridges Node.js req/res to Hono's Web API fetch handler.
+// Vercel Node.js serverless entry — bridges Node.js req/res to Hono's Web API fetch handler.
 import app from '../dist/boot.js'
 
 export default async function handler(req, res) {
