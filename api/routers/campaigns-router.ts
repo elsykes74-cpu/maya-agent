@@ -3,7 +3,7 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { campaigns, campaignLeads, leads, dncList, callQueue } from "../../db/schema";
-import { getCallingConfig, isWithinCallWindow, scrubPhone } from "../lib/vapi";
+import { getCallingConfig, isWithinCallWindow, scrubPhone, createVapiCall } from "../lib/vapi";
 import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
 import { env } from "../lib/env";
 
@@ -219,7 +219,7 @@ export const campaignsRouter = createRouter({
         });
         queued++;
 
-        // Dial via Twilio (preferred) — same conversational engine as inbound
+        // Dial via Twilio (preferred) or fall back to Vapi
         try {
           let callId: string | null = null;
 
@@ -228,9 +228,12 @@ export const campaignsRouter = createRouter({
               to: cl.lead.phone,
               name: cl.lead.sellerName ?? "",
               address: cl.lead.propertyAddress ?? "",
-              appUrl: env.appUrl,
+              appUrl,
             });
             callId = result?.sid ?? null;
+          } else {
+            const result = await createVapiCall(cl.leadId, cl.lead.phone, cl.lead.sellerName ?? "");
+            callId = result?.id ?? null;
           }
 
           if (callId) {
