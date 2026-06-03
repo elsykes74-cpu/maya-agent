@@ -1,8 +1,44 @@
 import { Hono } from "hono";
-import type { Context } from "hono";
+import type { Context, MiddlewareHandler } from "hono";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { supabase } from "../lib/supabase";
 import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
 import { elevenLabsTTSStream } from "../lib/elevenlabs";
+
+// ---------------------------------------------------------------------------
+// Twilio webhook signature validation
+// Prevents forged webhook calls that would burn Claude + ElevenLabs credits.
+// Skipped when TWILIO_AUTH_TOKEN is unset (local dev / initial setup).
+// ---------------------------------------------------------------------------
+function computeTwilioSignature(authToken: string, url: string, params: Record<string, string>): string {
+  let s = url;
+  for (const k of Object.keys(params).sort()) s += k + (params[k] ?? "");
+  return createHmac("sha1", authToken).update(s, "utf8").digest("base64");
+}
+
+const twilioGuard: MiddlewareHandler = async (c, next) => {
+  const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+  if (!authToken) return next(); // dev / unconfigured — skip
+
+  const signature = c.req.header("x-twilio-signature") ?? "";
+  if (!signature) return c.body("Forbidden", 403);
+
+  const params: Record<string, string> = {};
+  if (c.req.method === "POST") {
+    const body = await c.req.parseBody();
+    for (const [k, v] of Object.entries(body)) params[k] = String(v);
+  }
+
+  const expected = computeTwilioSignature(authToken, c.req.url, params);
+  let valid = false;
+  try { valid = timingSafeEqual(Buffer.from(expected), Buffer.from(signature)); } catch { /* length mismatch */ }
+
+  if (!valid) {
+    console.error("[twilio/guard] invalid signature:", c.req.url);
+    return c.body("Forbidden", 403);
+  }
+  return next();
+};
 
 function getAppUrl(c: Context): string {
   const proto = c.req.header("x-forwarded-proto") ?? "https";
@@ -129,7 +165,7 @@ export function createMayaWebhookRouter() {
   const app = new Hono();
 
   // Inbound calls — generic opener
-  app.post("/initial", async (c) => {
+  app.post("/initial", twilioGuard, async (c) => {
     console.log("[maya/initial] webhook received");
     try {
       const appUrl = getAppUrl(c);
@@ -159,7 +195,7 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
   });
 
   // Outbound personalized opener
-  app.post("/outbound", async (c) => {
+  app.post("/outbound", twilioGuard, async (c) => {
     console.log("[maya/outbound] webhook received");
     try {
       const name = c.req.query("name") ?? "";
@@ -207,7 +243,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
   });
 
   // AI-powered speech response handler
-  app.post("/respond", async (c) => {
+  app.post("/respond", twilioGuard, async (c) => {
     console.log("[maya/respond] webhook received");
 
     // Safety deadline: Vercel's 10s limit starts at request arrival, not handler entry.
@@ -292,7 +328,7 @@ ${gather(respondUrl(appUrl, name, address, voice), say("Sorry, one moment — ca
   });
 
   // No response — remind once then hang up
-  app.post("/no-response", async (c) => {
+  app.post("/no-response", twilioGuard, async (c) => {
     console.log("[maya/no-response] webhook received");
     try {
       const name = c.req.query("name") ?? "";
@@ -357,7 +393,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
   });
 
   // Status callback — save outcome when call completes
-  app.post("/status", async (c) => {
+  app.post("/status", twilioGuard, async (c) => {
     try {
       const body = await c.req.parseBody();
       const callSid = (body["CallSid"] as string) ?? "";
