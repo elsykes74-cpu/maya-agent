@@ -2,8 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY ?? "",
-  // Cold start (3-5s) + Supabase (0.5s) + Claude must fit inside Vercel's 10s limit
-  timeout: 4500,
+  // Cold start (3-5s) eats into Vercel's 10s limit before handler runs.
+  // Handler deadline is 4s, so Claude gets 3s max to leave headroom for Supabase + overhead.
+  timeout: 3000,
 });
 
 export interface ConversationTurn {

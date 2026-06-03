@@ -199,10 +199,12 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
   app.post("/respond", async (c) => {
     console.log("[maya/respond] webhook received");
 
-    // Safety deadline: respond within 7s from handler entry so Vercel's 10s limit is never hit
+    // Safety deadline: Vercel's 10s function limit starts at request arrival, not handler entry.
+    // Cold start can take 3-6s before this code runs, leaving only 4-7s for the handler.
+    // Fire at 4s from handler entry so the fallback TwiML is always sent before Vercel kills us.
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
     const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 7000);
+      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 4000);
     });
 
     const work = (async () => {
