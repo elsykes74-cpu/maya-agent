@@ -138,12 +138,19 @@ export const campaignsRouter = createRouter({
   // Activate campaign → queue calls → dial via Twilio (falls back to Vapi)
   activate: publicQuery
     .input(z.object({ campaignId: z.number() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ input, ctx }) => {
       const db = getDb();
       const campaign = await db.query.campaigns.findFirst({
         where: eq(campaigns.id, input.campaignId),
       });
       if (!campaign) throw new Error("Campaign not found");
+
+      // Derive app URL from the incoming request headers so campaign webhooks
+      // always point at the real host, not the APP_URL env var fallback (which
+      // defaults to http://localhost:3000 if unset).
+      const proto = ctx.req.headers.get("x-forwarded-proto") ?? "https";
+      const host = ctx.req.headers.get("x-forwarded-host") ?? ctx.req.headers.get("host") ?? "";
+      const appUrl = host ? `${proto}://${host}` : env.appUrl;
 
       const twilioReady = isTwilioConfigured();
       const config = await getCallingConfig();

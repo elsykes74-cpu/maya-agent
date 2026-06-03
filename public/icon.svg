@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0A0A0F"/>
+      <stop offset="100%" style="stop-color:#1A1A2E"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00D4AA"/>
+      <stop offset="100%" style="stop-color:#0099FF"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Outer ring arc (signal / broadcast) -->
+  <path d="M 156 256 A 100 100 0 0 1 256 156" stroke="url(#accent)" stroke-width="18" stroke-linecap="round" fill="none" opacity="0.35" filter="url(#glow)"/>
+  <path d="M 356 256 A 100 100 0 0 1 256 356" stroke="url(#accent)" stroke-width="18" stroke-linecap="round" fill="none" opacity="0.35" filter="url(#glow)"/>
+
+  <!-- Middle ring arc -->
+  <path d="M 186 256 A 70 70 0 0 1 256 186" stroke="url(#accent)" stroke-width="14" stroke-linecap="round" fill="none" opacity="0.6" filter="url(#glow)"/>
+  <path d="M 326 256 A 70 70 0 0 1 256 326" stroke="url(#accent)" stroke-width="14" stroke-linecap="round" fill="none" opacity="0.6" filter="url(#glow)"/>
+
+  <!-- M letterform — clean geometric -->
+  <path d="M 176 340 L 176 172 L 256 280 L 336 172 L 336 340"
+        stroke="url(#accent)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"
+        fill="none" filter="url(#glow)"/>
+
+  <!-- Center dot -->
+  <circle cx="256" cy="256" r="12" fill="url(#accent)" filter="url(#glow)"/>
+</svg>
