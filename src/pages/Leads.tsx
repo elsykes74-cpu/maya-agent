@@ -3,6 +3,7 @@ import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, 
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
 import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS } from '@/lib/persistence';
 import type { Lead, LeadCallLog } from '@/lib/persistence';
+import { pushLead, pushLeadDelete } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
 
 export default function Leads() {
@@ -36,6 +37,7 @@ export default function Leads() {
       desc: `Remove ${lead.sellerName} from your leads? This cannot be undone.`,
       onConfirm: () => {
         setLeads(p => p.filter(l => l.id !== id));
+        pushLeadDelete(id);
         setSelectedLead(null);
         setConfirmOpen(false);
       },
@@ -46,6 +48,7 @@ export default function Leads() {
   const updateLead = (updated: Lead) => {
     setLeads(p => p.map(l => l.id === updated.id ? updated : l));
     setSelectedLead(updated);
+    pushLead(updated);
   };
 
   return (
@@ -95,7 +98,7 @@ export default function Leads() {
 
       <div style={{ height: 20 }} />
 
-      {showAdd && <AddLeadSheet onClose={() => setShowAdd(false)} onAdd={(lead) => { setLeads(p => [lead, ...p]); setShowAdd(false); }} />}
+      {showAdd && <AddLeadSheet onClose={() => setShowAdd(false)} onAdd={(lead) => { setLeads(p => [lead, ...p]); pushLead(lead); setShowAdd(false); }} />}
 
       {selectedLead && (
         <LeadDetailSheet

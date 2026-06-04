@@ -3,6 +3,7 @@ import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Spar
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
 import { loadLeads, loadCalls, addCallRecord, clearCalls, addLeadCallLog, assignLeadToCampaign, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN } from '@/lib/persistence';
 import type { CallRecord, CallOutcome } from '@/lib/persistence';
+import { pushCallLog, pushLead } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
 
 interface CallJob {
@@ -151,12 +152,13 @@ export default function CallCenter() {
     setCallHistory(updated);
 
     if (lead) {
-      addLeadCallLog({
+      const newLog = addLeadCallLog({
         leadId: lead.id, leadName: lead.sellerName, phone: lead.phone,
         outcome, notes, duration: outcomeDuration,
         campaignAssigned: OUTCOME_TO_CAMPAIGN[outcome],
         createdAt: new Date().toISOString(),
       });
+      pushCallLog(newLog);
       assignLeadToCampaign(
         { leadId: lead.id, leadName: lead.sellerName, phone: lead.phone, motivationLevel: lead.motivationLevel },
         OUTCOME_TO_CAMPAIGN[outcome]
