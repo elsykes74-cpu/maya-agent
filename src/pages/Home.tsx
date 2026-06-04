@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import { PhoneCall, Users, Zap, Calendar, Flame, Upload, CheckCircle } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, MotTag } from '@/components/Neo';
 import { AgentTile } from '@/components/AgentTile';
-import { MayaHeader, QuickActionBar } from '@/components/MayaHeader';
+import { QuickActionBar } from '@/components/MayaHeader';
 import type { AgentData } from '@/components/Neo';
 import { loadLeads, loadCalls, saveLeads, type Lead, type CallRecord } from '@/lib/persistence';
 
@@ -116,7 +116,15 @@ export default function Home() {
 
   return (
     <div style={{ padding: '28px 20px 20px' }}>
-      <MayaHeader greeting={greeting} title="Maya" subtitle="Your AI Agent Command Center" status="online" statusLabel="Agent Online" branded />
+      {/* Brand Logo Header */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28, gap: 0 }}>
+        <img
+          src="/maya-logo.jpg"
+          alt="Maya"
+          style={{ width: 110, height: 110, objectFit: 'contain', borderRadius: 0, background: 'transparent', mixBlendMode: 'screen' }}
+        />
+        <h1 className="maya-chrome-logo" style={{ fontSize: 38, margin: 0, lineHeight: 1 }}>Maya</h1>
+      </div>
 
       {/* KPI Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
