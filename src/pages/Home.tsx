@@ -8,11 +8,9 @@ import type { AgentData } from '@/components/Neo';
 import { loadLeads, loadCalls, saveLeads, type Lead, type CallRecord } from '@/lib/persistence';
 
 const AGENTS: AgentData[] = [
-  { id: 'instagram', title: 'Instagram', icon: 'Instagram', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #E1306C 0%, #F77737 55%, #FCAF45 100%)', status: 'online', count: 3 },
   { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #8B5CF6 0%, #6D28D9 100%)', status: 'online' },
   { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #2DD4BF 0%, #14B8A6 50%, #0D9488 100%)', status: 'online' },
   { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #25D366 0%, #128C7E 100%)', status: 'busy' },
-  { id: 'facebook', title: 'Facebook', icon: 'Facebook', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #4F8EF7 0%, #1877F2 50%, #1251A6 100%)', status: 'online' },
   { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #FFB340 0%, #FF9500 100%)', status: 'paused' },
   { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #BF5AF2 0%, #9333EA 50%, #7C3AED 100%)', status: 'online' },
   { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #4CD964 0%, #34C759 50%, #28A745 100%)', status: 'online' },

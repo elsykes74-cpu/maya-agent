@@ -1080,6 +1080,37 @@ body {
 [data-theme="dark"] .bottom-sheet,
 [data-theme="dark"] .neo-sheet { box-shadow: 0 -8px 32px rgba(0,0,0,0.3); }
 
+[data-theme="dark"] .soft-input {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.08);
+  color: var(--text);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.3);
+}
+
+[data-theme="dark"] .seg-tab-bar {
+  background: rgba(255,255,255,0.05);
+  border-color: rgba(255,255,255,0.07);
+}
+
+[data-theme="dark"] .seg-tab { color: var(--text-secondary); }
+
+[data-theme="dark"] .seg-tab.active {
+  background: rgba(255,255,255,0.10);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.08);
+  color: var(--text);
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder { color: var(--text-tertiary); }
+
 [data-theme="dark"] .toggle-3d,
 [data-theme="dark"] .maya-toggle-track,
 [data-theme="dark"] .neo-toggle-track { background: #3A3D4A; }

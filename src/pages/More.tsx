@@ -9,7 +9,7 @@ const ITEMS = [
   { icon: MessageSquare, label: 'SMS Sequences', path: '/sms', description: '2 templates', color: C.blue, bg: C.blueS },
   { icon: Shield, label: 'DNC Lists', path: '/dnc', description: '3 numbers', color: C.red, bg: C.redS },
   { icon: Bot, label: 'AI Agent Config', path: '/ai-config', description: 'Voice, script & API keys', color: C.orange, bg: C.orangeS },
-  { icon: Settings, label: 'Settings', path: '/settings', description: 'Account & preferences', color: C.muted, bg: '#F3F4F7' },
+  { icon: Settings, label: 'Settings', path: '/settings', description: 'Account & preferences', color: C.muted, bg: C.surface },
 ];
 
 export default function More() {
