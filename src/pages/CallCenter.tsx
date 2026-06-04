@@ -153,9 +153,14 @@ export default function CallCenter() {
   return (
     <div style={{ padding: '28px 20px 20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>AI Agent</h1>
-          <p style={{ fontSize: 14, color: C.muted, margin: '4px 0 0', fontWeight: 500 }}>Conversational calling powered by Maya</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 16, overflow: 'hidden', flexShrink: 0, background: '#111' }}>
+            <img src="/maya-logo.jpg" alt="Maya" style={{ width: '100%', height: '100%', objectFit: 'cover', mixBlendMode: 'screen' }} />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>Maya</h1>
+            <p style={{ fontSize: 14, color: C.muted, margin: '4px 0 0', fontWeight: 500 }}>Conversational calling powered by Maya</p>
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 100, background: 'rgba(52,199,89,0.1)', border: '1px solid rgba(52,199,89,0.2)' }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: C.green, animation: 'mayaPulse 2.5s ease-in-out infinite' }} />
