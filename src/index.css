@@ -693,28 +693,21 @@ body {
   background: linear-gradient(
     180deg,
     #ffffff   0%,
-    #ffffff   4%,
-    #e8e8e8   10%,
-    #c0c8d0  20%,
-    #9aaab8  32%,
-    #c8d4dc  44%,
-    #f0f4f8  54%,
-    #b8c4cc  64%,
-    #7a8a96  76%,
-    #3a4450  88%,
-    #252d35 100%
+    #ffffff   5%,
+    #dde6ee  14%,
+    #a8bcc8  26%,
+    #ccd8e0  38%,
+    #f2f6f8  50%,
+    #c4d0d8  62%,
+    #9cb0bc  74%,
+    #bcccd4  85%,
+    #d8e4ec 100%
   );
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  text-shadow:
-    1px 1px 0   rgba(0,0,0,0.90),
-    2px 2px 1px rgba(0,0,0,0.70),
-    3px 3px 2px rgba(0,0,0,0.50),
-    4px 4px 5px rgba(0,0,0,0.25),
-    0   8px 24px rgba(0,0,0,0.18),
-    0   0   8px  rgba(255,255,255,0.10);
+  filter: drop-shadow(0 0 14px rgba(180,210,240,0.70)) drop-shadow(0 3px 6px rgba(0,0,0,0.85));
   font-weight: 900;
   letter-spacing: -0.03em;
   line-height: 1.05;
