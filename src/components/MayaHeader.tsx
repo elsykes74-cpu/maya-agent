@@ -9,15 +9,21 @@ interface HeaderProps {
   statusLabel?: string;
   right?: ReactNode;
   compact?: boolean;
+  branded?: boolean;
 }
 
-export function MayaHeader({ greeting, title = 'Maya', subtitle, status, statusLabel, right, compact = false }: HeaderProps) {
+export function MayaHeader({ greeting, title = 'Maya', subtitle, status, statusLabel, right, compact = false, branded = false }: HeaderProps) {
   return (
     <header style={{ display: 'flex', alignItems: compact ? 'center' : 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: compact ? 16 : 20 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         {greeting && <p style={{ fontSize: 15, color: C.muted, margin: '0 0 2px', fontWeight: 500, letterSpacing: '-0.01em' }}>{greeting}</p>}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <h1 style={{ fontSize: compact ? 26 : 32, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em', lineHeight: 1.1 }}>{title}</h1>
+          <h1
+            className={branded ? 'maya-chrome-logo' : undefined}
+            style={{ fontSize: compact ? 26 : 36, fontWeight: branded ? 900 : 800, color: branded ? undefined : C.text, margin: 0, lineHeight: 1.05 }}
+          >
+            {title}
+          </h1>
           {status && <StatusPill status={status} label={statusLabel} />}
         </div>
         {subtitle && !compact && <p style={{ fontSize: 15, color: C.muted, margin: '6px 0 0', fontWeight: 500 }}>{subtitle}</p>}

@@ -3,19 +3,18 @@ import { useNavigate } from 'react-router';
 import { PhoneCall, Users, Zap, Calendar, Flame, Upload, CheckCircle } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, MotTag } from '@/components/Neo';
 import { AgentTile } from '@/components/AgentTile';
-import { MayaHeader, QuickActionBar } from '@/components/MayaHeader';
+import { QuickActionBar } from '@/components/MayaHeader';
 import type { AgentData } from '@/components/Neo';
-import { loadLeads, loadCalls, saveLeads, type Lead, type CallRecord } from '@/lib/persistence';
+import { loadLeads, loadCalls, saveLeads, loadAppointments, saveAppointments, type Lead, type CallRecord, type Appointment } from '@/lib/persistence';
+import { APPOINTMENTS as INITIAL_APPOINTMENTS } from '@/data';
 
 const AGENTS: AgentData[] = [
-  { id: 'instagram', title: 'Instagram', icon: 'Zap', iconColor: '#E4405F', iconBg: '#FCE4EC', status: 'online', count: 3 },
-  { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#7B61FF', iconBg: '#EDE9FE', status: 'online' },
-  { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#14B8A6', iconBg: '#F0FDF9', status: 'online' },
-  { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#25D366', iconBg: '#E8F5E9', status: 'busy' },
-  { id: 'facebook', title: 'Facebook', icon: 'TrendingUp', iconColor: '#1877F2', iconBg: '#E3F2FD', status: 'online' },
-  { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FF9F0A', iconBg: '#FFFBF0', status: 'paused' },
-  { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#8B5CF6', iconBg: '#FAF5FF', status: 'online' },
-  { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#34C759', iconBg: '#F0FFF5', status: 'online' },
+  { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #8B5CF6 0%, #6D28D9 100%)', status: 'online' },
+  { id: 'leads', title: 'Lead Capture', icon: 'Users', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #2DD4BF 0%, #14B8A6 50%, #0D9488 100%)', status: 'online' },
+  { id: 'whatsapp', title: 'WhatsApp', icon: 'MessageCircle', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #25D366 0%, #128C7E 100%)', status: 'busy' },
+  { id: 'workflow', title: 'Workflows', icon: 'Workflow', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #FFB340 0%, #FF9500 100%)', status: 'paused' },
+  { id: 'messages', title: 'Messages', icon: 'Mail', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #BF5AF2 0%, #9333EA 50%, #7C3AED 100%)', status: 'online' },
+  { id: 'calls', title: 'Call Agent', icon: 'Phone', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #4CD964 0%, #34C759 50%, #28A745 100%)', status: 'online' },
 ];
 
 function parseCSVLine(line: string): string[] {
@@ -83,6 +82,7 @@ export default function Home() {
   const [uploaded, setUploaded] = useState<{ name: string; count: number } | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const hours = new Date().getHours();
   const greeting = hours < 12 ? 'Good Morning' : hours < 17 ? 'Good Afternoon' : 'Good Evening';
@@ -90,6 +90,13 @@ export default function Home() {
   useEffect(() => {
     setLeads(loadLeads());
     setCalls(loadCalls());
+    const stored = loadAppointments();
+    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
+      saveAppointments(INITIAL_APPOINTMENTS as Appointment[]);
+      setAppointments(INITIAL_APPOINTMENTS as Appointment[]);
+    } else {
+      setAppointments(stored);
+    }
   }, []);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,27 +123,44 @@ export default function Home() {
 
   return (
     <div style={{ padding: '28px 20px 20px' }}>
-      <MayaHeader greeting={greeting} title="Maya" subtitle="Your AI Agent Command Center" status="online" statusLabel="Agent Online" />
+      {/* Brand Logo Header */}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 22, gap: 6 }}>
+        <div style={{ position: 'relative', width: 160, height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="logo-glow-bg" />
+          <div className="logo-ring" />
+          <img
+            src="/maya-logo.jpg"
+            alt="Maya"
+            style={{ width: 160, height: 160, objectFit: 'contain', borderRadius: 0, background: 'transparent', mixBlendMode: 'screen', position: 'relative', zIndex: 1 }}
+          />
+        </div>
+        <h1 className="maya-chrome-logo" style={{ fontSize: 52, margin: 0, lineHeight: 1 }}>Maya</h1>
+      </div>
 
       {/* KPI Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
-        <KpiButton icon={<Users size={16} color={C.red} />} value={hot.length} label="Hot" onClick={() => navigate('/leads')} />
-        <KpiButton icon={<PhoneCall size={16} color={C.teal} />} value={calls.length} label="Calls" onClick={() => navigate('/calls')} />
-        <KpiButton icon={<Zap size={16} color={C.orange} />} value={leads.length} label="Leads" onClick={() => navigate('/leads')} />
-        <KpiButton icon={<Calendar size={16} color={C.purple} />} value={0} label="Appts" onClick={() => navigate('/appointments')} />
+        <KpiButton value={hot.length} label="Hot" accentColor="#FF6B6B" darkColor="#FF3B30" onClick={() => navigate('/leads')} />
+        <KpiButton value={calls.length} label="Calls" accentColor="#2DD4BF" darkColor="#0D9488" onClick={() => navigate('/calls')} />
+        <KpiButton value={leads.length} label="Leads" accentColor="#FFB340" darkColor="#FF9500" onClick={() => navigate('/leads')} />
+        <KpiButton value={appointments.length} label="Appts" accentColor="#A78BFA" darkColor="#7C3AED" onClick={() => navigate('/appointments')} />
       </div>
 
       {/* Agent Hub */}
       <SectionTitle>Agent Hub</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 24 }}>
         {AGENTS.map((agent, i) => (
-          <AgentTile key={agent.id} {...agent} className={`s-${Math.min(i + 1, 6)}`} onClick={() => {
-            if (agent.id === 'calls') navigate('/calls');
-            else if (agent.id === 'leads') navigate('/leads');
-            else if (agent.id === 'messages') navigate('/sms');
-            else if (agent.id === 'workflow') navigate('/ai-config');
-            else if (agent.id === 'camera') navigate('/appointments');
-          }} />
+          <div key={agent.id} className="neon-card">
+            <AgentTile {...agent} className={`s-${Math.min(i + 1, 6)}`} onClick={() => {
+              if (agent.id === 'calls') navigate('/calls');
+              else if (agent.id === 'leads') navigate('/leads');
+              else if (agent.id === 'messages') navigate('/sms');
+              else if (agent.id === 'workflow') navigate('/ai-config');
+              else if (agent.id === 'camera') navigate('/appointments');
+              else if (agent.id === 'instagram') navigate('/leads');
+              else if (agent.id === 'whatsapp') navigate('/sms');
+              else if (agent.id === 'facebook') navigate('/campaigns');
+            }} />
+          </div>
         ))}
       </div>
 
@@ -223,12 +247,19 @@ export default function Home() {
   );
 }
 
-function KpiButton({ icon, value, label, onClick }: { icon: React.ReactNode; value: number; label: string; onClick?: () => void }) {
+function KpiButton({ value, label, onClick, accentColor = '#14B8A6', darkColor = '' }: { value: number; label: string; onClick?: () => void; accentColor?: string; darkColor?: string }) {
+  const endColor = darkColor || accentColor;
   return (
-    <button onClick={onClick} className="neo-pressed-sm press-sm" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 8px', gap: 4, border: 'none', cursor: 'pointer' }}>
-      {icon}
-      <p style={{ fontSize: 20, fontWeight: 800, color: '#1C1C1E', margin: 0, letterSpacing: '-0.5px' }}>{value}</p>
-      <p style={{ fontSize: 11, color: '#8E8E93', margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</p>
+    <button
+      onClick={onClick}
+      className="maya-tile press-sm"
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 4px 12px', gap: 8, border: 'none', cursor: 'pointer', height: 104, borderRadius: 22 }}
+    >
+      <p style={{ fontSize: 10, color: C.muted, margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</p>
+      <div style={{ width: 54, height: 54, borderRadius: '50%', background: `linear-gradient(145deg, ${accentColor} 0%, ${endColor} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 22px ${accentColor}55, 0 2px 6px ${accentColor}33, inset 0 1px 0 rgba(255,255,255,0.35)`, position: 'relative', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 36% 28%, rgba(255,255,255,0.48) 0%, transparent 58%)', pointerEvents: 'none' }} />
+        <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1, letterSpacing: '-0.5px', position: 'relative' }}>{value}</span>
+      </div>
     </button>
   );
 }

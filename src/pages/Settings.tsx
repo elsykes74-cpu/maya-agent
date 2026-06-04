@@ -13,7 +13,7 @@ export default function Settings() {
 
   const initials = user?.name
     ? user.name.split(' ').map((n: string) => n[0]).slice(0, 2).join('').toUpperCase()
-    : user?.email?.[0]?.toUpperCase() ?? 'U';
+    : user?.email?.[0]?.toUpperCase() ?? 'AD';
 
   return (
     <div style={{ padding: '16px 20px 24px' }}>
@@ -27,7 +27,7 @@ export default function Settings() {
           {initials}
         </div>
         <div>
-          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'User'}</p>
+          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'Admin'}</p>
           <p style={{ fontSize: 14, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{user?.email || ''}</p>
         </div>
       </NeoTile>

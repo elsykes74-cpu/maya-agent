@@ -1,5 +1,6 @@
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { Home, Users, PhoneCall, Megaphone, LayoutGrid } from 'lucide-react'
+import { SpheresBackground } from './SpheresBackground'
 
 const TABS = [
   { path: '/', label: 'Home', icon: Home },
@@ -25,6 +26,7 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
+      <SpheresBackground />
       <main className="flex-1 overflow-y-auto hide-scrollbar pb-24">
         <Outlet />
       </main>
