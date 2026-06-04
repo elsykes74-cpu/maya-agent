@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
-import { loadLeads, saveLeads, addCallRecord, getNextId } from '@/lib/persistence';
-import type { Lead } from '@/lib/persistence';
+import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS } from '@/lib/persistence';
+import type { Lead, LeadCallLog } from '@/lib/persistence';
 import { trpc } from '@/providers/trpc';
 
 export default function Leads() {
@@ -206,6 +206,9 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
   const [callResult, setCallResult] = useState<string | null>(null);
   const [smsBody, setSmsBody] = useState('');
   const [showSms, setShowSms] = useState(false);
+  const [callLogs, setCallLogs] = useState<LeadCallLog[]>([]);
+
+  useEffect(() => { setCallLogs(getLeadCallLogs(lead.id)); }, [lead.id]);
 
   const sendSmsMutation = trpc.sms.sendOne.useMutation();
 
@@ -373,6 +376,40 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
           <NeoTile style={{ marginBottom: 16 }}>
             <F label="Key Pain Points / Motivation" value={lead.keyPainPoints} field="keyPainPoints" multiline />
           </NeoTile>
+
+          {/* Call Log */}
+          {callLogs.length > 0 && (
+            <>
+              <p className="maya-section-title">Call History</p>
+              <NeoTile style={{ marginBottom: 16 }}>
+                {callLogs.map((log, i) => {
+                  const outcomeColor = log.outcome === 'connected_interested' || log.outcome === 'callback_requested' ? C.green
+                    : log.outcome === 'voicemail' ? C.orange
+                    : log.outcome === 'connected_not_interested' || log.outcome === 'hung_up' ? C.red
+                    : C.muted;
+                  const fmt = (s: number) => s > 0 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '';
+                  return (
+                    <div key={log.id} style={{ display: 'flex', gap: 12, padding: '12px 0', borderBottom: i < callLogs.length - 1 ? '1px solid rgba(128,128,128,0.1)' : 'none' }}>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', background: outcomeColor, marginTop: 4, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: outcomeColor }}>{OUTCOME_LABELS[log.outcome]}</span>
+                          <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, flexShrink: 0, marginLeft: 8 }}>
+                            {new Date(log.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {fmt(log.duration) ? ` · ${fmt(log.duration)}` : ''}
+                          </span>
+                        </div>
+                        {log.campaignAssigned && (
+                          <p style={{ fontSize: 11, color: C.muted, margin: '2px 0 0', fontWeight: 600 }}>→ {log.campaignAssigned}</p>
+                        )}
+                        {log.notes && <p style={{ fontSize: 13, color: C.text, margin: '4px 0 0', lineHeight: 1.5, fontWeight: 500 }}>{log.notes}</p>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </NeoTile>
+            </>
+          )}
 
           {/* SMS */}
           {showSms && (

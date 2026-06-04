@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
+import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check, X } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
-import { loadLeads, loadCalls, addCallRecord, clearCalls } from '@/lib/persistence';
-import type { CallRecord } from '@/lib/persistence';
+import { loadLeads, loadCalls, addCallRecord, clearCalls, addLeadCallLog, assignLeadToCampaign, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN } from '@/lib/persistence';
+import type { CallRecord, CallOutcome } from '@/lib/persistence';
 import { trpc } from '@/providers/trpc';
 
 interface CallJob {
@@ -44,6 +44,9 @@ export default function CallCenter() {
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcomeDuration, setOutcomeDuration] = useState(0);
+  const [outcomePhone, setOutcomePhone] = useState('');
 
   const placeCallMut = trpc.maya.placeCall.useMutation();
   const hangUpMut = trpc.maya.hangUp.useMutation();
@@ -111,15 +114,59 @@ export default function CallCenter() {
       try { await hangUpMut.mutateAsync({ sid }); } catch { /* ignore */ }
     }
     const duration = timer;
-    if (number) {
-      const rec: CallRecord = { id: Date.now(), leadName: 'Test Call', phone: number, outcome: 'connected', duration, transcript: transcript.map(t => `${t.speaker}: ${t.text}`).join('\n') || null, notes: null, createdAt: new Date().toISOString() };
-      const updated = addCallRecord(rec);
-      setCallHistory(updated);
-    }
+    setOutcomeDuration(duration);
+    setOutcomePhone(number);
     setStage('completed');
     setSid(null);
-    setTimeout(() => setStage('idle'), 2000);
-  }, [sid, timer, number, transcript, hangUpMut]);
+    setShowOutcome(true);
+  }, [sid, timer, number, hangUpMut]);
+
+  const handleOutcomeSelect = useCallback((outcome: CallOutcome, notes: string) => {
+    const phone = outcomePhone;
+    const leads = loadLeads();
+    const lead = leads.find(l => l.phone.replace(/\D/g, '') === phone.replace(/\D/g, ''));
+
+    const outcomeMap: Record<CallOutcome, CallRecord['outcome']> = {
+      voicemail: 'voicemail',
+      connected_interested: 'connected',
+      connected_not_interested: 'connected',
+      callback_requested: 'connected',
+      no_answer: 'no_answer',
+      hung_up: 'no_answer',
+      other: 'no_answer',
+    };
+
+    const rec: CallRecord = {
+      id: Date.now(),
+      leadId: lead?.id,
+      leadName: lead?.sellerName ?? 'Manual Call',
+      phone,
+      outcome: outcomeMap[outcome],
+      duration: outcomeDuration,
+      transcript: transcript.map(t => `${t.speaker}: ${t.text}`).join('\n') || null,
+      notes: notes || null,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = addCallRecord(rec);
+    setCallHistory(updated);
+
+    if (lead) {
+      addLeadCallLog({
+        leadId: lead.id, leadName: lead.sellerName, phone: lead.phone,
+        outcome, notes, duration: outcomeDuration,
+        campaignAssigned: OUTCOME_TO_CAMPAIGN[outcome],
+        createdAt: new Date().toISOString(),
+      });
+      assignLeadToCampaign(
+        { leadId: lead.id, leadName: lead.sellerName, phone: lead.phone, motivationLevel: lead.motivationLevel },
+        OUTCOME_TO_CAMPAIGN[outcome]
+      );
+    }
+
+    setShowOutcome(false);
+    setTranscript([]);
+    setTimeout(() => setStage('idle'), 500);
+  }, [outcomePhone, outcomeDuration, transcript]);
 
   // Batch calling
   const startBatch = () => {
@@ -327,6 +374,15 @@ export default function CallCenter() {
         ))
       )}
       <div style={{ height: 20 }} />
+
+      {showOutcome && (
+        <OutcomeSheet
+          phone={outcomePhone}
+          duration={outcomeDuration}
+          onSelect={handleOutcomeSelect}
+          onSkip={() => { setShowOutcome(false); setTranscript([]); setTimeout(() => setStage('idle'), 500); }}
+        />
+      )}
     </div>
   );
 }
@@ -408,6 +464,72 @@ function CallError({ error, onDismiss }: { error: string; onDismiss: () => void 
         </div>
       )}
     </div>
+  );
+}
+
+// ── Outcome sheet ─────────────────────────────────────────────────
+
+const OUTCOME_CONFIGS: { outcome: CallOutcome; label: string; color: string; bg: string }[] = [
+  { outcome: 'voicemail',                label: 'Voicemail Left',          color: C.orange, bg: C.orangeS },
+  { outcome: 'connected_interested',     label: 'Connected — Interested',  color: C.green,  bg: C.greenS },
+  { outcome: 'connected_not_interested', label: 'Not Interested',          color: C.muted,  bg: 'rgba(128,128,128,0.1)' },
+  { outcome: 'callback_requested',       label: 'Callback Requested',      color: C.teal,   bg: C.tealS },
+  { outcome: 'no_answer',                label: 'No Answer',               color: C.blue,   bg: C.blueS },
+  { outcome: 'hung_up',                  label: 'Hung Up',                 color: C.red,    bg: C.redS },
+];
+
+function OutcomeSheet({ phone, duration, onSelect, onSkip }: {
+  phone: string; duration: number;
+  onSelect: (outcome: CallOutcome, notes: string) => void;
+  onSkip: () => void;
+}) {
+  const [notes, setNotes] = useState('');
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 60, backdropFilter: 'blur(8px)' }} />
+      <div className="neo-sheet hide-scrollbar" style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, zIndex: 70, padding: '24px 24px 48px', borderRadius: '28px 28px 0 0', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.15)', margin: '0 auto 20px' }} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.02em' }}>Log Call Outcome</h2>
+          <button onClick={onSkip} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 12, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <X size={15} color={C.muted} />
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: C.muted, fontWeight: 500, margin: '0 0 20px' }}>
+          {phone} · {fmt(duration)}
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+          {OUTCOME_CONFIGS.map(({ outcome, label, color, bg }) => (
+            <button
+              key={outcome}
+              onClick={() => onSelect(outcome, notes)}
+              className="press-sm"
+              style={{ width: '100%', padding: '14px 18px', borderRadius: 16, border: `1.5px solid ${color}30`, background: bg, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left' }}
+            >
+              <span style={{ fontSize: 15, fontWeight: 700, color }}>{label}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: color + 'AA' }}>→ {OUTCOME_TO_CAMPAIGN[outcome]}</span>
+            </button>
+          ))}
+        </div>
+
+        <label style={{ fontSize: 13, fontWeight: 700, color: C.muted, display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notes (optional)</label>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="What happened on the call?"
+          rows={3}
+          style={{ width: '100%', border: '1px solid rgba(128,128,128,0.2)', borderRadius: 14, padding: '12px 14px', fontSize: 14, background: 'rgba(128,128,128,0.08)', color: C.text, fontWeight: 500, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'none', marginBottom: 16 }}
+        />
+
+        <button onClick={onSkip} style={{ width: '100%', height: 44, background: 'none', border: 'none', color: C.muted, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+          Skip Logging
+        </button>
+      </div>
+    </>
   );
 }
 
