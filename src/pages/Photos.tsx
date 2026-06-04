@@ -65,16 +65,9 @@ export default function Photos() {
     <div style={{ padding: '28px 20px 100px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>Photos</h1>
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="press-sm"
-          aria-label="Take photo"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-        >
-          <NeoIcon bg={C.purpleS} size={48}>
-            <Camera size={22} color={C.purple} strokeWidth={2} />
-          </NeoIcon>
-        </button>
+        <div style={{ width: 48, height: 48, borderRadius: 15, overflow: 'hidden', background: '#111' }}>
+          <img src="/maya-logo.jpg" alt="Maya" style={{ width: '100%', height: '100%', objectFit: 'cover', mixBlendMode: 'screen' }} />
+        </div>
       </div>
 
       <input
