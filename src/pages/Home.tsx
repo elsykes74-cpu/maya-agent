@@ -120,10 +120,10 @@ export default function Home() {
 
       {/* KPI Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
-        <KpiButton icon={<Users size={18} color={C.red} />} value={hot.length} label="Hot" accentColor={C.red} onClick={() => navigate('/leads')} />
-        <KpiButton icon={<PhoneCall size={18} color={C.teal} />} value={calls.length} label="Calls" accentColor={C.teal} onClick={() => navigate('/calls')} />
-        <KpiButton icon={<Zap size={18} color={C.orange} />} value={leads.length} label="Leads" accentColor={C.orange} onClick={() => navigate('/leads')} />
-        <KpiButton icon={<Calendar size={18} color={C.purple} />} value={0} label="Appts" accentColor={C.purple} onClick={() => navigate('/appointments')} />
+        <KpiButton value={hot.length} label="Hot" accentColor="#FF6B6B" darkColor="#FF3B30" onClick={() => navigate('/leads')} />
+        <KpiButton value={calls.length} label="Calls" accentColor="#2DD4BF" darkColor="#0D9488" onClick={() => navigate('/calls')} />
+        <KpiButton value={leads.length} label="Leads" accentColor="#FFB340" darkColor="#FF9500" onClick={() => navigate('/leads')} />
+        <KpiButton value={0} label="Appts" accentColor="#A78BFA" darkColor="#7C3AED" onClick={() => navigate('/appointments')} />
       </div>
 
       {/* Agent Hub */}
@@ -226,18 +226,19 @@ export default function Home() {
   );
 }
 
-function KpiButton({ icon, value, label, onClick, accentColor = C.teal }: { icon: React.ReactNode; value: number; label: string; onClick?: () => void; accentColor?: string }) {
+function KpiButton({ value, label, onClick, accentColor = '#14B8A6', darkColor = '' }: { value: number; label: string; onClick?: () => void; accentColor?: string; darkColor?: string }) {
+  const endColor = darkColor || accentColor;
   return (
     <button
       onClick={onClick}
       className="maya-tile press-sm"
-      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '14px 6px 12px', gap: 6, border: 'none', cursor: 'pointer', height: 96, borderRadius: 22 }}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '10px 4px 12px', gap: 8, border: 'none', cursor: 'pointer', height: 104, borderRadius: 22 }}
     >
-      <div style={{ width: 38, height: 38, borderRadius: 12, background: `${accentColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 3px 10px ${accentColor}28` }}>
-        {icon}
+      <p style={{ fontSize: 10, color: C.muted, margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>{label}</p>
+      <div style={{ width: 54, height: 54, borderRadius: '50%', background: `linear-gradient(145deg, ${accentColor} 0%, ${endColor} 100%)`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 8px 22px ${accentColor}55, 0 2px 6px ${accentColor}33, inset 0 1px 0 rgba(255,255,255,0.35)`, position: 'relative', overflow: 'hidden', flexShrink: 0 }}>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'radial-gradient(circle at 36% 28%, rgba(255,255,255,0.48) 0%, transparent 58%)', pointerEvents: 'none' }} />
+        <span style={{ fontSize: 20, fontWeight: 900, color: '#fff', lineHeight: 1, letterSpacing: '-0.5px', position: 'relative' }}>{value}</span>
       </div>
-      <p style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.5px', lineHeight: 1 }}>{value}</p>
-      <p style={{ fontSize: 10, color: C.muted, margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</p>
     </button>
   );
 }
