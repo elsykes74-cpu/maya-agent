@@ -59,6 +59,48 @@ export function clearCalls() {
   saveCalls([]);
 }
 
+const CAMPAIGNS_KEY = 'maya_campaigns_v1';
+
+export interface SequenceStep {
+  day: number;
+  channel: 'call' | 'sms';
+  scriptKey: string;
+}
+
+export interface CampaignLead {
+  leadId: number;
+  leadName: string;
+  phone: string;
+  motivationLevel: string;
+  status: 'pending' | 'connected' | 'voicemail' | 'no_answer' | 'converted' | 'dnc';
+  currentStep: number;
+  lastContactedAt: string | null;
+}
+
+export interface Campaign {
+  id: number;
+  name: string;
+  description: string;
+  status: 'active' | 'paused' | 'completed' | 'draft';
+  motivationFilter: 'all' | 'hot' | 'warm' | 'cold';
+  sequenceTemplate: string;
+  sequence: SequenceStep[];
+  leads: CampaignLead[];
+  createdAt: string;
+}
+
+export function loadCampaigns(): Campaign[] {
+  try {
+    const raw = localStorage.getItem(CAMPAIGNS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return [];
+}
+
+export function saveCampaigns(campaigns: Campaign[]) {
+  try { localStorage.setItem(CAMPAIGNS_KEY, JSON.stringify(campaigns)); } catch { /* ignore */ }
+}
+
 export interface Appointment {
   id: number;
   title: string;
