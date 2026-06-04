@@ -128,18 +128,20 @@ export default function Home() {
 
       {/* Agent Hub */}
       <SectionTitle>Agent Hub</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 14, marginBottom: 24 }}>
         {AGENTS.map((agent, i) => (
-          <AgentTile key={agent.id} {...agent} className={`s-${Math.min(i + 1, 6)}`} onClick={() => {
-            if (agent.id === 'calls') navigate('/calls');
-            else if (agent.id === 'leads') navigate('/leads');
-            else if (agent.id === 'messages') navigate('/sms');
-            else if (agent.id === 'workflow') navigate('/ai-config');
-            else if (agent.id === 'camera') navigate('/appointments');
-            else if (agent.id === 'instagram') navigate('/leads');
-            else if (agent.id === 'whatsapp') navigate('/sms');
-            else if (agent.id === 'facebook') navigate('/campaigns');
-          }} />
+          <div key={agent.id} className="neon-card">
+            <AgentTile {...agent} className={`s-${Math.min(i + 1, 6)}`} onClick={() => {
+              if (agent.id === 'calls') navigate('/calls');
+              else if (agent.id === 'leads') navigate('/leads');
+              else if (agent.id === 'messages') navigate('/sms');
+              else if (agent.id === 'workflow') navigate('/ai-config');
+              else if (agent.id === 'camera') navigate('/appointments');
+              else if (agent.id === 'instagram') navigate('/leads');
+              else if (agent.id === 'whatsapp') navigate('/sms');
+              else if (agent.id === 'facebook') navigate('/campaigns');
+            }} />
+          </div>
         ))}
       </div>
 

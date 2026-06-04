@@ -712,6 +712,38 @@ body {
 .s-6 { animation-delay: 0.24s; }
 .pulse-glow { animation: pulseGlow 2.5s ease-in-out infinite; }
 
+/* ─── Neon Card Border ────────────────────────────────────────── */
+
+.neon-card {
+  position: relative;
+  border-radius: 30px;
+}
+
+.neon-card::before {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 31.5px;
+  background: linear-gradient(145deg, #5AC8FA 0%, #BF5AF2 50%, #FF375F 100%);
+  z-index: 0;
+  opacity: 0.92;
+}
+
+.neon-card::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 36px;
+  background: linear-gradient(145deg, rgba(90,200,250,0.55) 0%, rgba(191,90,242,0.35) 50%, rgba(255,55,95,0.55) 100%);
+  filter: blur(14px);
+  z-index: 0;
+}
+
+.neon-card > * {
+  position: relative;
+  z-index: 1;
+}
+
 /* ─── Glass Panel Utility ─────────────────────────────────────── */
 
 .glass-panel {
