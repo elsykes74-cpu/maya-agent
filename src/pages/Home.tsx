@@ -120,10 +120,10 @@ export default function Home() {
 
       {/* KPI Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>
-        <KpiButton icon={<Users size={16} color={C.red} />} value={hot.length} label="Hot" onClick={() => navigate('/leads')} />
-        <KpiButton icon={<PhoneCall size={16} color={C.teal} />} value={calls.length} label="Calls" onClick={() => navigate('/calls')} />
-        <KpiButton icon={<Zap size={16} color={C.orange} />} value={leads.length} label="Leads" onClick={() => navigate('/leads')} />
-        <KpiButton icon={<Calendar size={16} color={C.purple} />} value={0} label="Appts" onClick={() => navigate('/appointments')} />
+        <KpiButton icon={<Users size={18} color={C.red} />} value={hot.length} label="Hot" accentColor={C.red} onClick={() => navigate('/leads')} />
+        <KpiButton icon={<PhoneCall size={18} color={C.teal} />} value={calls.length} label="Calls" accentColor={C.teal} onClick={() => navigate('/calls')} />
+        <KpiButton icon={<Zap size={18} color={C.orange} />} value={leads.length} label="Leads" accentColor={C.orange} onClick={() => navigate('/leads')} />
+        <KpiButton icon={<Calendar size={18} color={C.purple} />} value={0} label="Appts" accentColor={C.purple} onClick={() => navigate('/appointments')} />
       </div>
 
       {/* Agent Hub */}
@@ -226,12 +226,18 @@ export default function Home() {
   );
 }
 
-function KpiButton({ icon, value, label, onClick }: { icon: React.ReactNode; value: number; label: string; onClick?: () => void }) {
+function KpiButton({ icon, value, label, onClick, accentColor = C.teal }: { icon: React.ReactNode; value: number; label: string; onClick?: () => void; accentColor?: string }) {
   return (
-    <button onClick={onClick} className="neo-pressed-sm press-sm" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '12px 8px', gap: 4, border: 'none', cursor: 'pointer' }}>
-      {icon}
-      <p style={{ fontSize: 20, fontWeight: 800, color: '#1C1C1E', margin: 0, letterSpacing: '-0.5px' }}>{value}</p>
-      <p style={{ fontSize: 11, color: '#8E8E93', margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</p>
+    <button
+      onClick={onClick}
+      className="maya-tile press-sm"
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '14px 6px 12px', gap: 6, border: 'none', cursor: 'pointer', height: 96, borderRadius: 22 }}
+    >
+      <div style={{ width: 38, height: 38, borderRadius: 12, background: `${accentColor}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: `0 3px 10px ${accentColor}28` }}>
+        {icon}
+      </div>
+      <p style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.5px', lineHeight: 1 }}>{value}</p>
+      <p style={{ fontSize: 10, color: C.muted, margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</p>
     </button>
   );
 }
