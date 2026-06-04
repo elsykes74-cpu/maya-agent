@@ -26,8 +26,8 @@ export default function More() {
       <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>More</h1>
 
       <NeoTile style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
-        <div style={{ width: 56, height: 56, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20, fontWeight: 800, background: `linear-gradient(135deg, ${C.teal}, ${C.blue})`, letterSpacing: '-0.02em', flexShrink: 0 }}>
-          {initials}
+        <div style={{ width: 56, height: 56, borderRadius: 18, overflow: 'hidden', flexShrink: 0, background: '#111' }}>
+          <img src="/maya-logo.jpg" alt="Maya" style={{ width: '100%', height: '100%', objectFit: 'cover', mixBlendMode: 'screen' }} />
         </div>
         <div>
           <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'Admin'}</p>
