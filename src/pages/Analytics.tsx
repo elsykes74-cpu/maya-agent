@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { BarChart3, TrendingUp, PhoneCall, Users, Target, Activity, DollarSign, Clock } from 'lucide-react';
 import { C, NeoTile, NeoIcon } from '@/components/Neo';
-import { loadLeads, loadLeadCallLogs, loadCampaigns, OUTCOME_LABELS } from '@/lib/persistence';
-import type { LeadCallLog } from '@/lib/persistence';
+import { loadLeads, loadLeadCallLogs, loadCampaigns, loadAudit, OUTCOME_LABELS } from '@/lib/persistence';
+import type { LeadCallLog, AuditEntry } from '@/lib/persistence';
 import { fetchPipelineStages, fetchCallMetrics, fetchRecentActivity } from '@/lib/sync';
 
 const PIPELINE_ORDER = ['lead', 'outreach', 'scoring', 'hot_routing', 'warm_nurture', 'cold_drip', 'appointment', 'close'];
@@ -26,6 +26,22 @@ const OUTCOME_COLORS: Record<string, string> = {
   other: C.muted,
 };
 
+const AUDIT_COLORS: Record<string, string> = {
+  lead_added: C.green,
+  lead_updated: C.blue,
+  lead_deleted: C.red,
+  call_logged: C.teal,
+  campaign_assigned: C.purple,
+};
+
+const AUDIT_LABELS: Record<string, string> = {
+  lead_added: 'Lead Added',
+  lead_updated: 'Lead Updated',
+  lead_deleted: 'Lead Deleted',
+  call_logged: 'Call Logged',
+  campaign_assigned: 'Campaign Assigned',
+};
+
 type Range = 'today' | '7d' | '30d';
 
 function filterByRange(logs: LeadCallLog[], range: Range): LeadCallLog[] {
@@ -42,6 +58,7 @@ export default function Analytics() {
   const [pipeline, setPipeline] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState<LeadCallLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
 
   // Local data
   const allLeads = loadLeads();
@@ -51,6 +68,7 @@ export default function Analytics() {
   const logs = filterByRange(allLogs, range);
 
   useEffect(() => {
+    setAudit(loadAudit());
     setLoading(true);
     Promise.all([
       fetchPipelineStages().then(setPipeline),
@@ -188,6 +206,8 @@ export default function Analytics() {
                 </div>
               );
             })}
+          <p style={{ fontSize: 11, fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '16px 0 10px' }}>Call Volume by Hour</p>
+          <HourlyChart logs={logs} />
         </NeoTile>
       )}
 
@@ -283,6 +303,38 @@ export default function Analytics() {
         </>
       )}
 
+      {/* Audit Trail */}
+      {audit.length > 0 && (
+        <>
+          <p style={{ fontSize: 11, fontWeight: 800, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 10px' }}>Audit Trail</p>
+          <NeoTile style={{ marginBottom: 20 }}>
+            {audit.slice(0, 20).map((entry, i) => {
+              const color = AUDIT_COLORS[entry.action] || C.muted;
+              const ago = (() => {
+                const diff = Date.now() - new Date(entry.createdAt).getTime();
+                if (diff < 60_000) return 'just now';
+                if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+                if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+                return new Date(entry.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              })();
+              return (
+                <div key={entry.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 0', borderBottom: i < Math.min(audit.length, 20) - 1 ? '1px solid rgba(128,128,128,0.08)' : 'none' }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: color, marginTop: 5, flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.entityName}</p>
+                    <p style={{ fontSize: 12, color, margin: '1px 0 0', fontWeight: 600 }}>
+                      {AUDIT_LABELS[entry.action] || entry.action}
+                      <span style={{ color: C.muted, fontWeight: 500 }}> · {entry.detail}</span>
+                    </p>
+                  </div>
+                  <span style={{ fontSize: 11, color: C.muted, fontWeight: 600, flexShrink: 0 }}>{ago}</span>
+                </div>
+              );
+            })}
+          </NeoTile>
+        </>
+      )}
+
       {/* Empty state */}
       {allLeads.length === 0 && allLogs.length === 0 && !loading && (
         <div style={{ textAlign: 'center', padding: '60px 24px' }}>
@@ -311,6 +363,37 @@ function CampStat({ value, label, color }: { value: number; label: string; color
     <div style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 14, background: color + '12' }}>
       <p style={{ fontSize: 22, fontWeight: 800, color, margin: 0, lineHeight: 1 }}>{value}</p>
       <p style={{ fontSize: 10, fontWeight: 700, color: C.muted, margin: '3px 0 0', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</p>
+    </div>
+  );
+}
+
+function HourlyChart({ logs }: { logs: LeadCallLog[] }) {
+  const counts: number[] = Array(24).fill(0);
+  for (const l of logs) counts[new Date(l.createdAt).getHours()]++;
+  const hours = Array.from({ length: 13 }, (_, i) => i + 8); // 8am–8pm
+  const max = Math.max(1, ...hours.map(h => counts[h]));
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', height: 52, gap: 3 }}>
+        {hours.map(h => {
+          const c = counts[h];
+          const barH = Math.max(2, Math.round((c / max) * 48));
+          return (
+            <div key={h} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+              <div style={{ width: '100%', height: barH, borderRadius: '3px 3px 0 0', background: c > 0 ? `linear-gradient(180deg, ${C.teal}, ${C.blue})` : 'rgba(128,128,128,0.1)' }} />
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>
+        {hours.map(h => (
+          <div key={h} style={{ flex: 1, textAlign: 'center' }}>
+            <span style={{ fontSize: 8, color: C.muted, fontWeight: 600 }}>
+              {h > 12 ? `${h - 12}p` : h === 12 ? '12p' : `${h}a`}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

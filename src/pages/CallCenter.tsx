@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check, X } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
-import { loadLeads, loadCalls, addCallRecord, clearCalls, addLeadCallLog, assignLeadToCampaign, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN } from '@/lib/persistence';
+import { loadLeads, loadCalls, addCallRecord, clearCalls, addLeadCallLog, assignLeadToCampaign, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN, addAuditEntry } from '@/lib/persistence';
 import type { CallRecord, CallOutcome } from '@/lib/persistence';
 import { pushCallLog, pushLead } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
@@ -165,6 +165,7 @@ export default function CallCenter() {
       );
     }
 
+    addAuditEntry({ action: 'call_logged', entityId: rec.id, entityName: rec.leadName, detail: `${OUTCOME_LABELS[outcome]} · ${outcomeDuration}s` });
     setShowOutcome(false);
     setTranscript([]);
     setTimeout(() => setStage('idle'), 500);

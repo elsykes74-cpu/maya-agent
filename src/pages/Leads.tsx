@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
-import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS } from '@/lib/persistence';
+import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, addAuditEntry } from '@/lib/persistence';
 import type { Lead, LeadCallLog } from '@/lib/persistence';
 import { pushLead, pushLeadDelete } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
@@ -38,6 +38,7 @@ export default function Leads() {
       onConfirm: () => {
         setLeads(p => p.filter(l => l.id !== id));
         pushLeadDelete(id);
+        addAuditEntry({ action: 'lead_deleted', entityId: id, entityName: lead.sellerName, detail: lead.propertyAddress });
         setSelectedLead(null);
         setConfirmOpen(false);
       },
@@ -49,6 +50,7 @@ export default function Leads() {
     setLeads(p => p.map(l => l.id === updated.id ? updated : l));
     setSelectedLead(updated);
     pushLead(updated);
+    addAuditEntry({ action: 'lead_updated', entityId: updated.id, entityName: updated.sellerName, detail: updated.motivationLevel });
   };
 
   return (
@@ -98,7 +100,7 @@ export default function Leads() {
 
       <div style={{ height: 20 }} />
 
-      {showAdd && <AddLeadSheet onClose={() => setShowAdd(false)} onAdd={(lead) => { setLeads(p => [lead, ...p]); pushLead(lead); setShowAdd(false); }} />}
+      {showAdd && <AddLeadSheet onClose={() => setShowAdd(false)} onAdd={(lead) => { setLeads(p => [lead, ...p]); pushLead(lead); addAuditEntry({ action: 'lead_added', entityId: lead.id, entityName: lead.sellerName, detail: lead.motivationLevel }); setShowAdd(false); }} />}
 
       {selectedLead && (
         <LeadDetailSheet

@@ -351,3 +351,41 @@ let nextId = Date.now();
 export function getNextId(): number {
   return ++nextId;
 }
+
+// ── Audit trail ───────────────────────────────────────────────────
+
+const AUDIT_KEY = 'maya_audit_v1';
+
+export type AuditAction =
+  | 'lead_added'
+  | 'lead_updated'
+  | 'lead_deleted'
+  | 'call_logged'
+  | 'campaign_assigned';
+
+export interface AuditEntry {
+  id: number;
+  action: AuditAction;
+  entityId: number;
+  entityName: string;
+  detail: string;
+  createdAt: string;
+}
+
+export function loadAudit(): AuditEntry[] {
+  try {
+    const raw = localStorage.getItem(AUDIT_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return [];
+}
+
+function saveAudit(entries: AuditEntry[]) {
+  try { localStorage.setItem(AUDIT_KEY, JSON.stringify(entries.slice(0, 500))); } catch { /* ignore */ }
+}
+
+export function addAuditEntry(entry: Omit<AuditEntry, 'id' | 'createdAt'>): void {
+  const entries = loadAudit();
+  entries.unshift({ ...entry, id: Date.now(), createdAt: new Date().toISOString() });
+  saveAudit(entries);
+}

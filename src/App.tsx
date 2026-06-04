@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router'
 import { useEffect } from 'react'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
@@ -27,6 +28,7 @@ export default function App() {
   }, []);
 
   return (
+    <ErrorBoundary>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="*" element={<NotFound />} />
@@ -47,5 +49,6 @@ export default function App() {
         <Route path="/photos" element={<Photos />} />
       </Route>
     </Routes>
+    </ErrorBoundary>
   )
 }
