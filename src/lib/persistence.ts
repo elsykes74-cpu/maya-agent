@@ -59,6 +59,38 @@ export function clearCalls() {
   saveCalls([]);
 }
 
+const PHOTOS_KEY = 'maya_photos_v1';
+
+export interface Photo {
+  id: number;
+  dataUrl: string;
+  takenAt: string;
+  label: string;
+}
+
+export function loadPhotos(): Photo[] {
+  try {
+    const raw = localStorage.getItem(PHOTOS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return [];
+}
+
+export function savePhotos(photos: Photo[]) {
+  try { localStorage.setItem(PHOTOS_KEY, JSON.stringify(photos)); } catch { /* ignore */ }
+}
+
+export function addPhoto(photo: Omit<Photo, 'id'>): Photo {
+  const photos = loadPhotos();
+  const newPhoto = { ...photo, id: Date.now() };
+  savePhotos([newPhoto, ...photos]);
+  return newPhoto;
+}
+
+export function deletePhoto(id: number) {
+  savePhotos(loadPhotos().filter(p => p.id !== id));
+}
+
 const CAMPAIGNS_KEY = 'maya_campaigns_v1';
 
 export interface SequenceStep {

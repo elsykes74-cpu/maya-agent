@@ -14,6 +14,7 @@ import DNCLists from './pages/DNCLists'
 import More from './pages/More'
 import CallQueue from './pages/CallQueue'
 import LeadFinder from './pages/LeadFinder'
+import Photos from './pages/Photos'
 import Layout from './components/Layout'
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="/sms" element={<SMSSequences />} />
         <Route path="/dnc" element={<DNCLists />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/photos" element={<Photos />} />
       </Route>
     </Routes>
   )
