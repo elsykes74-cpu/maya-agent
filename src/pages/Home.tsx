@@ -121,9 +121,9 @@ export default function Home() {
         <img
           src="/maya-logo.jpg"
           alt="Maya"
-          style={{ width: 110, height: 110, objectFit: 'contain', borderRadius: 0, background: 'transparent', mixBlendMode: 'screen' }}
+          style={{ width: 160, height: 160, objectFit: 'contain', borderRadius: 0, background: 'transparent', mixBlendMode: 'screen' }}
         />
-        <h1 className="maya-chrome-logo" style={{ fontSize: 38, margin: 0, lineHeight: 1 }}>Maya</h1>
+        <h1 className="maya-chrome-logo" style={{ fontSize: 52, margin: 0, lineHeight: 1 }}>Maya</h1>
       </div>
 
       {/* KPI Row */}
