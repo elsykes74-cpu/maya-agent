@@ -17,17 +17,32 @@ const VOICES = [
 
 const activeCalls = new Map<string, { to: string; status: string; startedAt: Date }>();
 
+// Clean up stale activeCalls entries older than 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() - 5 * 60 * 1000;
+  for (const [sid, call] of activeCalls) {
+    if (call.startedAt.getTime() < cutoff) activeCalls.delete(sid);
+  }
+}, 60_000);
+
+let _configCache: { v: { accountSid: string; authToken: string; fromNumber: string }; exp: number } | null = null;
+
 async function getTwilioConfig() {
+  const now = Date.now();
+  if (_configCache && _configCache.exp > now) return _configCache.v;
   const { data } = await supabase
     .from("ai_config")
     .select("twilio_account_sid, twilio_auth_token, twilio_from_number")
     .order("id")
     .limit(1)
     .single();
-  const accountSid = data?.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || "";
-  const authToken = data?.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || "";
-  const fromNumber = data?.twilio_from_number || process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "";
-  return { accountSid, authToken, fromNumber };
+  const v = {
+    accountSid: data?.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || "",
+    authToken:  data?.twilio_auth_token  || process.env.TWILIO_AUTH_TOKEN  || "",
+    fromNumber: data?.twilio_from_number || process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "",
+  };
+  _configCache = { v, exp: now + 60_000 };
+  return v;
 }
 
 export const mayaRouter = createRouter({

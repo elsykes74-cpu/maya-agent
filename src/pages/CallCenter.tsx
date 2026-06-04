@@ -28,6 +28,7 @@ export default function CallCenter() {
   const [exp, setExp] = useState<number | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [batchPaused, setBatchPaused] = useState(false);
+  const batchPausedRef = useRef(false);
   const [callQueue, setCallQueue] = useState<CallJob[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -120,8 +121,9 @@ export default function CallCenter() {
     setCallQueue(jobs);
     setCurrentIdx(0);
     setOverallProgress(0);
-    setBatchMode(true);
+    batchPausedRef.current = false;
     setBatchPaused(false);
+    setBatchMode(true);
     runBatch(jobs, 0);
   };
 
@@ -138,7 +140,7 @@ export default function CallCenter() {
     setCurrentIdx(idx + 1);
     addCallRecord({ id: Date.now(), leadName: job.leadName, phone: job.phone, outcome: outcome as any, duration, transcript: null, notes: null, createdAt: new Date().toISOString() });
     setCallHistory(loadCalls());
-    if (!batchPaused) runBatch(jobs, idx + 1);
+    if (!batchPausedRef.current) runBatch(jobs, idx + 1);
   };
 
   const stats = {
@@ -170,7 +172,7 @@ export default function CallCenter() {
 
       {/* Call All Leads batch button */}
       <button
-        onClick={batchMode ? () => setBatchPaused(p => !p) : startBatch}
+        onClick={batchMode ? () => { setBatchPaused(p => { batchPausedRef.current = !p; return !p; }); } : startBatch}
         className="maya-tile press-sm"
         style={{ width: '100%', height: 64, borderRadius: 22, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20, background: batchMode ? (batchPaused ? `linear-gradient(135deg, ${C.orange}, #E08900)` : `linear-gradient(135deg, ${C.red}, #C72020)`) : `linear-gradient(135deg, ${C.teal}, ${C.green})`, color: '#fff', padding: 0 }}
       >
