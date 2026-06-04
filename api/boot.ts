@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
-import { leads } from "../db/schema";
+import { leads, smsLogs, dncList } from "../db/schema";
 import { notify } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
@@ -442,6 +442,64 @@ app.post("/api/twilio/status", async (c) => {
 	const body = await c.req.parseBody().catch(() => ({}));
 	console.log("[twilio/status]", body);
 	return c.text("ok");
+});
+
+// ── Inbound SMS from Twilio ───────────────────────────────────────────────────
+app.post("/api/twilio/sms", async (c) => {
+	const emptyTwiml = `<?xml version="1.0" encoding="UTF-8"?><Response/>`;
+	try {
+		const body = await c.req.parseBody().catch(() => ({}));
+		const fromRaw = String(body["From"] ?? "").replace(/\D/g, "");
+		const msgBody = String(body["Body"] ?? "").trim();
+
+		if (!fromRaw || !msgBody) {
+			return c.body(emptyTwiml, 200, { "Content-Type": "text/xml; charset=utf-8" });
+		}
+
+		const cleanFrom = fromRaw.slice(-10);
+		const lower = msgBody.toLowerCase().trim();
+		console.log(`[twilio/sms] inbound from ${cleanFrom}: ${msgBody.slice(0, 80)}`);
+
+		const db = getDb();
+		const allLeads = await db.query.leads.findMany({
+			columns: { id: true, sellerName: true, phone: true },
+			limit: 5000,
+		});
+		const lead = allLeads.find(l => l.phone && l.phone.replace(/\D/g, "").slice(-10) === cleanFrom);
+
+		if (lead) {
+			const isDnc = /\bstop\b|\bunsubscribe\b|\bremove me\b/.test(lower);
+			const isNegative = /\b(no|not interested|wrong|delete|remove|nope|nah)\b/.test(lower);
+			const newStage = isDnc || isNegative ? "cold_drip" : "outreach";
+
+			await db.update(leads)
+				.set({ pipelineStage: newStage as any, notes: `SMS reply: ${msgBody}` })
+				.where(eq(leads.id, lead.id));
+
+			if (isDnc) {
+				await db.insert(dncList).values({
+					phone: cleanFrom,
+					name: lead.sellerName ?? undefined,
+					reason: "seller_request",
+					source: "sms_reply",
+					notes: `STOP reply from lead ${lead.id}`,
+				}).catch(() => null);
+			}
+
+			await db.insert(smsLogs).values({
+				leadId:         lead.id,
+				sequenceDay:    0,
+				messageContent: msgBody,
+				direction:      "inbound",
+				status:         "replied",
+				repliedAt:      new Date(),
+				replyContent:   msgBody,
+			});
+		}
+	} catch (err) {
+		console.error("[twilio/sms] inbound error:", err);
+	}
+	return c.body(emptyTwiml, 200, { "Content-Type": "text/xml; charset=utf-8" });
 });
 
 // ---------------------------------------------------------------------------
