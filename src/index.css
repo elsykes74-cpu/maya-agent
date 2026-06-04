@@ -736,6 +736,49 @@ body {
   100% { background-position: 200% 0; }
 }
 
+/* ─── Logo Ring + Glow ──────────────────────────────────────── */
+
+.logo-glow-bg {
+  position: absolute;
+  inset: -34px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, rgba(205,128,50,0.42) 0%, rgba(160,85,20,0.20) 38%, transparent 68%);
+  animation: logo-glow-breathe 3.6s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.logo-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid rgba(184,115,51,0.80);
+  box-shadow:
+    0 0 10px rgba(184,115,51,0.50),
+    0 0 26px rgba(184,115,51,0.25),
+    0 0 50px rgba(79,195,247,0.12),
+    inset 0 0 8px rgba(184,115,51,0.15);
+  animation: logo-ring-pulse 2.8s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes logo-glow-breathe {
+  0%, 100% { opacity: 0.65; transform: scale(1); }
+  50%       { opacity: 1;    transform: scale(1.14); }
+}
+
+@keyframes logo-ring-pulse {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(184,115,51,0.50), 0 0 26px rgba(184,115,51,0.25), 0 0 50px rgba(79,195,247,0.12);
+    border-color: rgba(184,115,51,0.70);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(184,115,51,0.90), 0 0 42px rgba(184,115,51,0.50), 0 0 75px rgba(79,195,247,0.32);
+    border-color: rgba(184,115,51,1.00);
+  }
+}
+
 .fade-in, .maya-fade-in { animation: fadeInUp 0.45s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
 .maya-skeleton { background: linear-gradient(90deg, #E5E5EA 25%, #F0F0F0 50%, #E5E5EA 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 14px; }
 .maya-pulse { animation: mayaPulse 2.5s ease-in-out infinite; }

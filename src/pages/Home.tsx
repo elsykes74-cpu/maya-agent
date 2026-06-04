@@ -117,12 +117,16 @@ export default function Home() {
   return (
     <div style={{ padding: '28px 20px 20px' }}>
       {/* Brand Logo Header */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 28, gap: 0 }}>
-        <img
-          src="/maya-logo.jpg"
-          alt="Maya"
-          style={{ width: 160, height: 160, objectFit: 'contain', borderRadius: 0, background: 'transparent', mixBlendMode: 'screen' }}
-        />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 22, gap: 6 }}>
+        <div style={{ position: 'relative', width: 160, height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="logo-glow-bg" />
+          <div className="logo-ring" />
+          <img
+            src="/maya-logo.jpg"
+            alt="Maya"
+            style={{ width: 160, height: 160, objectFit: 'contain', borderRadius: 0, background: 'transparent', mixBlendMode: 'screen', position: 'relative', zIndex: 1 }}
+          />
+        </div>
         <h1 className="maya-chrome-logo" style={{ fontSize: 52, margin: 0, lineHeight: 1 }}>Maya</h1>
       </div>
 
