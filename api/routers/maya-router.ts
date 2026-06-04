@@ -124,6 +124,21 @@ export const mayaRouter = createRouter({
     .input(z.object({ sid: z.string().optional() }))
     .query(async ({ input }) => {
       if (!input.sid) return { transcript: null, status: "idle" };
+      // Ask Twilio directly so the UI auto-hangs-up when the far end disconnects
+      try {
+        const { accountSid, authToken } = await getTwilioConfig();
+        if (accountSid && authToken) {
+          const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${input.sid}.json`;
+          const resp = await fetch(url, {
+            headers: { Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}` },
+          });
+          if (resp.ok) {
+            const data = await resp.json() as { status: string };
+            const done = ["completed", "busy", "failed", "no-answer", "canceled"].includes(data.status);
+            return { transcript: null, status: done ? "completed" : data.status };
+          }
+        }
+      } catch { /* fall through to local map */ }
       const call = activeCalls.get(input.sid);
       return { transcript: null, status: call?.status ?? "completed" };
     }),

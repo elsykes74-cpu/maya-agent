@@ -63,6 +63,13 @@ export default function CallCenter() {
     }
   }, [transcriptData, stage]);
 
+  // Auto-hangup when Twilio reports the call is done (far-end hung up)
+  useEffect(() => {
+    if (transcriptData?.status === 'completed' && (stage === 'in_progress' || stage === 'ringing')) {
+      hangUp();
+    }
+  }, [transcriptData?.status]);
+
   useEffect(() => {
     if (transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
