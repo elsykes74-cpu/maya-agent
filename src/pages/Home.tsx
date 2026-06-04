@@ -116,7 +116,7 @@ export default function Home() {
 
   return (
     <div style={{ padding: '28px 20px 20px' }}>
-      <MayaHeader greeting={greeting} title="Maya" subtitle="Your AI Agent Command Center" status="online" statusLabel="Agent Online" />
+      <MayaHeader greeting={greeting} title="Maya" subtitle="Your AI Agent Command Center" status="online" statusLabel="Agent Online" branded />
 
       {/* KPI Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 24 }}>

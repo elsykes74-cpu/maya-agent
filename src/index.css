@@ -687,6 +687,36 @@ body {
   50%       { opacity: 0.6; transform: scale(1.15); }
 }
 
+/* ─── Chrome Metal Logo Text ──────────────────────────────────── */
+
+.maya-chrome-logo {
+  background: linear-gradient(
+    180deg,
+    #ffffff   0%,
+    #f2f2f2   6%,
+    #d0d0d0  18%,
+    #a8a8a8  34%,
+    #727272  52%,
+    #424242  68%,
+    #262626  82%,
+    #363636  92%,
+    #2e2e2e 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  text-shadow:
+    1px 1px 0   rgba(0,0,0,0.95),
+    2px 2px 1px rgba(0,0,0,0.80),
+    3px 3px 2px rgba(0,0,0,0.60),
+    4px 4px 4px rgba(0,0,0,0.30),
+    0   6px 18px rgba(0,0,0,0.20);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
 @keyframes sphere-float-a {
   0%, 100% { transform: translate(0px, 0px); }
   33%       { transform: translate(8px, 13px); }
