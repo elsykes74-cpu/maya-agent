@@ -9,9 +9,9 @@ import { sendTwilioSms } from "../lib/twilio";
 async function getTwilioCreds(db: ReturnType<typeof getDb>) {
   const config = await db.query.aiConfig.findFirst();
   return {
-    accountSid: process.env.TWILIO_ACCOUNT_SID || config?.twilioAccountSid || "",
-    authToken:  process.env.TWILIO_AUTH_TOKEN  || config?.twilioAuthToken  || "",
-    fromNumber: process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || config?.twilioFromNumber || "",
+    accountSid: config?.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID || "",
+    authToken:  config?.twilioAuthToken  || process.env.TWILIO_AUTH_TOKEN  || "",
+    fromNumber: config?.twilioFromNumber || process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "",
   };
 }
 
