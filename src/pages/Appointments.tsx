@@ -1,10 +1,24 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Clock, MapPin, User } from 'lucide-react';
 import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
-import { APPOINTMENTS } from '@/data';
+import { loadAppointments, saveAppointments, type Appointment } from '@/lib/persistence';
+import { APPOINTMENTS as INITIAL_APPOINTMENTS } from '@/data';
 
 export default function Appointments() {
   const navigate = useNavigate();
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+
+  useEffect(() => {
+    const stored = loadAppointments();
+    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
+      const seeded = INITIAL_APPOINTMENTS as Appointment[];
+      saveAppointments(seeded);
+      setAppointments(seeded);
+    } else {
+      setAppointments(stored);
+    }
+  }, []);
 
   return (
     <div style={{ padding: '16px 20px 24px' }}>
@@ -13,12 +27,12 @@ export default function Appointments() {
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Appointments</h1>
       </div>
 
-      {APPOINTMENTS.length === 0 ? (
+      {appointments.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '48px 24px' }}>
           <p style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: '0 0 4px' }}>No appointments</p>
           <p style={{ fontSize: 14, color: C.muted, margin: 0 }}>Schedule a walkthrough from a lead</p>
         </div>
-      ) : APPOINTMENTS.map(a => (
+      ) : appointments.map(a => (
         <NeoTile key={a.id} style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
           <div style={{ width: 56, height: 56, borderRadius: 18, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#fff', flexShrink: 0, background: `linear-gradient(135deg, ${C.teal}, ${C.blue})` }}>
             <span style={{ fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{new Date(a.scheduledDate).getDate()}</span>

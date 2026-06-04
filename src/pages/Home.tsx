@@ -5,7 +5,8 @@ import { C, NeoTile, NeoIcon, SectionTitle, MotTag } from '@/components/Neo';
 import { AgentTile } from '@/components/AgentTile';
 import { QuickActionBar } from '@/components/MayaHeader';
 import type { AgentData } from '@/components/Neo';
-import { loadLeads, loadCalls, saveLeads, type Lead, type CallRecord } from '@/lib/persistence';
+import { loadLeads, loadCalls, saveLeads, loadAppointments, saveAppointments, type Lead, type CallRecord, type Appointment } from '@/lib/persistence';
+import { APPOINTMENTS as INITIAL_APPOINTMENTS } from '@/data';
 
 const AGENTS: AgentData[] = [
   { id: 'camera', title: 'Camera', icon: 'Camera', iconColor: '#FFFFFF', iconBg: 'linear-gradient(145deg, #8B5CF6 0%, #6D28D9 100%)', status: 'online' },
@@ -81,6 +82,7 @@ export default function Home() {
   const [uploaded, setUploaded] = useState<{ name: string; count: number } | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
   const hours = new Date().getHours();
   const greeting = hours < 12 ? 'Good Morning' : hours < 17 ? 'Good Afternoon' : 'Good Evening';
@@ -88,6 +90,13 @@ export default function Home() {
   useEffect(() => {
     setLeads(loadLeads());
     setCalls(loadCalls());
+    const stored = loadAppointments();
+    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
+      saveAppointments(INITIAL_APPOINTMENTS as Appointment[]);
+      setAppointments(INITIAL_APPOINTMENTS as Appointment[]);
+    } else {
+      setAppointments(stored);
+    }
   }, []);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,7 +142,7 @@ export default function Home() {
         <KpiButton value={hot.length} label="Hot" accentColor="#FF6B6B" darkColor="#FF3B30" onClick={() => navigate('/leads')} />
         <KpiButton value={calls.length} label="Calls" accentColor="#2DD4BF" darkColor="#0D9488" onClick={() => navigate('/calls')} />
         <KpiButton value={leads.length} label="Leads" accentColor="#FFB340" darkColor="#FF9500" onClick={() => navigate('/leads')} />
-        <KpiButton value={0} label="Appts" accentColor="#A78BFA" darkColor="#7C3AED" onClick={() => navigate('/appointments')} />
+        <KpiButton value={appointments.length} label="Appts" accentColor="#A78BFA" darkColor="#7C3AED" onClick={() => navigate('/appointments')} />
       </div>
 
       {/* Agent Hub */}

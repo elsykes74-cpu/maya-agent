@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
-import { loadLeads, loadCalls, addCallRecord } from '@/lib/persistence';
+import { loadLeads, loadCalls, addCallRecord, clearCalls } from '@/lib/persistence';
 import type { CallRecord } from '@/lib/persistence';
 import { trpc } from '@/providers/trpc';
 
@@ -295,7 +295,7 @@ export default function CallCenter() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <SectionTitle>Call History</SectionTitle>
         {callHistory.length > 0 && (
-          <button onClick={() => { localStorage.removeItem('maya_calls_v2'); setCallHistory([]); }} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.red, cursor: 'pointer', marginBottom: 14 }}>Clear All</button>
+          <button onClick={() => { clearCalls(); setCallHistory([]); }} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.red, cursor: 'pointer', marginBottom: 14 }}>Clear All</button>
         )}
       </div>
 

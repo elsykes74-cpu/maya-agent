@@ -1,5 +1,6 @@
 const LEADS_KEY = 'maya_leads_v3';
 const CALLS_KEY = 'maya_calls_v3';
+const APPTS_KEY = 'maya_appointments_v1';
 
 export interface Lead {
   id: number;
@@ -52,6 +53,31 @@ export function loadCalls(): CallRecord[] {
 
 export function saveCalls(calls: CallRecord[]) {
   try { localStorage.setItem(CALLS_KEY, JSON.stringify(calls)); } catch { /* ignore */ }
+}
+
+export function clearCalls() {
+  saveCalls([]);
+}
+
+export interface Appointment {
+  id: number;
+  title: string;
+  leadName: string;
+  scheduledDate: string;
+  location: string;
+  notes?: string;
+}
+
+export function loadAppointments(): Appointment[] {
+  try {
+    const raw = localStorage.getItem(APPTS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return [];
+}
+
+export function saveAppointments(appts: Appointment[]) {
+  try { localStorage.setItem(APPTS_KEY, JSON.stringify(appts)); } catch { /* ignore */ }
 }
 
 export function addCallRecord(call: CallRecord) {

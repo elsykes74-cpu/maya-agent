@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
-import { Calendar, TrendingUp, MessageSquare, Shield, Bot, Settings, LogOut } from 'lucide-react';
+import { Calendar, TrendingUp, MessageSquare, Shield, Bot, Settings, LogOut, Search } from 'lucide-react';
 import { C, NeoTile, NeoIcon } from '@/components/Neo';
 
 const ITEMS = [
-  { icon: Calendar, label: 'Appointments', path: '/appointments', description: '2 upcoming', color: C.purple, bg: C.purpleS },
+  { icon: Calendar, label: 'Appointments', path: '/appointments', description: 'Scheduled walkthroughs', color: C.purple, bg: C.purpleS },
+  { icon: Search, label: 'Lead Finder', path: '/lead-finder', description: 'Find motivated sellers', color: C.teal, bg: C.tealS },
   { icon: TrendingUp, label: 'Deal Analysis', path: '/deals', description: 'MAO calculator', color: C.green, bg: C.greenS },
   { icon: MessageSquare, label: 'SMS Sequences', path: '/sms', description: '2 templates', color: C.blue, bg: C.blueS },
   { icon: Shield, label: 'DNC Lists', path: '/dnc', description: '3 numbers', color: C.red, bg: C.redS },
@@ -29,7 +30,7 @@ export default function More() {
           {initials}
         </div>
         <div>
-          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'User'}</p>
+          <p style={{ fontSize: 18, fontWeight: 700, color: C.text, margin: 0 }}>{user?.name || 'Admin'}</p>
           <p style={{ fontSize: 14, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{user?.email || ''}</p>
         </div>
       </NeoTile>
