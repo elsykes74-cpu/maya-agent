@@ -2,9 +2,18 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { smsLogs, smsTemplates } from "../../db/schema";
+import { smsLogs, smsTemplates, aiConfig } from "../../db/schema";
 import { leads, campaignLeads } from "../../db/schema";
 import { sendTwilioSms } from "../lib/twilio";
+
+async function getTwilioCreds(db: ReturnType<typeof getDb>) {
+  const config = await db.query.aiConfig.findFirst();
+  return {
+    accountSid: process.env.TWILIO_ACCOUNT_SID || config?.twilioAccountSid || "",
+    authToken:  process.env.TWILIO_AUTH_TOKEN  || config?.twilioAuthToken  || "",
+    fromNumber: process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || config?.twilioFromNumber || "",
+  };
+}
 
 export const smsRouter = createRouter({
   list: publicQuery
@@ -109,9 +118,10 @@ export const smsRouter = createRouter({
       sequenceDay: z.number().default(0),
     }))
     .mutation(async ({ input }) => {
-      const result = await sendTwilioSms({ to: input.to, body: input.body });
+      const db = getDb();
+      const creds = await getTwilioCreds(db);
+      const result = await sendTwilioSms({ to: input.to, body: input.body, ...creds });
       if (input.leadId) {
-        const db = getDb();
         await db.insert(smsLogs).values({
           leadId: input.leadId,
           sequenceDay: input.sequenceDay,
@@ -153,6 +163,7 @@ export const smsRouter = createRouter({
         with: { lead: { columns: { id: true, phone: true, sellerName: true } } },
       });
 
+      const creds = await getTwilioCreds(db);
       let sent = 0;
       let failed = 0;
       for (const cl of clRows) {
@@ -162,7 +173,7 @@ export const smsRouter = createRouter({
           .replace(/{name}/g, name)
           .replace(/{address}/g, "");
 
-        const smsResult = await sendTwilioSms({ to: cl.lead.phone, body: content });
+        const smsResult = await sendTwilioSms({ to: cl.lead.phone, body: content, ...creds });
 
         await db.insert(smsLogs).values({
           leadId:         cl.lead.id,
