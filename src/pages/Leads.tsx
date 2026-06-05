@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send } from 'lucide-react';
+import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send, ExternalLink } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
-import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, addAuditEntry } from '@/lib/persistence';
+import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, addAuditEntry, getSkyslopeTransactionId, setSkyslopeTransactionId } from '@/lib/persistence';
 import type { Lead, LeadCallLog } from '@/lib/persistence';
 import { pushLead, pushLeadDelete } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
@@ -382,6 +382,9 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
             <F label="Key Pain Points / Motivation" value={lead.keyPainPoints} field="keyPainPoints" multiline />
           </NeoTile>
 
+          {/* SkySlope */}
+          <SkySlopeSection lead={lead} />
+
           {/* Call Log */}
           {callLogs.length > 0 && (
             <>
@@ -466,6 +469,80 @@ const inputSt: React.CSSProperties = {
   color: 'inherit', fontWeight: 600, fontFamily: 'inherit', outline: 'none',
   boxSizing: 'border-box',
 };
+
+function SkySlopeSection({ lead }: { lead: Lead }) {
+  const [saleGuid, setSaleGuid] = useState<string | null>(() => getSkyslopeTransactionId(lead.id));
+  const configQuery = trpc.skyslope.configStatus.useQuery(undefined, { retry: false, staleTime: 60_000 });
+  const createMut = trpc.skyslope.createTransaction.useMutation({
+    onSuccess: (data) => {
+      if (data.saleGuid) {
+        setSkyslopeTransactionId(lead.id, data.saleGuid);
+        setSaleGuid(data.saleGuid);
+      }
+    },
+  });
+
+  const isConfigured = configQuery.data?.fullyConfigured;
+
+  return (
+    <>
+      <p className="maya-section-title">SkySlope</p>
+      <NeoTile style={{ marginBottom: 16 }}>
+        {configQuery.isLoading ? (
+          <p style={{ fontSize: 14, color: C.muted, margin: 0, fontWeight: 500 }}>Checking SkySlope…</p>
+        ) : !isConfigured ? (
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: '0 0 6px' }}>Setup required</p>
+            <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.6, fontWeight: 500 }}>
+              Contact your SkySlope Customer Success Manager for your Client ID &amp; Secret, then add{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_ACCESS_SECRET</span>,{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_ID</span>,{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_SECRET</span>,{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_OFFICE_GUID</span>,{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_AGENT_GUID</span>, and{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CHECKLIST_TYPE_ID</span>{' '}
+              to Vercel environment variables.
+            </p>
+          </div>
+        ) : saleGuid ? (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>Transaction linked</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <Check size={14} color={C.green} strokeWidth={2.5} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: C.green }}>Sent to SkySlope</span>
+            </div>
+            <p style={{ fontSize: 11, color: C.muted, margin: 0, wordBreak: 'break-all', fontFamily: 'monospace', lineHeight: 1.5 }}>
+              {saleGuid}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <p style={{ fontSize: 13, fontWeight: 600, color: C.muted, margin: '0 0 12px', lineHeight: 1.4 }}>
+              Create a transaction for {lead.propertyAddress}
+            </p>
+            <button
+              onClick={() => createMut.mutate({
+                sellerName: lead.sellerName,
+                propertyAddress: lead.propertyAddress,
+                salePrice: lead.askingPrice ? Number(lead.askingPrice) : undefined,
+              })}
+              disabled={createMut.isPending}
+              style={{ width: '100%', height: 44, borderRadius: 12, background: C.teal, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: createMut.isPending ? 0.7 : 1 }}
+            >
+              <ExternalLink size={14} strokeWidth={2} />
+              {createMut.isPending ? 'Creating…' : 'Create Transaction'}
+            </button>
+            {createMut.isError && (
+              <p style={{ fontSize: 12, color: C.red, margin: '8px 0 0', lineHeight: 1.5, fontWeight: 500 }}>
+                {(createMut.error as Error).message}
+              </p>
+            )}
+          </div>
+        )}
+      </NeoTile>
+    </>
+  );
+}
 
 function AddLeadSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (lead: Lead) => void }) {
   const [name, setName] = useState('');

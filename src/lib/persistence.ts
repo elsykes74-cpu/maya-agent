@@ -389,3 +389,27 @@ export function addAuditEntry(entry: Omit<AuditEntry, 'id' | 'createdAt'>): void
   entries.unshift({ ...entry, id: Date.now(), createdAt: new Date().toISOString() });
   saveAudit(entries);
 }
+
+// ── SkySlope transaction linkage ──────────────────────────────────
+
+const SKYSLOPE_KEY = 'maya_skyslope_tx_v1';
+
+export function getSkyslopeTransactionId(leadId: number): string | null {
+  try {
+    const raw = localStorage.getItem(SKYSLOPE_KEY);
+    if (raw) {
+      const map = JSON.parse(raw) as Record<string, string>;
+      return map[String(leadId)] ?? null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+export function setSkyslopeTransactionId(leadId: number, saleGuid: string): void {
+  try {
+    const raw = localStorage.getItem(SKYSLOPE_KEY);
+    const map: Record<string, string> = raw ? JSON.parse(raw) : {};
+    map[String(leadId)] = saleGuid;
+    localStorage.setItem(SKYSLOPE_KEY, JSON.stringify(map));
+  } catch { /* ignore */ }
+}
