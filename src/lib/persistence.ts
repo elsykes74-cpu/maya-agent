@@ -30,6 +30,7 @@ export interface CallRecord {
   notes: string | null;
   createdAt: string;
   scriptUsed?: string;
+  callSid?: string;
 }
 
 export function loadLeads(): Lead[] {

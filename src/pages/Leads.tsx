@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send, ExternalLink } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
 import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, addAuditEntry, getSkyslopeTransactionId, setSkyslopeTransactionId } from '@/lib/persistence';
-import type { Lead, LeadCallLog } from '@/lib/persistence';
+import type { Lead, LeadCallLog, CallOutcome } from '@/lib/persistence';
 import { pushLead, pushLeadDelete } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
 
@@ -119,12 +119,14 @@ export default function Leads() {
 
 function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen: () => void; onDelete: () => void; onCallRecord: (r: any) => void }) {
   const [calling, setCalling] = useState(false);
-  const [callResult, setCallResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [callError, setCallError] = useState<string | null>(null);
+  const [liveSid, setLiveSid] = useState<string | null>(null);
 
   const callWithMaya = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setCalling(true);
-    setCallResult(null);
+    setCallError(null);
+    setLiveSid(null);
     try {
       const res = await fetch('/api/trpc/maya.placeCall', {
         method: 'POST',
@@ -135,13 +137,12 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
       const data = await res.json();
       const sid = data?.result?.data?.json?.sid;
       if (sid) {
-        onCallRecord({ id: Date.now(), leadName: lead.sellerName, phone: lead.phone, outcome: 'connected', duration: 0, transcript: `Maya called ${lead.sellerName}`, notes: null, createdAt: new Date().toISOString() });
-        setCallResult({ ok: true, msg: `Call placed! SID: ${sid.slice(0, 12)}...` });
+        setLiveSid(sid);
       } else {
         throw new Error(data?.error?.message || 'Call failed');
       }
     } catch (e: any) {
-      setCallResult({ ok: false, msg: e.message || 'Call failed — check Twilio settings' });
+      setCallError(e.message || 'Call failed — check Twilio settings');
     }
     setCalling(false);
   };
@@ -189,9 +190,21 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
         </button>
       </div>
 
-      {callResult && (
-        <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: callResult.ok ? C.greenS : C.redS, color: callResult.ok ? C.green : C.red, lineHeight: 1.5 }}>
-          {callResult.msg}
+      {callError && (
+        <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: C.redS, color: C.red, lineHeight: 1.5 }}>
+          {callError}
+        </div>
+      )}
+      {liveSid && (
+        <div onClick={e => e.stopPropagation()}>
+          <LiveCallMonitor
+            sid={liveSid}
+            leadId={lead.id}
+            leadName={lead.sellerName}
+            phone={lead.phone}
+            onDone={(rec) => { onCallRecord(rec); setLiveSid(null); }}
+            onCancel={() => setLiveSid(null)}
+          />
         </div>
       )}
     </NeoTile>
@@ -208,7 +221,8 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Lead>({ ...lead });
   const [calling, setCalling] = useState(false);
-  const [callResult, setCallResult] = useState<string | null>(null);
+  const [callError, setCallError] = useState<string | null>(null);
+  const [liveSid, setLiveSid] = useState<string | null>(null);
   const [smsBody, setSmsBody] = useState('');
   const [showSms, setShowSms] = useState(false);
   const [callLogs, setCallLogs] = useState<LeadCallLog[]>([]);
@@ -230,7 +244,8 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
 
   const callWithMaya = async () => {
     setCalling(true);
-    setCallResult(null);
+    setCallError(null);
+    setLiveSid(null);
     try {
       const res = await fetch('/api/trpc/maya.placeCall', {
         method: 'POST',
@@ -241,13 +256,12 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
       const data = await res.json();
       const sid = data?.result?.data?.json?.sid;
       if (sid) {
-        onCallRecord({ id: Date.now(), leadName: lead.sellerName, phone: lead.phone, outcome: 'connected', duration: 0, transcript: `Maya called ${lead.sellerName}`, notes: null, createdAt: new Date().toISOString() });
-        setCallResult('Call placed successfully!');
+        setLiveSid(sid);
       } else {
         throw new Error(data?.error?.message || 'Call failed');
       }
     } catch (e: any) {
-      setCallResult(e.message || 'Call failed — check Twilio settings');
+      setCallError(e.message || 'Call failed — check Twilio settings');
     }
     setCalling(false);
   };
@@ -448,10 +462,20 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
                 <Send size={15} strokeWidth={2} /> Send SMS
               </button>
             </div>
-            {callResult && (
-              <div style={{ padding: '12px 16px', borderRadius: 14, background: callResult.includes('success') ? C.greenS : C.redS, color: callResult.includes('success') ? C.green : C.red, fontSize: 13, fontWeight: 600 }}>
-                {callResult}
+            {callError && (
+              <div style={{ padding: '12px 16px', borderRadius: 14, background: C.redS, color: C.red, fontSize: 13, fontWeight: 600 }}>
+                {callError}
               </div>
+            )}
+            {liveSid && (
+              <LiveCallMonitor
+                sid={liveSid}
+                leadId={lead.id}
+                leadName={lead.sellerName}
+                phone={lead.phone}
+                onDone={(rec) => { onCallRecord(rec); setLiveSid(null); }}
+                onCancel={() => setLiveSid(null)}
+              />
             )}
             <button onClick={onDelete} style={{ height: 48, borderRadius: 14, background: C.redS, color: C.red, border: 'none', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
               Delete Lead
@@ -469,6 +493,134 @@ const inputSt: React.CSSProperties = {
   color: 'inherit', fontWeight: 600, fontFamily: 'inherit', outline: 'none',
   boxSizing: 'border-box',
 };
+
+const LIVE_OUTCOMES: { outcome: CallOutcome; label: string; color: string; bg: string }[] = [
+  { outcome: 'voicemail',                label: 'Voicemail',          color: C.orange, bg: C.orangeS },
+  { outcome: 'connected_interested',     label: 'Interested',         color: C.green,  bg: C.greenS },
+  { outcome: 'connected_not_interested', label: 'Not Interested',     color: C.muted,  bg: 'rgba(128,128,128,0.1)' },
+  { outcome: 'callback_requested',       label: 'Callback Requested', color: C.teal,   bg: C.tealS },
+  { outcome: 'no_answer',                label: 'No Answer',          color: C.blue,   bg: C.blueS },
+  { outcome: 'hung_up',                  label: 'Hung Up',            color: C.red,    bg: C.redS },
+];
+
+const OUTCOME_TO_SIMPLE: Record<CallOutcome, 'connected' | 'voicemail' | 'no_answer'> = {
+  voicemail:                'voicemail',
+  connected_interested:     'connected',
+  connected_not_interested: 'connected',
+  callback_requested:       'connected',
+  no_answer:                'no_answer',
+  hung_up:                  'no_answer',
+};
+
+function LiveCallMonitor({ sid, leadId, leadName, phone, onDone, onCancel }: {
+  sid: string; leadId: number; leadName: string; phone: string;
+  onDone: (rec: any) => void;
+  onCancel: () => void;
+}) {
+  const [phase, setPhase] = useState<'ringing' | 'connected' | 'ended'>('ringing');
+  const [timer, setTimer] = useState(0);
+  const [notes, setNotes] = useState('');
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const { data: statusData } = trpc.maya.getTranscript.useQuery(
+    { sid },
+    { enabled: phase !== 'ended', refetchInterval: phase !== 'ended' ? 3000 : false }
+  );
+  const { data: convData } = trpc.maya.getConversation.useQuery(
+    { callSid: sid },
+    { enabled: phase === 'ended', refetchInterval: 4000, staleTime: 0 }
+  );
+
+  useEffect(() => {
+    if (!statusData?.status) return;
+    const s = statusData.status;
+    if (s === 'in-progress' && phase === 'ringing') {
+      setPhase('connected');
+      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
+    }
+    if (['completed', 'busy', 'failed', 'no-answer', 'canceled'].includes(s) && phase !== 'ended') {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setPhase('ended');
+    }
+  }, [statusData?.status]);
+
+  useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  const save = (outcome: CallOutcome) => {
+    const turns = convData?.turns ?? [];
+    const transcriptText = turns.length > 0
+      ? turns.map(t => `${t.role === 'assistant' ? 'Maya' : 'Seller'}: ${t.content}`).join('\n')
+      : null;
+    onDone({
+      id: Date.now(),
+      leadId,
+      leadName,
+      phone,
+      outcome: OUTCOME_TO_SIMPLE[outcome],
+      duration: timer,
+      transcript: transcriptText,
+      notes: notes.trim() || null,
+      createdAt: new Date().toISOString(),
+      callSid: sid,
+    });
+  };
+
+  if (phase === 'ended') {
+    return (
+      <div style={{ marginTop: 12, padding: 14, borderRadius: 16, background: 'rgba(128,128,128,0.06)', border: '1px solid rgba(128,128,128,0.12)' }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: '0 0 2px' }}>
+          Call ended {timer > 0 ? `· ${fmt(timer)}` : ''}
+        </p>
+        <p style={{ fontSize: 12, color: C.muted, margin: '0 0 12px', fontWeight: 500 }}>What happened?</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+          {LIVE_OUTCOMES.map(({ outcome, label, color, bg }) => (
+            <button key={outcome} onClick={() => save(outcome)}
+              style={{ padding: '10px 8px', borderRadius: 12, border: `1px solid ${color}30`, background: bg, color, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional)…" rows={2}
+          style={{ width: '100%', border: '1px solid rgba(128,128,128,0.2)', borderRadius: 10, padding: '8px 10px', fontSize: 13, background: 'rgba(128,128,128,0.06)', color: 'inherit', fontWeight: 500, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'none', marginBottom: 8 }} />
+        {convData?.turns && convData.turns.length > 0 && (
+          <details style={{ marginBottom: 8 }}>
+            <summary style={{ fontSize: 12, fontWeight: 700, color: C.teal, cursor: 'pointer', userSelect: 'none', marginBottom: 6 }}>
+              View transcript ({convData.turns.length} turns)
+            </summary>
+            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingRight: 4 }} className="hide-scrollbar">
+              {convData.turns.map((t, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: t.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
+                  <div style={{ maxWidth: '85%', padding: '7px 10px', borderRadius: t.role === 'assistant' ? '12px 12px 12px 3px' : '12px 12px 3px 12px', background: t.role === 'assistant' ? C.purpleS : C.tealS, fontSize: 12, color: t.role === 'assistant' ? C.purple : C.teal, lineHeight: 1.5, fontWeight: 500 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, display: 'block', marginBottom: 2 }}>{t.role === 'assistant' ? 'Maya' : 'Seller'}</span>
+                    {t.content}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+        <button onClick={onCancel} style={{ width: '100%', padding: '8px 0', background: 'none', border: 'none', fontSize: 12, color: C.muted, cursor: 'pointer', fontWeight: 600 }}>Skip logging</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 16, background: phase === 'connected' ? `${C.green}12` : `${C.orange}12`, border: `1px solid ${phase === 'connected' ? C.green : C.orange}30`, display: 'flex', alignItems: 'center', gap: 10 }}>
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: phase === 'connected' ? C.green : C.orange, flexShrink: 0, animation: 'mayaPulse 2.5s ease-in-out infinite' }} />
+      <div style={{ flex: 1 }}>
+        <p style={{ fontSize: 13, fontWeight: 700, color: phase === 'connected' ? C.green : C.orange, margin: 0 }}>
+          {phase === 'connected' ? `Connected · ${fmt(timer)}` : 'Ringing…'}
+        </p>
+        <p style={{ fontSize: 11, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>{leadName}</p>
+      </div>
+      <button onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.muted, padding: 4 }}>
+        <X size={14} />
+      </button>
+    </div>
+  );
+}
 
 function SkySlopeSection({ lead }: { lead: Lead }) {
   const [saleGuid, setSaleGuid] = useState<string | null>(() => getSkyslopeTransactionId(lead.id));

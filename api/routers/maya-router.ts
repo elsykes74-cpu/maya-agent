@@ -142,4 +142,20 @@ export const mayaRouter = createRouter({
       const call = activeCalls.get(input.sid);
       return { transcript: null, status: call?.status ?? "completed" };
     }),
+
+  getConversation: publicQuery
+    .input(z.object({ callSid: z.string() }))
+    .query(async ({ input }) => {
+      const { data } = await supabase
+        .from("maya_conversations")
+        .select("turns, metadata, updated_at")
+        .eq("call_sid", input.callSid)
+        .single();
+      if (!data) return null;
+      return {
+        turns: (data.turns ?? []) as Array<{ role: "assistant" | "user"; content: string }>,
+        metadata: (data.metadata ?? {}) as Record<string, unknown>,
+        updatedAt: data.updated_at as string,
+      };
+    }),
 });

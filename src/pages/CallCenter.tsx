@@ -541,6 +541,15 @@ function CallHistoryCard({ call, expanded, onToggle }: { call: CallRecord; expan
   const outcomeBg = call.outcome === 'connected' ? C.greenS : call.outcome === 'voicemail' ? C.orangeS : C.redS;
   const outcomeLabel = call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer';
 
+  const { data: conv } = trpc.maya.getConversation.useQuery(
+    { callSid: call.callSid! },
+    { enabled: expanded && !!call.callSid, staleTime: 30_000 }
+  );
+
+  const turns = conv?.turns ?? [];
+  const storedTranscript = call.transcript && !call.transcript.startsWith('Maya called ') ? call.transcript : null;
+  const fmt = (s: number) => s > 0 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '';
+
   return (
     <NeoTile style={{ marginBottom: 12, cursor: 'pointer' }} onClick={onToggle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -551,16 +560,49 @@ function CallHistoryCard({ call, expanded, onToggle }: { call: CallRecord; expan
           <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>{call.leadName}</p>
           <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>
             {new Date(call.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            {call.duration > 0 ? ` · ${fmt(call.duration)}` : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: outcomeColor, background: outcomeBg, padding: '4px 10px', borderRadius: 20, textTransform: 'uppercase' }}>{outcomeLabel}</span>
-          {call.duration > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{call.duration}s</span>}
+          {(call.callSid || call.notes) && (
+            <span style={{ fontSize: 10, fontWeight: 600, color: C.muted }}>{expanded ? '▲ hide' : '▼ details'}</span>
+          )}
         </div>
       </div>
-      {expanded && call.transcript && (
-        <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 14, background: 'rgba(0,0,0,0.03)', fontSize: 13, color: C.text, lineHeight: 1.6, fontWeight: 500 }}>
-          {call.transcript}
+
+      {expanded && (
+        <div style={{ marginTop: 14 }}>
+          {call.notes && (
+            <div style={{ padding: '10px 12px', borderRadius: 12, background: C.tealS, marginBottom: 10 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.teal, margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notes</p>
+              <p style={{ fontSize: 13, color: C.text, margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{call.notes}</p>
+            </div>
+          )}
+
+          {turns.length > 0 ? (
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px' }}>
+                Transcript · {turns.length} turns
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }} className="hide-scrollbar">
+                {turns.map((t, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: t.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
+                    <div style={{ maxWidth: '85%', padding: '8px 12px', borderRadius: t.role === 'assistant' ? '12px 12px 12px 3px' : '12px 12px 3px 12px', background: t.role === 'assistant' ? C.purpleS : C.tealS, fontSize: 13, color: t.role === 'assistant' ? C.purple : C.teal, lineHeight: 1.5, fontWeight: 500 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, display: 'block', marginBottom: 2 }}>{t.role === 'assistant' ? 'Maya' : 'Seller'}</span>
+                      {t.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : storedTranscript ? (
+            <div style={{ padding: '12px 14px', borderRadius: 14, background: 'rgba(0,0,0,0.03)', fontSize: 13, color: C.text, lineHeight: 1.6, fontWeight: 500 }}>
+              {storedTranscript}
+            </div>
+          ) : call.callSid ? (
+            <p style={{ fontSize: 13, color: C.muted, margin: 0, fontStyle: 'italic', fontWeight: 500 }}>Loading transcript…</p>
+          ) : null}
         </div>
       )}
     </NeoTile>
