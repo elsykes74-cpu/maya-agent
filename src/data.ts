@@ -18,7 +18,4 @@ export const CAMPAIGNS = [
   { id: 3, name: 'Chicopee Cash Buyers', description: 'Absentee owners in Chicopee', status: 'completed' as const, progress: 100, callsMade: 50, totalLeads: 50 },
 ];
 
-export const APPOINTMENTS = [
-  { id: 1, title: 'Property Walkthrough', leadName: 'Sarah Johnson', scheduledDate: new Date(Date.now() + 86400000 * 2).toISOString(), location: '142 Maple St, Springfield', notes: 'Bring contractor for repair estimate' },
-  { id: 2, title: 'Contract Signing', leadName: 'Mike Chen', scheduledDate: new Date(Date.now() + 86400000 * 5).toISOString(), location: 'Title Office, Downtown Springfield', notes: 'Purchase agreement ready' },
-];
+export const APPOINTMENTS: never[] = [];

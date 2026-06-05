@@ -90,13 +90,9 @@ export default function Home() {
   useEffect(() => {
     setLeads(loadLeads());
     setCalls(loadCalls());
-    const stored = loadAppointments();
-    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
-      saveAppointments(INITIAL_APPOINTMENTS as Appointment[]);
-      setAppointments(INITIAL_APPOINTMENTS as Appointment[]);
-    } else {
-      setAppointments(stored);
-    }
+    const stored = loadAppointments().filter(a => a.id > 2);
+    saveAppointments(stored);
+    setAppointments(stored);
   }, []);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
