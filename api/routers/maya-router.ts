@@ -5,6 +5,8 @@ import { createRouter, publicQuery } from "../middleware";
 import { placeTwilioOutboundCall } from "../lib/twilio";
 import { supabase } from "../lib/supabase";
 import { env } from "../lib/env";
+import { analyzeCallOutcome } from "../lib/anthropic";
+import type { ConversationTurn } from "../lib/anthropic";
 
 const VOICES = [
   { id: "Google.en-US-Neural2-F", label: "Aria", gender: "Female", style: "Most Natural (Recommended)" },
@@ -157,5 +159,37 @@ export const mayaRouter = createRouter({
         metadata: (data.metadata ?? {}) as Record<string, unknown>,
         updatedAt: data.updated_at as string,
       };
+    }),
+
+  analyzeOutcome: publicQuery
+    .input(z.object({ callSid: z.string(), duration: z.number().default(0) }))
+    .query(async ({ input }) => {
+      const { data } = await supabase
+        .from("maya_conversations")
+        .select("turns, metadata")
+        .eq("call_sid", input.callSid)
+        .single();
+
+      const turns = (data?.turns ?? []) as ConversationTurn[];
+
+      // No conversation recorded at all
+      if (turns.length === 0) {
+        if (input.duration < 8) {
+          return { outcome: "no_answer" as const, notes: "Phone rang but no one answered.", confidence: 0.85 };
+        }
+        return { outcome: "voicemail" as const, notes: `Maya left a voicemail (${input.duration}s). Follow up with a text.`, confidence: 0.82 };
+      }
+
+      // Only Maya's opener — person disconnected immediately
+      if (turns.length === 1) {
+        return { outcome: "hung_up" as const, notes: "Seller disconnected after Maya's greeting.", confidence: 0.78 };
+      }
+
+      // Real conversation — ask Claude to classify
+      try {
+        return await analyzeCallOutcome(turns);
+      } catch {
+        return { outcome: "connected_not_interested" as const, notes: "Call completed — review transcript for details.", confidence: 0.5 };
+      }
     }),
 });

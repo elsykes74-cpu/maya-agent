@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send, ExternalLink } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
-import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, addAuditEntry, getSkyslopeTransactionId, setSkyslopeTransactionId } from '@/lib/persistence';
+import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN, addAuditEntry, getSkyslopeTransactionId, setSkyslopeTransactionId, addLeadCallLog, assignLeadToCampaign } from '@/lib/persistence';
 import type { Lead, LeadCallLog, CallOutcome } from '@/lib/persistence';
 import { pushLead, pushLeadDelete } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
@@ -202,6 +202,7 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
             leadId={lead.id}
             leadName={lead.sellerName}
             phone={lead.phone}
+            motivationLevel={lead.motivationLevel}
             onDone={(rec) => { onCallRecord(rec); setLiveSid(null); }}
             onCancel={() => setLiveSid(null)}
           />
@@ -473,6 +474,7 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
                 leadId={lead.id}
                 leadName={lead.sellerName}
                 phone={lead.phone}
+                motivationLevel={lead.motivationLevel}
                 onDone={(rec) => { onCallRecord(rec); setLiveSid(null); }}
                 onCancel={() => setLiveSid(null)}
               />
@@ -512,15 +514,17 @@ const OUTCOME_TO_SIMPLE: Record<CallOutcome, 'connected' | 'voicemail' | 'no_ans
   hung_up:                  'no_answer',
 };
 
-function LiveCallMonitor({ sid, leadId, leadName, phone, onDone, onCancel }: {
-  sid: string; leadId: number; leadName: string; phone: string;
+function LiveCallMonitor({ sid, leadId, leadName, phone, motivationLevel, onDone, onCancel }: {
+  sid: string; leadId: number; leadName: string; phone: string; motivationLevel: string;
   onDone: (rec: any) => void;
   onCancel: () => void;
 }) {
   const [phase, setPhase] = useState<'ringing' | 'connected' | 'ended'>('ringing');
   const [timer, setTimer] = useState(0);
   const [notes, setNotes] = useState('');
+  const [selected, setSelected] = useState<CallOutcome | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finalTimer = useRef(0);
 
   const { data: statusData } = trpc.maya.getTranscript.useQuery(
     { sid },
@@ -530,19 +534,33 @@ function LiveCallMonitor({ sid, leadId, leadName, phone, onDone, onCancel }: {
     { callSid: sid },
     { enabled: phase === 'ended', refetchInterval: 4000, staleTime: 0 }
   );
+  const { data: analysis, isLoading: analyzing } = trpc.maya.analyzeOutcome.useQuery(
+    { callSid: sid, duration: finalTimer.current },
+    { enabled: phase === 'ended', staleTime: 60_000, retry: 2 }
+  );
 
   useEffect(() => {
     if (!statusData?.status) return;
     const s = statusData.status;
     if (s === 'in-progress' && phase === 'ringing') {
       setPhase('connected');
-      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000);
+      timerRef.current = setInterval(() => {
+        setTimer(t => { finalTimer.current = t + 1; return t + 1; });
+      }, 1000);
     }
     if (['completed', 'busy', 'failed', 'no-answer', 'canceled'].includes(s) && phase !== 'ended') {
       if (timerRef.current) clearInterval(timerRef.current);
       setPhase('ended');
     }
   }, [statusData?.status]);
+
+  // Pre-select Maya's detected outcome and fill notes
+  useEffect(() => {
+    if (analysis?.outcome && !selected) {
+      setSelected(analysis.outcome as CallOutcome);
+      setNotes(analysis.notes ?? '');
+    }
+  }, [analysis]);
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 
@@ -553,43 +571,74 @@ function LiveCallMonitor({ sid, leadId, leadName, phone, onDone, onCancel }: {
     const transcriptText = turns.length > 0
       ? turns.map(t => `${t.role === 'assistant' ? 'Maya' : 'Seller'}: ${t.content}`).join('\n')
       : null;
-    onDone({
+    const rec = {
       id: Date.now(),
       leadId,
       leadName,
       phone,
       outcome: OUTCOME_TO_SIMPLE[outcome],
-      duration: timer,
+      duration: finalTimer.current,
       transcript: transcriptText,
       notes: notes.trim() || null,
       createdAt: new Date().toISOString(),
       callSid: sid,
+    };
+    addLeadCallLog({
+      leadId, leadName, phone, outcome,
+      notes: notes.trim() || '',
+      duration: finalTimer.current,
+      campaignAssigned: OUTCOME_TO_CAMPAIGN[outcome],
+      createdAt: rec.createdAt,
     });
+    assignLeadToCampaign({ leadId, leadName, phone, motivationLevel }, OUTCOME_TO_CAMPAIGN[outcome]);
+    addAuditEntry({ action: 'call_logged', entityId: leadId, entityName: leadName, detail: `${OUTCOME_LABELS[outcome]} · ${finalTimer.current}s → ${OUTCOME_TO_CAMPAIGN[outcome]}` });
+    onDone(rec);
   };
 
   if (phase === 'ended') {
     return (
       <div style={{ marginTop: 12, padding: 14, borderRadius: 16, background: 'rgba(128,128,128,0.06)', border: '1px solid rgba(128,128,128,0.12)' }}>
-        <p style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: '0 0 2px' }}>
-          Call ended {timer > 0 ? `· ${fmt(timer)}` : ''}
-        </p>
-        <p style={{ fontSize: 12, color: C.muted, margin: '0 0 12px', fontWeight: 500 }}>What happened?</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-          {LIVE_OUTCOMES.map(({ outcome, label, color, bg }) => (
-            <button key={outcome} onClick={() => save(outcome)}
-              style={{ padding: '10px 8px', borderRadius: 12, border: `1px solid ${color}30`, background: bg, color, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-              {label}
-            </button>
-          ))}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: 0 }}>
+              Call ended {finalTimer.current > 0 ? `· ${fmt(finalTimer.current)}` : ''}
+            </p>
+            {analyzing ? (
+              <p style={{ fontSize: 11, color: C.purple, margin: '2px 0 0', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Sparkles size={10} strokeWidth={2} /> Maya is analyzing the call…
+              </p>
+            ) : analysis ? (
+              <p style={{ fontSize: 11, color: C.purple, margin: '2px 0 0', fontWeight: 600 }}>
+                Maya detected: {OUTCOME_LABELS[analysis.outcome as CallOutcome]} · tap to confirm or change
+              </p>
+            ) : (
+              <p style={{ fontSize: 11, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>What happened?</p>
+            )}
+          </div>
         </div>
-        <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes (optional)…" rows={2}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+          {LIVE_OUTCOMES.map(({ outcome, label, color, bg }) => {
+            const isSelected = selected === outcome;
+            return (
+              <button key={outcome} onClick={() => { setSelected(outcome); save(outcome); }}
+                style={{ padding: '10px 8px', borderRadius: 12, border: `2px solid ${isSelected ? color : color + '30'}`, background: isSelected ? color + '25' : bg, color, fontSize: 12, fontWeight: 700, cursor: 'pointer', position: 'relative' }}>
+                {isSelected && <span style={{ position: 'absolute', top: 4, right: 6, fontSize: 10 }}>✓</span>}
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes…" rows={2}
           style={{ width: '100%', border: '1px solid rgba(128,128,128,0.2)', borderRadius: 10, padding: '8px 10px', fontSize: 13, background: 'rgba(128,128,128,0.06)', color: 'inherit', fontWeight: 500, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'none', marginBottom: 8 }} />
+
         {convData?.turns && convData.turns.length > 0 && (
           <details style={{ marginBottom: 8 }}>
-            <summary style={{ fontSize: 12, fontWeight: 700, color: C.teal, cursor: 'pointer', userSelect: 'none', marginBottom: 6 }}>
+            <summary style={{ fontSize: 12, fontWeight: 700, color: C.teal, cursor: 'pointer', userSelect: 'none' }}>
               View transcript ({convData.turns.length} turns)
             </summary>
-            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8, paddingRight: 4 }} className="hide-scrollbar">
+            <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }} className="hide-scrollbar">
               {convData.turns.map((t, i) => (
                 <div key={i} style={{ display: 'flex', justifyContent: t.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
                   <div style={{ maxWidth: '85%', padding: '7px 10px', borderRadius: t.role === 'assistant' ? '12px 12px 12px 3px' : '12px 12px 3px 12px', background: t.role === 'assistant' ? C.purpleS : C.tealS, fontSize: 12, color: t.role === 'assistant' ? C.purple : C.teal, lineHeight: 1.5, fontWeight: 500 }}>
@@ -601,6 +650,7 @@ function LiveCallMonitor({ sid, leadId, leadName, phone, onDone, onCancel }: {
             </div>
           </details>
         )}
+
         <button onClick={onCancel} style={{ width: '100%', padding: '8px 0', background: 'none', border: 'none', fontSize: 12, color: C.muted, cursor: 'pointer', fontWeight: 600 }}>Skip logging</button>
       </div>
     );
