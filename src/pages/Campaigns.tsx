@@ -6,8 +6,9 @@ import {
 import { C, NeoTile, NeoIcon, ConfirmSheet } from '@/components/Neo';
 import {
   loadLeads, loadCampaigns, saveCampaigns, seedDripCampaigns, updateCampaignLeadStatus,
+  loadLeadCallLogs, assignLeadToCampaign, OUTCOME_TO_CAMPAIGN,
 } from '@/lib/persistence';
-import type { Campaign, CampaignLead, SequenceStep } from '@/lib/persistence';
+import type { Campaign, CampaignLead, SequenceStep, CallOutcome } from '@/lib/persistence';
 
 // ── Sequence templates ────────────────────────────────────────────
 
@@ -55,6 +56,39 @@ export const SCRIPTS: Record<string, string> = {
   voicemail_sms_1: "Hi {{name}}, I left you a voicemail about your property. I have a cash offer ready — no repairs, close fast. Would you have a few minutes to chat?",
 };
 
+// ── Backfill call logs into campaigns ────────────────────────────
+
+const OUTCOME_TO_CAMPAIGN_STATUS: Record<CallOutcome, CampaignLead['status']> = {
+  voicemail:                'voicemail',
+  connected_interested:     'connected',
+  connected_not_interested: 'not_interested',
+  callback_requested:       'callback',
+  no_answer:                'no_answer',
+  hung_up:                  'no_answer',
+};
+
+function backfillFromCallLogs() {
+  const logs = loadLeadCallLogs();
+  if (logs.length === 0) return;
+  const leads = loadLeads();
+  const leadMap = new Map(leads.map(l => [l.id, l]));
+  for (const log of logs) {
+    const campaignName = log.campaignAssigned ?? OUTCOME_TO_CAMPAIGN[log.outcome];
+    if (!campaignName) continue;
+    const lead = leadMap.get(log.leadId);
+    const motivationLevel = lead?.motivationLevel ?? 'warm';
+    assignLeadToCampaign({ leadId: log.leadId, leadName: log.leadName, phone: log.phone, motivationLevel }, campaignName);
+    const campaigns = loadCampaigns();
+    const campaign = campaigns.find(c => c.name === campaignName);
+    if (campaign) {
+      const campLead = campaign.leads.find(l => l.leadId === log.leadId);
+      if (campLead && campLead.status === 'pending') {
+        updateCampaignLeadStatus(campaign.id, log.leadId, OUTCOME_TO_CAMPAIGN_STATUS[log.outcome] ?? 'pending');
+      }
+    }
+  }
+}
+
 // ── Analytics helper ──────────────────────────────────────────────
 
 function stats(camp: Campaign) {
@@ -78,6 +112,7 @@ export default function Campaigns() {
 
   useEffect(() => {
     seedDripCampaigns();
+    backfillFromCallLogs();
     setCampaigns(loadCampaigns());
   }, []);
 

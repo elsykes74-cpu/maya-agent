@@ -292,6 +292,7 @@ export function assignLeadToCampaign(
   lead: { leadId: number; leadName: string; phone: string; motivationLevel: string },
   campaignName: string
 ) {
+  seedDripCampaigns(); // ensure drip campaigns exist before assigning
   const campaigns = loadCampaigns();
   const campaign = campaigns.find(c => c.name === campaignName);
   if (!campaign) return;
