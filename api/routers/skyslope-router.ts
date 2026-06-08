@@ -1,49 +1,43 @@
-import { createHmac } from 'crypto';
 import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
 
 const BASE = "https://api.skyslope.com";
 
-function getCreds() {
-  return {
-    accessKey: process.env.SKYSLOPE_ACCESS_KEY ?? "",
-    accessSecret: process.env.SKYSLOPE_ACCESS_SECRET ?? "",
-    clientId: process.env.SKYSLOPE_CLIENT_ID ?? "",
-    clientSecret: process.env.SKYSLOPE_CLIENT_SECRET ?? "",
-    officeGuid: process.env.SKYSLOPE_OFFICE_GUID ?? "",
-    agentGuid: process.env.SKYSLOPE_AGENT_GUID ?? "",
-    checklistTypeId: parseInt(process.env.SKYSLOPE_CHECKLIST_TYPE_ID ?? "0", 10),
-  };
+// ── OAuth2 bearer token ───────────────────────────────────────────
+
+let tokenCache: { token: string; expiresAt: number } | null = null;
+let discoveredTokenUrl: string | null = null;
+
+async function getTokenUrl(): Promise<string> {
+  if (discoveredTokenUrl) return discoveredTokenUrl;
+  try {
+    const res = await fetch(`${BASE}/.well-known/openid-configuration`, { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const cfg = await res.json() as { token_endpoint?: string };
+      if (cfg.token_endpoint) {
+        discoveredTokenUrl = cfg.token_endpoint;
+        return discoveredTokenUrl;
+      }
+    }
+  } catch { /* fall through */ }
+  discoveredTokenUrl = "https://identity.skyslope.com/connect/token";
+  return discoveredTokenUrl;
 }
 
-// In-memory session cache (valid 2 hours per SkySlope docs, we refresh at 1h55m)
-let sessionCache: { token: string; expiresAt: number } | null = null;
+async function getBearerToken(): Promise<string> {
+  if (tokenCache && Date.now() < tokenCache.expiresAt) return tokenCache.token;
 
-async function getSessionToken(): Promise<string> {
-  if (sessionCache && Date.now() < sessionCache.expiresAt) {
-    return sessionCache.token;
+  const clientId = process.env.SKYSLOPE_CLIENT_ID ?? "";
+  const clientSecret = process.env.SKYSLOPE_CLIENT_SECRET ?? "";
+  if (!clientId || !clientSecret) {
+    throw new Error("SkySlope not configured — add SKYSLOPE_CLIENT_ID and SKYSLOPE_CLIENT_SECRET to Vercel env vars.");
   }
 
-  const { accessKey, accessSecret, clientId, clientSecret } = getCreds();
-  if (!accessKey || !accessSecret || !clientId || !clientSecret) {
-    throw new Error(
-      "SkySlope credentials incomplete. Add SKYSLOPE_ACCESS_SECRET, SKYSLOPE_CLIENT_ID, and SKYSLOPE_CLIENT_SECRET to Vercel env vars."
-    );
-  }
-
-  const timestamp = new Date().toISOString();
-  const hmac = createHmac('sha256', accessSecret)
-    .update(`${clientId}:${clientSecret}:${timestamp}`)
-    .digest('base64');
-
-  const res = await fetch(`${BASE}/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `SS ${accessKey}:${hmac}`,
-      'Timestamp': timestamp,
-    },
-    body: JSON.stringify({ clientId, clientSecret }),
+  const tokenUrl = await getTokenUrl();
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }).toString(),
   });
 
   if (!res.ok) {
@@ -51,68 +45,109 @@ async function getSessionToken(): Promise<string> {
     throw new Error(`SkySlope auth failed ${res.status}: ${body.slice(0, 200)}`);
   }
 
-  const data = await res.json();
-  const token: string = data.Session ?? data.session ?? data.token ?? "";
-  if (!token) throw new Error("SkySlope auth returned no session token");
+  const data = await res.json() as { access_token?: string; expires_in?: number };
+  const token = data.access_token ?? "";
+  if (!token) throw new Error("SkySlope auth returned no access token");
 
-  // Cache for 1h55m (just under the 2-hour session lifetime)
-  sessionCache = { token, expiresAt: Date.now() + 115 * 60 * 1000 };
+  const expiresIn = data.expires_in ?? 3600;
+  tokenCache = { token, expiresAt: Date.now() + (expiresIn - 60) * 1000 };
   return token;
 }
 
 async function skySlopeReq(path: string, options: RequestInit = {}) {
-  const token = await getSessionToken();
+  const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${token}`,
       ...((options.headers as Record<string, string>) ?? {}),
     },
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    throw new Error(`SkySlope ${res.status}: ${body.slice(0, 200)}`);
+    throw new Error(`SkySlope ${res.status}: ${body.slice(0, 300)}`);
   }
 
   const text = await res.text();
   return text ? JSON.parse(text) : {};
 }
 
+// ── Dynamic ID discovery (office, agent, checklist type) ──────────
+
+interface DiscoveredIds { officeGuid: string; agentGuid: string; checklistTypeId: number }
+let discoveryCache: (DiscoveredIds & { expiresAt: number }) | null = null;
+
+function pickFromResponse(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  const d = data as Record<string, unknown>;
+  const candidate = d?.value ?? d?.offices ?? d?.users ?? d?.checklistTypes ?? d?.items ?? [];
+  return Array.isArray(candidate) ? candidate : [];
+}
+
+async function discoverIds(): Promise<DiscoveredIds> {
+  if (discoveryCache && Date.now() < discoveryCache.expiresAt) return discoveryCache;
+
+  // Office — first accessible office
+  const officeEnv = process.env.SKYSLOPE_OFFICE_GUID ?? "";
+  let officeGuid = officeEnv;
+  if (!officeGuid) {
+    const officeData = await skySlopeReq("/api/offices");
+    const offices = pickFromResponse(officeData) as Array<{ officeGuid?: string; guid?: string }>;
+    officeGuid = offices[0]?.officeGuid ?? offices[0]?.guid ?? "";
+  }
+
+  // Agent — look up by email if provided, else first user
+  const agentEnv = process.env.SKYSLOPE_AGENT_GUID ?? "";
+  let agentGuid = agentEnv;
+  if (!agentGuid) {
+    const email = process.env.SKYSLOPE_AGENT_EMAIL ?? "";
+    const qs = email ? `?email=${encodeURIComponent(email)}` : "";
+    const userData = await skySlopeReq(`/api/users${qs}`);
+    const users = pickFromResponse(userData) as Array<{ userGuid?: string; guid?: string }>;
+    agentGuid = users[0]?.userGuid ?? users[0]?.guid ?? "";
+  }
+
+  // Checklist type — first Sale type
+  const checklistEnv = parseInt(process.env.SKYSLOPE_CHECKLIST_TYPE_ID ?? "0", 10);
+  let checklistTypeId = checklistEnv;
+  if (!checklistTypeId) {
+    const clData = await skySlopeReq("/api/checklistTypes?transactionType=Sale");
+    const types = pickFromResponse(clData) as Array<{ id?: number; checklistTypeId?: number }>;
+    checklistTypeId = types[0]?.id ?? types[0]?.checklistTypeId ?? 0;
+  }
+
+  discoveryCache = { officeGuid, agentGuid, checklistTypeId, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+  return discoveryCache;
+}
+
+// ── Address parser ────────────────────────────────────────────────
+
 function parseAddress(address: string) {
   const parts = address.split(",").map(s => s.trim());
   const fullStreet = parts[0] || address;
   const city = parts[1] || "";
   const stateZipPart = parts[2] || "";
-
-  // Split "142 Maple St" → streetNumber="142", streetAddress="Maple St"
   const streetMatch = fullStreet.match(/^(\S+)\s+(.+)$/);
   const streetNumber = streetMatch?.[1] ?? "0";
   const streetAddress = streetMatch?.[2] ?? fullStreet;
-
   const stateZipMatch = stateZipPart.match(/^([A-Z]{2})\s*(\d{5})?/);
   const state = stateZipMatch?.[1] ?? "MA";
   const zip = stateZipMatch?.[2] ?? "00000";
-
   return { streetNumber, streetAddress, city, state, zip };
 }
 
+// ── Router ────────────────────────────────────────────────────────
+
 export const skyslopeRouter = createRouter({
   configStatus: publicQuery.query(() => {
-    const c = getCreds();
+    const clientId = process.env.SKYSLOPE_CLIENT_ID ?? "";
+    const clientSecret = process.env.SKYSLOPE_CLIENT_SECRET ?? "";
     return {
-      hasAccessKey: !!c.accessKey,
-      hasAccessSecret: !!c.accessSecret,
-      hasClientId: !!c.clientId,
-      hasClientSecret: !!c.clientSecret,
-      hasOfficeGuid: !!c.officeGuid,
-      hasAgentGuid: !!c.agentGuid,
-      hasChecklistTypeId: c.checklistTypeId > 0,
-      fullyConfigured: !!(
-        c.accessKey && c.accessSecret && c.clientId && c.clientSecret &&
-        c.officeGuid && c.agentGuid && c.checklistTypeId > 0
-      ),
+      hasClientId: !!clientId,
+      hasClientSecret: !!clientSecret,
+      fullyConfigured: !!(clientId && clientSecret),
     };
   }),
 
@@ -123,10 +158,15 @@ export const skyslopeRouter = createRouter({
       salePrice: z.number().optional(),
     }))
     .mutation(async ({ input }) => {
-      const { officeGuid, agentGuid, checklistTypeId } = getCreds();
+      const { officeGuid, agentGuid, checklistTypeId } = await discoverIds();
+
       if (!officeGuid || !agentGuid || !checklistTypeId) {
         throw new Error(
-          "Missing SKYSLOPE_OFFICE_GUID, SKYSLOPE_AGENT_GUID, or SKYSLOPE_CHECKLIST_TYPE_ID in Vercel env vars."
+          `SkySlope setup incomplete — could not resolve: ${[
+            !officeGuid && "office",
+            !agentGuid && "agent",
+            !checklistTypeId && "checklist type",
+          ].filter(Boolean).join(", ")}. Add SKYSLOPE_AGENT_EMAIL to Vercel env vars if agent lookup fails.`
         );
       }
 
@@ -164,14 +204,14 @@ export const skyslopeRouter = createRouter({
   listTransactions: publicQuery
     .query(async () => {
       const data = await skySlopeReq("/api/files/sales");
-      const items = Array.isArray(data) ? data : (data?.value ?? data?.sales ?? data?.items ?? []);
-      return (items as unknown[]).slice(0, 50);
+      const items = pickFromResponse(data);
+      return items.slice(0, 50) as unknown[];
     }),
 
   getOffices: publicQuery
     .query(async () => {
       const data = await skySlopeReq("/api/offices");
-      const items = Array.isArray(data) ? data : (data?.value ?? data?.offices ?? []);
+      const items = pickFromResponse(data);
       return items as Array<{ officeGuid: string; name: string }>;
     }),
 });
