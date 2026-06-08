@@ -696,14 +696,10 @@ function SkySlopeSection({ lead }: { lead: Lead }) {
           <div>
             <p style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: '0 0 6px' }}>Setup required</p>
             <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.6, fontWeight: 500 }}>
-              Contact your SkySlope Customer Success Manager for your Client ID &amp; Secret, then add{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_ACCESS_SECRET</span>,{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_ID</span>,{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_SECRET</span>,{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_OFFICE_GUID</span>,{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_AGENT_GUID</span>, and{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CHECKLIST_TYPE_ID</span>{' '}
-              to Vercel environment variables.
+              Add{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_ID</span> and{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_SECRET</span>{' '}
+              to Vercel → app project → Environment Variables, then redeploy.
             </p>
           </div>
         ) : saleGuid ? (
