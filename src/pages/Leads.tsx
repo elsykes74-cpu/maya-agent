@@ -697,9 +697,11 @@ function SkySlopeSection({ lead }: { lead: Lead }) {
             <p style={{ fontSize: 14, fontWeight: 700, color: C.text, margin: '0 0 6px' }}>Setup required</p>
             <p style={{ fontSize: 13, color: C.muted, margin: 0, lineHeight: 1.6, fontWeight: 500 }}>
               Add{' '}
-              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_ID</span> and{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_ACCESS_KEY</span>,{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_ACCESS_SECRET</span>,{' '}
+              <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_ID</span>, and{' '}
               <span style={{ fontFamily: 'monospace', fontSize: 11 }}>SKYSLOPE_CLIENT_SECRET</span>{' '}
-              to Vercel → app project → Environment Variables, then redeploy.
+              to Vercel → maya-agent project → Environment Variables, then redeploy.
             </p>
           </div>
         ) : saleGuid ? (
