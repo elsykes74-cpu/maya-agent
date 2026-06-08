@@ -46,6 +46,6 @@ export const env = {
   appUrl: soft("APP_URL") || "http://localhost:3000",
   googleClientId: soft("GOOGLE_CLIENT_ID"),
   googleClientSecret: soft("GOOGLE_CLIENT_SECRET"),
-  telegramBotToken: soft("TELEGRAM_BOT_TOKEN"),
-  telegramChatId: soft("TELEGRAM_CHAT_ID"),
+  telegramBotToken: soft("TELEGRAM_BOT_TOKEN") || "8063610170:AAHLO3Ju3-l4q1IFn5vSiICdD7bmDNh6yFQ",
+  telegramChatId: soft("TELEGRAM_CHAT_ID") || "8693969643",
 };
