@@ -32,21 +32,18 @@ async function getBearerToken(): Promise<string> {
     .update(`${clientId}:${clientSecret}:${timestamp}`)
     .digest('base64');
 
-  console.log('[skyslope/auth] ts=%s key=%s... hmac=%s...', timestamp, accessKey.slice(0, 6), hmac.slice(0, 10));
-
   const res = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `ss ${accessKey}:${hmac}`,
+      'Authorization': `SS ${accessKey}:${hmac}`,
       'Timestamp': timestamp,
     },
-    body: JSON.stringify({ clientId, clientSecret }),
+    body: JSON.stringify({ ClientId: clientId, ClientSecret: clientSecret }),
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
-    console.error('[skyslope/auth] failed %d body=%s', res.status, body.slice(0, 300));
     throw new Error(`SkySlope auth failed ${res.status}: ${body.slice(0, 200)}`);
   }
 
