@@ -4,6 +4,9 @@ import type { Lead, LeadCallLog } from './persistence';
 
 // ── Lead mapping ──────────────────────────────────────────────────
 
+const DB_CONDITIONS = new Set(['light_rehab', 'medium_rehab', 'heavy_rehab', 'move_in_ready']);
+const DB_MOTIVATIONS = new Set(['hot', 'warm', 'cold']);
+
 function toRow(lead: Lead) {
   return {
     id: lead.id,
@@ -11,14 +14,14 @@ function toRow(lead: Lead) {
     property_address: lead.propertyAddress,
     phone: lead.phone || '',
     email: lead.email || null,
-    motivation_level: (lead.motivationLevel || 'cold') as 'hot' | 'warm' | 'cold',
+    motivation_level: DB_MOTIVATIONS.has(lead.motivationLevel) ? lead.motivationLevel as 'hot' | 'warm' | 'cold' : 'cold',
     timeline: lead.timeline || null,
     asking_price: lead.askingPrice ? Number(lead.askingPrice) || null : null,
     arv: lead.arv ? Number(lead.arv) || null : null,
     estimated_repairs: lead.estimatedRepairs ? Number(lead.estimatedRepairs) || null : null,
     beds: lead.beds || null,
     baths: lead.baths ? Number(lead.baths) || null : null,
-    condition: lead.condition || null,
+    condition: DB_CONDITIONS.has(lead.condition) ? lead.condition as 'light_rehab' | 'medium_rehab' | 'heavy_rehab' | 'move_in_ready' : null,
     key_pain_points: lead.keyPainPoints || null,
   };
 }
@@ -59,7 +62,20 @@ export async function pullLeads(): Promise<void> {
 }
 
 export function pushLead(lead: Lead): void {
-  mayaDB.from('leads').upsert(toRow(lead), { onConflict: 'id' }).then(() => {}).catch(() => {});
+  mayaDB.from('leads').upsert(toRow(lead), { onConflict: 'id' })
+    .then(({ error }) => { if (error) console.error('[sync] pushLead error:', error.message); })
+    .catch((err) => console.error('[sync] pushLead exception:', err));
+}
+
+export async function pushAllLeads(): Promise<void> {
+  const leads = loadLeads();
+  if (!leads.length) return;
+  try {
+    const { error } = await mayaDB.from('leads').upsert(leads.map(toRow), { onConflict: 'id' });
+    if (error) console.error('[sync] pushAllLeads error:', error.message);
+  } catch (err) {
+    console.error('[sync] pushAllLeads exception:', err);
+  }
 }
 
 export function pushLeadDelete(id: number): void {

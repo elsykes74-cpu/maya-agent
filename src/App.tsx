@@ -19,12 +19,13 @@ import LeadFinder from './pages/LeadFinder'
 import Photos from './pages/Photos'
 import Analytics from './pages/Analytics'
 import Layout from './components/Layout'
-import { pullLeads, pullCallLogs } from './lib/sync'
+import { pullLeads, pullCallLogs, pushAllLeads } from './lib/sync'
 
 export default function App() {
   useEffect(() => {
     pullLeads();
     pullCallLogs();
+    pushAllLeads();
   }, []);
 
   return (
