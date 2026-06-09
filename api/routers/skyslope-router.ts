@@ -27,7 +27,7 @@ async function getBearerToken(): Promise<string> {
     );
   }
 
-  console.log('[skyslope] key=%s cid=%s csec=%s', accessKey.slice(0, 8), clientId.slice(0, 6), clientSecret.slice(0, 6));
+  console.error('[skyslope/debug] key=%s cid=%s csec=%s secret_len=%d', accessKey.slice(0, 8), clientId.slice(0, 6), clientSecret.slice(0, 6), accessSecret.length);
 
   const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const hmac = createHmac('sha256', accessSecret)
