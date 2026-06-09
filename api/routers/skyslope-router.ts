@@ -27,7 +27,7 @@ async function getBearerToken(): Promise<string> {
     );
   }
 
-  const timestamp = new Date().toISOString();
+  const timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const hmac = createHmac('sha256', accessSecret)
     .update(`${clientId}:${clientSecret}:${timestamp}`)
     .digest('base64');
@@ -36,7 +36,7 @@ async function getBearerToken(): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `SS ${accessKey}:${hmac}`,
+      'Authorization': `ss ${accessKey}:${hmac}`,
       'Timestamp': timestamp,
     },
     body: JSON.stringify({ clientId, clientSecret }),
