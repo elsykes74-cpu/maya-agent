@@ -65,7 +65,7 @@ function say(text: string, voice = "Google.en-US-Neural2-F"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="2" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="auto" timeout="15" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
@@ -252,7 +252,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
     // With AI config cached after first call, Supabase latency drops to ~0 on subsequent turns.
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
     const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 5000);
+      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 25000);
     });
 
     const work = (async () => {
