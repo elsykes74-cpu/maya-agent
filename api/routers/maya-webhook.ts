@@ -65,7 +65,7 @@ function say(text: string, voice = "Google.en-US-Neural2-F"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="auto" timeout="15" action="${escXml(action)}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="3" timeout="15" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
@@ -264,7 +264,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
       const body = await c.req.parseBody();
       const speech = (body["SpeechResult"] as string) ?? "";
       const callSid = (body["CallSid"] as string) ?? "";
-      console.log("[maya/respond] speech:", speech.slice(0, 80), "callSid:", callSid);
+      console.error("[maya/respond] SpeechResult=%s callSid=%s", JSON.stringify(speech), callSid);
 
       const [turns, { systemPrompt, elevenlabs }] = await Promise.all([
         callSid ? loadConversation(callSid) : Promise.resolve([]),
