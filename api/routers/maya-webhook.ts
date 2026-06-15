@@ -280,8 +280,12 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
       try {
         mayaResponse = await getMayaResponse(systemPrompt, updatedTurns, name, address);
       } catch (err) {
-        console.error("[maya/respond] Claude error:", err);
-        mayaResponse = "Sorry about that — can you say that again?";
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[maya/respond] Claude error:", errMsg);
+        // Use a neutral bridge response instead of looping "say that again"
+        mayaResponse = name
+          ? `Thanks for picking up. I work with a local buyer group here in Western Mass — we've been looking at properties in your area. Is now an okay time to chat briefly about ${address || "your property"}?`
+          : "Thanks for picking up. I work with a local buyer group — we've been looking at properties in your area. Is now an okay time to chat briefly?";
       }
 
       const endCall = mayaResponse.includes("[END_CALL]");
@@ -321,8 +325,11 @@ ${gather(respondUrl(appUrl, name, address, voice), spokenTts)}
       const name = c.req.query("name") ?? "";
       const address = c.req.query("address") ?? "";
       const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const bridgeMsg = name
+        ? `Thanks for bearing with me. I work with a local buyer group here in Western Mass — we've been looking at properties in your area. Is now an okay time to chat briefly about ${address || "your property"}?`
+        : "Thanks for bearing with me. I work with a local buyer group — we've been looking at properties in your area. Is now an okay time to chat briefly?";
       return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), say("Sorry, one moment — can you say that again?", voice))}
+${gather(respondUrl(appUrl, name, address, voice), say(bridgeMsg, voice))}
 <Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
 </Response>`);
     }
