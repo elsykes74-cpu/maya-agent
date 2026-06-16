@@ -162,6 +162,27 @@ COMPLIANCE RULES:
 TONE:
 Calm, confident, empathetic. You are solving a problem, not selling a product. Never rush. Never argue. Always end by moving the conversation forward.`;
 
+function scriptedFallback(priorTurnCount: number, name: string, address: string): string {
+  const first = name.split(" ")[0];
+  const prop = address || "your property";
+  // Cycle through conversation stages so the call progresses even when Claude is unavailable
+  const stage = Math.floor(priorTurnCount / 2);
+  switch (stage) {
+    case 0:
+      return first
+        ? `Hey ${first}, thanks for picking up. Are you still the owner of the property at ${prop}?`
+        : `Thanks for picking up. Are you the owner of the property we've been looking at?`;
+    case 1:
+      return `Got it. We work with a local buyer group here in Western Mass — we buy properties as-is, no repairs needed, no agent fees. Have you had any thoughts about selling?`;
+    case 2:
+      return `Totally understand. We can work around your timeline — no rush. Would it be okay if I sent over a quick text with some info on how we work?`;
+    case 3:
+      return `Of course. Could I grab the best number for a text, or would email work better for you?`;
+    default:
+      return `I really appreciate your time today. We'll follow up shortly. Hope you have a great rest of your day! [END_CALL]`;
+  }
+}
+
 export function createMayaWebhookRouter() {
   const app = new Hono();
 
@@ -282,10 +303,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         console.error("[maya/respond] Claude error:", errMsg);
-        // Use a neutral bridge response instead of looping "say that again"
-        mayaResponse = name
-          ? `Thanks for picking up. I work with a local buyer group here in Western Mass — we've been looking at properties in your area. Is now an okay time to chat briefly about ${address || "your property"}?`
-          : "Thanks for picking up. I work with a local buyer group — we've been looking at properties in your area. Is now an okay time to chat briefly?";
+        mayaResponse = scriptedFallback(turns.length, name, address);
       }
 
       const endCall = mayaResponse.includes("[END_CALL]");
@@ -325,11 +343,8 @@ ${gather(respondUrl(appUrl, name, address, voice), spokenTts)}
       const name = c.req.query("name") ?? "";
       const address = c.req.query("address") ?? "";
       const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
-      const bridgeMsg = name
-        ? `Thanks for bearing with me. I work with a local buyer group here in Western Mass — we've been looking at properties in your area. Is now an okay time to chat briefly about ${address || "your property"}?`
-        : "Thanks for bearing with me. I work with a local buyer group — we've been looking at properties in your area. Is now an okay time to chat briefly?";
       return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), say(bridgeMsg, voice))}
+${gather(respondUrl(appUrl, name, address, voice), say(scriptedFallback(0, name, address), voice))}
 <Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
 </Response>`);
     }
