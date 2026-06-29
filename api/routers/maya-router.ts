@@ -172,7 +172,6 @@ export const mayaRouter = createRouter({
 
       const turns = (data?.turns ?? []) as ConversationTurn[];
 
-      // No conversation recorded at all
       if (turns.length === 0) {
         if (input.duration < 8) {
           return { outcome: "no_answer" as const, notes: "Phone rang but no one answered.", confidence: 0.85 };
@@ -180,16 +179,49 @@ export const mayaRouter = createRouter({
         return { outcome: "voicemail" as const, notes: `Maya left a voicemail (${input.duration}s). Follow up with a text.`, confidence: 0.82 };
       }
 
-      // Only Maya's opener — person disconnected immediately
       if (turns.length === 1) {
         return { outcome: "hung_up" as const, notes: "Seller disconnected after Maya's greeting.", confidence: 0.78 };
       }
 
-      // Real conversation — ask Claude to classify
       try {
         return await analyzeCallOutcome(turns);
       } catch {
         return { outcome: "connected_not_interested" as const, notes: "Call completed — review transcript for details.", confidence: 0.5 };
       }
+    }),
+
+  callHistoryByPhone: publicQuery
+    .input(z.object({ phone: z.string() }))
+    .query(async ({ input }) => {
+      const digits = input.phone.replace(/\D/g, "");
+      if (!digits) return { calls: [] };
+
+      const e164 = digits.length === 10 ? `+1${digits}` : digits.length === 11 && digits.startsWith("1") ? `+${digits}` : `+${digits}`;
+
+      const { data, error } = await supabase
+        .from("maya_conversations")
+        .select("call_sid, turns, metadata, updated_at")
+        .or(`metadata->>phone.eq.${e164},metadata->>phone.eq.${digits}`)
+        .order("updated_at", { ascending: false })
+        .limit(20);
+
+      if (error) {
+        console.error("[maya/callHistoryByPhone] error:", error.message);
+        return { calls: [] };
+      }
+
+      return {
+        calls: (data ?? []).map((row) => {
+          const meta = (row.metadata as Record<string, unknown>) ?? {};
+          return {
+            callSid: row.call_sid as string,
+            date: row.updated_at as string,
+            recordingUrl: (meta.recording_url as string) ?? null,
+            recordingDuration: (meta.recording_duration as number) ?? null,
+            outcome: (meta.appointment_set ? "appointment_set" : null) as string | null,
+            turns: (row.turns as Array<{ role: string; content: string }>) ?? [],
+          };
+        }),
+      };
     }),
 });

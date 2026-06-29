@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, Mail, Edit3, Check, X, Send, ExternalLink } from 'lucide-react';
+import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, ChevronDown, ChevronUp, Mail, Edit3, Check, X, Send, ExternalLink, Play, Pause, Mic } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
 import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN, addAuditEntry, getSkyslopeTransactionId, setSkyslopeTransactionId, addLeadCallLog, assignLeadToCampaign } from '@/lib/persistence';
 import type { Lead, LeadCallLog, CallOutcome } from '@/lib/persistence';
@@ -117,6 +117,109 @@ export default function Leads() {
   );
 }
 
+function AudioPlayer({ url, duration }: { url: string; duration?: number | null }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const total = duration ?? 0;
+
+  const toggle = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (playing) { el.pause(); } else { el.play(); }
+  };
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  // Extract Recording SID from Twilio URL for the proxy
+  const sidMatch = url.match(/Recordings\/(RE[a-z0-9]+)/i);
+  const proxyUrl = sidMatch ? `/api/maya/recording-audio?sid=${sidMatch[1]}` : url;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 12, background: C.tealS }}>
+      <audio
+        ref={audioRef}
+        src={proxyUrl}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setProgress(0); setCurrentTime(0); }}
+        onTimeUpdate={() => {
+          const el = audioRef.current;
+          if (!el || !el.duration) return;
+          setCurrentTime(el.currentTime);
+          setProgress((el.currentTime / el.duration) * 100);
+        }}
+      />
+      <button onClick={toggle} style={{ width: 32, height: 32, borderRadius: 10, background: C.teal, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+        {playing ? <Pause size={14} color="#fff" strokeWidth={2.5} /> : <Play size={14} color="#fff" strokeWidth={2.5} />}
+      </button>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${progress}%`, background: C.teal, borderRadius: 2, transition: 'width 0.25s linear' }} />
+        </div>
+        <p style={{ fontSize: 11, color: C.teal, margin: '3px 0 0', fontWeight: 600 }}>
+          {fmt(currentTime)}{total > 0 ? ` / ${fmt(total)}` : ''}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CallHistorySection({ phone }: { phone: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = trpc.maya.callHistoryByPhone.useQuery(
+    { phone },
+    { enabled: open, staleTime: 30_000 }
+  );
+
+  const calls = data?.calls ?? [];
+
+  return (
+    <div style={{ marginTop: 10 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="neo-pressed-sm press-sm"
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', border: 'none', borderRadius: 12, cursor: 'pointer', background: 'transparent' }}
+      >
+        <span style={{ fontSize: 13, fontWeight: 700, color: C.teal, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Mic size={14} strokeWidth={2} />
+          Call Recordings
+        </span>
+        {open ? <ChevronUp size={16} color={C.muted} /> : <ChevronDown size={16} color={C.muted} />}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          {isLoading && <p style={{ fontSize: 13, color: C.muted, textAlign: 'center', padding: '12px 0' }}>Loading...</p>}
+          {!isLoading && calls.length === 0 && (
+            <p style={{ fontSize: 13, color: C.muted, textAlign: 'center', padding: '12px 0' }}>No recordings yet</p>
+          )}
+          {calls.map((call) => (
+            <div key={call.callSid} style={{ marginBottom: 10, padding: '12px 14px', borderRadius: 14, background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.06)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: call.recordingUrl ? 8 : 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: C.text, margin: 0 }}>
+                  {new Date(call.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </p>
+                <p style={{ fontSize: 11, color: C.muted, margin: 0 }}>
+                  {new Date(call.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                </p>
+              </div>
+              {call.recordingUrl
+                ? <AudioPlayer url={call.recordingUrl} duration={call.recordingDuration} />
+                : <p style={{ fontSize: 12, color: C.muted, margin: 0, fontStyle: 'italic' }}>No recording available</p>
+              }
+              {call.turns.length > 1 && (
+                <p style={{ fontSize: 11, color: C.muted, margin: '6px 0 0' }}>{call.turns.length} turns in conversation</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen: () => void; onDelete: () => void; onCallRecord: (r: any) => void }) {
   const [calling, setCalling] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
@@ -208,6 +311,8 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
           />
         </div>
       )}
+
+      <CallHistorySection phone={lead.phone} />
     </NeoTile>
   );
 }

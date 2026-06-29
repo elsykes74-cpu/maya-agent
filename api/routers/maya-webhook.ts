@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { supabase } from "../lib/supabase";
 import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
 import { elevenLabsTTSStream } from "../lib/elevenlabs";
@@ -229,6 +230,7 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
       const body = await c.req.parseBody();
       const callSid = (body["CallSid"] as string) ?? "";
       const answeredBy = (body["AnsweredBy"] as string) ?? "";
+      const toPhone = (body["To"] as string) ?? "";
       const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
       console.log("[maya/outbound] callSid:", callSid, "answeredBy:", answeredBy);
 
@@ -249,7 +251,7 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
         : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
 
       if (callSid) {
-        saveConversation(callSid, [{ role: "assistant", content: opener }], { name, address }).catch(err =>
+        saveConversation(callSid, [{ role: "assistant", content: opener }], { name, address, phone: toPhone }).catch(err =>
           console.error("[maya/outbound] save error:", err)
         );
       }
@@ -412,6 +414,65 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
     } catch (err) {
       console.error("[elevenlabs] audio proxy error:", err);
       return c.body("TTS error", 502);
+    }
+  });
+
+  // Recording status callback — save recording URL when Twilio finishes processing
+  app.post("/recording-status", async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const callSid = (body["CallSid"] as string) ?? "";
+      const recordingUrl = (body["RecordingUrl"] as string) ?? "";
+      const recordingStatus = (body["RecordingStatus"] as string) ?? "";
+      const duration = parseInt((body["RecordingDuration"] as string) ?? "0", 10);
+      console.log(`[maya/recording] callSid=${callSid} status=${recordingStatus} url=${recordingUrl}`);
+
+      if (callSid && recordingUrl && recordingStatus === "completed") {
+        const mp3Url = `${recordingUrl}.mp3`;
+        const { data } = await supabase
+          .from("maya_conversations")
+          .select("metadata")
+          .eq("call_sid", callSid)
+          .single();
+        const existingMeta = (data?.metadata as Record<string, unknown>) ?? {};
+        await supabase.from("maya_conversations").upsert(
+          { call_sid: callSid, metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration }, updated_at: new Date().toISOString() },
+          { onConflict: "call_sid" }
+        );
+      }
+    } catch (err) {
+      console.error("[maya/recording] error:", err);
+    }
+    return c.body(null, 204);
+  });
+
+  // Recording audio proxy — streams Twilio recording with server-side auth so browser can play it
+  app.get("/recording-audio", async (c) => {
+    const sid = c.req.query("sid") ?? "";
+    if (!sid) return c.body("Missing sid", 400);
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
+    const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+    if (!accountSid || !authToken) return c.body("Twilio not configured", 503);
+
+    const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${sid}.mp3`;
+    try {
+      const upstream = await fetch(recordingUrl, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        },
+      });
+      if (!upstream.ok) return c.body("Recording not found", 404);
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Cache-Control": "private, max-age=3600",
+        },
+      });
+    } catch (err) {
+      console.error("[maya/recording-audio] error:", err);
+      return c.body("Failed to fetch recording", 502);
     }
   });
 

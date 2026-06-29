@@ -100,6 +100,7 @@ export async function placeTwilioOutboundCall(opts: {
   const webhookUrl = `${baseUrl}/api/maya/outbound?${params}`;
   const statusUrl = `${baseUrl}/api/maya/status`;
 
+  const recordingStatusUrl = `${baseUrl}/api/maya/recording-status`;
   const body = new URLSearchParams({
     To: normalizePhoneNumber(opts.to),
     From: normalizePhoneNumber(fromNumber),
@@ -108,6 +109,9 @@ export async function placeTwilioOutboundCall(opts: {
     StatusCallbackMethod: "POST",
     MachineDetection: "Enable",
     MachineDetectionTimeout: "30",
+    Record: "true",
+    RecordingStatusCallback: recordingStatusUrl,
+    RecordingStatusCallbackMethod: "POST",
   });
 
   try {
