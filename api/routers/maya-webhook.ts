@@ -3,10 +3,11 @@ import type { Context, MiddlewareHandler } from "hono";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { supabase } from "../lib/supabase";
-import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
+import { getMayaResponse, analyzeCallOutcome, type ConversationTurn } from "../lib/anthropic";
 import { elevenLabsTTSStream } from "../lib/elevenlabs";
 import { searchGoogleMapsAddress } from "../lib/serpapi";
 import { researchLead } from "../lib/brave-search";
+import { env } from "../lib/env";
 
 // ---------------------------------------------------------------------------
 // Twilio webhook signature validation
@@ -139,13 +140,43 @@ async function saveConversation(callSid: string, turns: ConversationTurn[], meta
   if (error) console.error("[maya] saveConversation error:", error.message);
 }
 
+async function sendEmail(subject: string, html: string): Promise<void> {
+  if (!env.resendApiKey) return;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: env.resendFromEmail,
+        to: [env.notifyEmail],
+        subject,
+        html,
+      }),
+    });
+    if (!res.ok) console.error("[maya/email] Resend error:", res.status, await res.text());
+    else console.log("[maya/email] sent:", subject);
+  } catch (err) {
+    console.error("[maya/email] fetch error:", err);
+  }
+}
+
 async function extractAndSaveOutcome(callSid: string, turns: ConversationTurn[]) {
   try {
+    const { data: existing } = await supabase
+      .from("maya_conversations")
+      .select("metadata")
+      .eq("call_sid", callSid)
+      .single();
+    const meta = (existing?.metadata as Record<string, unknown>) ?? {};
+
     const fullText = turns.map(t => `${t.role}: ${t.content}`).join("\n");
     const appointmentSet = /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|confirm the detail/i.test(fullText);
 
     await supabase.from("maya_conversations")
-      .update({ metadata: { appointment_set: appointmentSet, outcome_processed: true } })
+      .update({ metadata: { ...meta, appointment_set: appointmentSet, outcome_processed: true } })
       .eq("call_sid", callSid);
   } catch (err) {
     console.error("[maya] outcome save error:", err);
@@ -448,28 +479,109 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
     }
   });
 
-  // Recording status callback — save recording URL when Twilio finishes processing
+  // Recording status callback — save recording URL and send email notification
   app.post("/recording-status", async (c) => {
     try {
       const body = await c.req.parseBody();
       const callSid = (body["CallSid"] as string) ?? "";
       const recordingUrl = (body["RecordingUrl"] as string) ?? "";
       const recordingStatus = (body["RecordingStatus"] as string) ?? "";
+      const recordingSid = (body["RecordingSid"] as string) ?? "";
       const duration = parseInt((body["RecordingDuration"] as string) ?? "0", 10);
       console.log(`[maya/recording] callSid=${callSid} status=${recordingStatus} url=${recordingUrl}`);
 
-      if (callSid && recordingUrl && recordingStatus === "completed") {
-        const mp3Url = `${recordingUrl}.mp3`;
-        const { data } = await supabase
-          .from("maya_conversations")
-          .select("metadata")
-          .eq("call_sid", callSid)
-          .single();
-        const existingMeta = (data?.metadata as Record<string, unknown>) ?? {};
-        await supabase.from("maya_conversations").upsert(
-          { call_sid: callSid, metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration }, updated_at: new Date().toISOString() },
-          { onConflict: "call_sid" }
-        );
+      if (!callSid || !recordingUrl || recordingStatus !== "completed") {
+        return c.body(null, 204);
+      }
+
+      const mp3Url = `${recordingUrl}.mp3`;
+
+      // Fetch full conversation to merge metadata and analyze outcome
+      const { data } = await supabase
+        .from("maya_conversations")
+        .select("metadata, turns")
+        .eq("call_sid", callSid)
+        .single();
+
+      const existingMeta = (data?.metadata as Record<string, unknown>) ?? {};
+      const name = (existingMeta.name as string) ?? "";
+      const address = (existingMeta.address as string) ?? "";
+      const phone = (existingMeta.phone as string) ?? "";
+      const turns = (data?.turns as ConversationTurn[]) ?? [];
+
+      // Save recording URL into metadata (merging, not replacing)
+      await supabase.from("maya_conversations").upsert(
+        { call_sid: callSid, metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration }, updated_at: new Date().toISOString() },
+        { onConflict: "call_sid" }
+      );
+
+      // Analyze outcome and send email notification (non-blocking)
+      if (turns.length > 0) {
+        analyzeCallOutcome(turns).then(async (analysis) => {
+          const isAppointment = analysis.outcome === "connected_interested" &&
+            /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|schedule|appointment|meet|walkthrough/i.test(
+              turns.map(t => t.content).join(" ")
+            );
+          const isFollowUp = analysis.outcome === "callback_requested";
+
+          const durationFmt = duration > 0
+            ? `${Math.floor(duration / 60)}m ${duration % 60}s`
+            : "< 1 min";
+
+          const transcriptHtml = turns
+            .map(t => `<tr><td style="padding:4px 8px;font-weight:700;color:${t.role === "assistant" ? "#7c3aed" : "#374151"};white-space:nowrap;">${t.role === "assistant" ? "Maya" : "Seller"}</td><td style="padding:4px 8px;color:#374151;">${t.content}</td></tr>`)
+            .join("");
+
+          const audioLink = recordingSid
+            ? `<a href="${env.appUrl}/api/maya/recording-audio?sid=${recordingSid}" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#7c3aed;color:white;border-radius:8px;text-decoration:none;font-weight:700;">▶ Play Recording</a>`
+            : "";
+
+          let subjectEmoji = "📋";
+          let subjectLabel = "Call Summary";
+          let alertBanner = "";
+          if (isAppointment) {
+            subjectEmoji = "🏠";
+            subjectLabel = "Appointment Set";
+            alertBanner = `<div style="background:#d1fae5;border:2px solid #10b981;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-weight:700;color:#065f46;font-size:15px;">✅ APPOINTMENT SET — follow up to confirm details</div>`;
+          } else if (isFollowUp) {
+            subjectEmoji = "📞";
+            subjectLabel = "Follow-Up Call Needed";
+            alertBanner = `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-weight:700;color:#92400e;font-size:15px;">📞 FOLLOW-UP REQUESTED — seller asked to be called back</div>`;
+          }
+
+          const html = `
+<div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f9fafb;">
+  <div style="background:white;border-radius:16px;padding:24px;border:1px solid #e5e7eb;">
+    <h2 style="margin:0 0 4px;color:#111827;">Maya Call Report</h2>
+    <p style="margin:0 0 20px;color:#6b7280;font-size:14px;">${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })} ET</p>
+
+    ${alertBanner}
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;width:90px;">Lead</td><td style="padding:6px 0;font-weight:700;color:#111827;">${name || "Unknown"}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Phone</td><td style="padding:6px 0;font-weight:600;color:#111827;">${phone}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Address</td><td style="padding:6px 0;font-weight:600;color:#111827;">${address || "—"}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Duration</td><td style="padding:6px 0;font-weight:600;color:#111827;">${durationFmt}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Outcome</td><td style="padding:6px 0;font-weight:600;color:#7c3aed;">${analysis.outcome.replace(/_/g, " ")}</td></tr>
+    </table>
+
+    <div style="background:#f3f4f6;border-radius:10px;padding:12px 16px;margin-bottom:20px;">
+      <p style="margin:0;font-size:13px;color:#374151;font-style:italic;">${analysis.notes}</p>
+    </div>
+
+    ${audioLink}
+
+    ${turns.length > 0 ? `
+    <h3 style="margin:24px 0 10px;color:#111827;font-size:14px;">Transcript</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;background:#f9fafb;border-radius:10px;overflow:hidden;">
+      ${transcriptHtml}
+    </table>` : ""}
+  </div>
+</div>`;
+
+          const subject = `${subjectEmoji} ${subjectLabel} — ${name || phone} ${address ? `· ${address}` : ""}`;
+          await sendEmail(subject, html);
+        }).catch(err => console.error("[maya/recording] email error:", err));
       }
     } catch (err) {
       console.error("[maya/recording] error:", err);
@@ -516,9 +628,9 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
       console.log(`[maya/status] call ${callSid} → ${callStatus}`);
 
       if ((callStatus === "completed" || callStatus === "no-answer") && callSid) {
-        const turns = await loadConversation(callSid);
-        if (turns.length > 1) {
-          await extractAndSaveOutcome(callSid, turns);
+        const convData = await loadConversation(callSid);
+        if (convData.turns.length > 1) {
+          await extractAndSaveOutcome(callSid, convData.turns);
         }
       }
     } catch (err) {

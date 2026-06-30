@@ -166,11 +166,12 @@ function AudioPlayer({ url, duration }: { url: string; duration?: number | null 
   );
 }
 
-function CallHistorySection({ phone }: { phone: string }) {
+function CallHistorySection({ phone, forceOpen }: { phone: string; forceOpen?: boolean }) {
   const [open, setOpen] = useState(false);
+  const isOpen = open || !!forceOpen;
   const { data, isLoading } = trpc.maya.callHistoryByPhone.useQuery(
     { phone },
-    { enabled: open, staleTime: 30_000 }
+    { enabled: isOpen, staleTime: 0, refetchInterval: isOpen ? 15_000 : false }
   );
 
   const calls = data?.calls ?? [];
@@ -186,10 +187,10 @@ function CallHistorySection({ phone }: { phone: string }) {
           <Mic size={14} strokeWidth={2} />
           Call Recordings
         </span>
-        {open ? <ChevronUp size={16} color={C.muted} /> : <ChevronDown size={16} color={C.muted} />}
+        {isOpen ? <ChevronUp size={16} color={C.muted} /> : <ChevronDown size={16} color={C.muted} />}
       </button>
 
-      {open && (
+      {isOpen && (
         <div style={{ marginTop: 8 }}>
           {isLoading && <p style={{ fontSize: 13, color: C.muted, textAlign: 'center', padding: '12px 0' }}>Loading...</p>}
           {!isLoading && calls.length === 0 && (
@@ -224,6 +225,7 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
   const [calling, setCalling] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
+  const [recentCallDone, setRecentCallDone] = useState(false);
 
   const callWithMaya = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -306,13 +308,13 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
             leadName={lead.sellerName}
             phone={lead.phone}
             motivationLevel={lead.motivationLevel}
-            onDone={(rec) => { onCallRecord(rec); setLiveSid(null); }}
+            onDone={(rec) => { onCallRecord(rec); setLiveSid(null); setRecentCallDone(true); }}
             onCancel={() => setLiveSid(null)}
           />
         </div>
       )}
 
-      <CallHistorySection phone={lead.phone} />
+      <CallHistorySection phone={lead.phone} forceOpen={recentCallDone} />
     </NeoTile>
   );
 }
@@ -409,6 +411,7 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
   const [calling, setCalling] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
+  const [recentCallDone, setRecentCallDone] = useState(false);
   const [smsBody, setSmsBody] = useState('');
   const [showSms, setShowSms] = useState(false);
   const [callLogs, setCallLogs] = useState<LeadCallLog[]>([]);
@@ -640,7 +643,7 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
 
           {/* Call Recordings */}
           <NeoTile style={{ marginBottom: 16 }}>
-            <CallHistorySection phone={lead.phone} />
+            <CallHistorySection phone={lead.phone} forceOpen={recentCallDone} />
           </NeoTile>
 
           {/* Actions */}
@@ -668,7 +671,7 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
                 leadName={lead.sellerName}
                 phone={lead.phone}
                 motivationLevel={lead.motivationLevel}
-                onDone={(rec) => { onCallRecord(rec); setLiveSid(null); }}
+                onDone={(rec) => { onCallRecord(rec); setLiveSid(null); setRecentCallDone(true); }}
                 onCancel={() => setLiveSid(null)}
               />
             )}
@@ -757,6 +760,7 @@ function LiveCallMonitor({ sid, leadId, leadName, phone, motivationLevel, onDone
 
   useEffect(() => () => { if (timerRef.current) clearInterval(timerRef.current); }, []);
 
+  const utils = trpc.useUtils();
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
   const save = (outcome: CallOutcome) => {
@@ -785,6 +789,8 @@ function LiveCallMonitor({ sid, leadId, leadName, phone, motivationLevel, onDone
     });
     assignLeadToCampaign({ leadId, leadName, phone, motivationLevel }, OUTCOME_TO_CAMPAIGN[outcome]);
     addAuditEntry({ action: 'call_logged', entityId: leadId, entityName: leadName, detail: `${OUTCOME_LABELS[outcome]} · ${finalTimer.current}s → ${OUTCOME_TO_CAMPAIGN[outcome]}` });
+    // Force-refresh call history so the recording appears immediately
+    utils.maya.callHistoryByPhone.invalidate({ phone });
     onDone(rec);
   };
 
