@@ -5,6 +5,8 @@ import { createRouter, publicQuery } from "../middleware";
 import { placeTwilioOutboundCall } from "../lib/twilio";
 import { supabase } from "../lib/supabase";
 import { env } from "../lib/env";
+import { searchGoogleMapsAddress } from "../lib/serpapi";
+import { researchLead } from "../lib/brave-search";
 import { analyzeCallOutcome } from "../lib/anthropic";
 import type { ConversationTurn } from "../lib/anthropic";
 
@@ -188,6 +190,25 @@ export const mayaRouter = createRouter({
       } catch {
         return { outcome: "connected_not_interested" as const, notes: "Call completed — review transcript for details.", confidence: 0.5 };
       }
+    }),
+
+  propertyResearch: publicQuery
+    .input(z.object({ address: z.string(), name: z.string().default("") }))
+    .query(async ({ input }) => {
+      const serpConfigured = !!(process.env.SERPAPI_KEY ?? "");
+      const braveConfigured = !!env.braveApiKey;
+
+      const [mapsData, braveData] = await Promise.all([
+        serpConfigured && input.address ? searchGoogleMapsAddress(input.address).catch(() => null) : Promise.resolve(null),
+        braveConfigured && input.address ? researchLead(input.name, input.address, "").catch(() => null) : Promise.resolve(null),
+      ]);
+
+      return {
+        maps: mapsData,
+        distressSignals: braveData?.distressSignals ?? [],
+        braveResults: braveData?.results?.slice(0, 3) ?? [],
+        configured: { serp: serpConfigured, brave: braveConfigured },
+      };
     }),
 
   callHistoryByPhone: publicQuery

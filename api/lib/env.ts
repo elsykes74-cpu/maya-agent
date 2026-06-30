@@ -92,6 +92,7 @@ export const env = {
   kimiOpenUrl: required("KIMI_OPEN_URL"),
   anthropicApiKey: soft("ANTHROPIC_API_KEY") || soft("ANTHROPIC_KEY"),
   braveApiKey: soft("BRAVE_API_KEY"),
+  serpApiKey: soft("SERPAPI_KEY"),
   claudeEndpointSecret: soft("CLAUDE_ENDPOINT_SECRET"),
   ownerUnionId: soft("OWNER_UNION_ID"),
   appUrl: soft("APP_URL") || "http://localhost:3000",

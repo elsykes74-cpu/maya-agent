@@ -5,6 +5,8 @@ import { Buffer } from "node:buffer";
 import { supabase } from "../lib/supabase";
 import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
 import { elevenLabsTTSStream } from "../lib/elevenlabs";
+import { searchGoogleMapsAddress } from "../lib/serpapi";
+import { researchLead } from "../lib/brave-search";
 
 // ---------------------------------------------------------------------------
 // Twilio webhook signature validation
@@ -116,13 +118,17 @@ function tts(appUrl: string, text: string, voice: string, el: ElevenLabsConfig |
   return el ? playEl(appUrl, text, el.voiceId) : say(text, voice);
 }
 
-async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
+async function loadConversation(callSid: string): Promise<{ turns: ConversationTurn[]; systemPrompt?: string }> {
   const { data } = await supabase
     .from("maya_conversations")
-    .select("turns")
+    .select("turns, metadata")
     .eq("call_sid", callSid)
     .single();
-  return (data?.turns as ConversationTurn[]) ?? [];
+  const meta = (data?.metadata as Record<string, unknown>) ?? {};
+  return {
+    turns: (data?.turns as ConversationTurn[]) ?? [],
+    systemPrompt: meta.systemPrompt as string | undefined,
+  };
 }
 
 async function saveConversation(callSid: string, turns: ConversationTurn[], metadata: Record<string, unknown> = {}) {
@@ -234,8 +240,29 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
       const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
       console.log("[maya/outbound] callSid:", callSid, "answeredBy:", answeredBy);
 
+      // Run AI config + property research in parallel — research enriches Maya's system prompt
       let elevenlabs: ElevenLabsConfig | null = null;
-      try { ({ elevenlabs } = await getAIConfig()); } catch (err) {
+      let systemPromptOverride: string | null = null;
+      try {
+        const [aiConfig, mapsData, braveData] = await Promise.all([
+          getAIConfig(),
+          address ? searchGoogleMapsAddress(address).catch(() => null) : Promise.resolve(null),
+          (name && address) ? researchLead(name, address, "").catch(() => null) : Promise.resolve(null),
+        ]);
+        elevenlabs = aiConfig.elevenlabs;
+
+        const researchLines: string[] = [];
+        if (mapsData?.summary) researchLines.push(`Google Maps: ${mapsData.summary}`);
+        if (braveData?.distressSignals?.length) researchLines.push(`Distress signals: ${braveData.distressSignals.join(", ")}`);
+        if (braveData?.summary && !braveData.summary.includes("not configured")) researchLines.push(`Web research: ${braveData.summary}`);
+
+        if (researchLines.length > 0) {
+          systemPromptOverride = aiConfig.systemPrompt + `\n\nPRE-CALL RESEARCH (use naturally in conversation, don't read verbatim):\n${researchLines.join("\n")}`;
+          console.log("[maya/outbound] enriched prompt with research:", researchLines.length, "signals");
+        } else {
+          systemPromptOverride = aiConfig.systemPrompt;
+        }
+      } catch (err) {
         console.error("[maya/outbound] getAIConfig error:", err);
       }
 
@@ -251,9 +278,10 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
         : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
 
       if (callSid) {
-        saveConversation(callSid, [{ role: "assistant", content: opener }], { name, address, phone: toPhone }).catch(err =>
-          console.error("[maya/outbound] save error:", err)
-        );
+        saveConversation(callSid, [{ role: "assistant", content: opener }], {
+          name, address, phone: toPhone,
+          ...(systemPromptOverride ? { systemPrompt: systemPromptOverride } : {}),
+        }).catch(err => console.error("[maya/outbound] save error:", err));
       }
 
       return twimlResponse(c, `<Response>
@@ -289,10 +317,13 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
       const callSid = (body["CallSid"] as string) ?? "";
       console.error("[maya/respond] SpeechResult=%s callSid=%s", JSON.stringify(speech), callSid);
 
-      const [turns, { systemPrompt, elevenlabs }] = await Promise.all([
-        callSid ? loadConversation(callSid) : Promise.resolve([]),
+      const [convData, { systemPrompt: basePrompt, elevenlabs }] = await Promise.all([
+        callSid ? loadConversation(callSid) : Promise.resolve({ turns: [], systemPrompt: undefined }),
         getAIConfig(),
       ]);
+      const turns = convData.turns;
+      // Use research-enriched prompt stored at call start if available, fall back to base
+      const systemPrompt = convData.systemPrompt ?? basePrompt;
 
       const updatedTurns: ConversationTurn[] = [
         ...turns,

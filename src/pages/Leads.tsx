@@ -317,6 +317,86 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
   );
 }
 
+function PropertyResearchTile({ address, name }: { address: string; name: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = trpc.maya.propertyResearch.useQuery(
+    { address, name },
+    { enabled: open, staleTime: 5 * 60_000 }
+  );
+
+  const hasDistress = (data?.distressSignals?.length ?? 0) > 0;
+  const hasMaps = !!data?.maps?.summary;
+  const configured = data?.configured;
+
+  return (
+    <NeoTile style={{ marginBottom: 16 }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+      >
+        <span style={{ fontSize: 14, fontWeight: 700, color: C.text, display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ fontSize: 16 }}>🔍</span> Pre-Call Research
+          {hasDistress && <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redS, padding: '2px 8px', borderRadius: 8 }}>
+            {data!.distressSignals.length} signal{data!.distressSignals.length > 1 ? 's' : ''}
+          </span>}
+        </span>
+        {open ? <ChevronUp size={16} color={C.muted} /> : <ChevronDown size={16} color={C.muted} />}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          {isLoading && <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>Researching…</p>}
+
+          {!isLoading && configured && !configured.serp && !configured.brave && (
+            <p style={{ fontSize: 12, color: C.muted, margin: 0, fontStyle: 'italic' }}>
+              Add SERPAPI_KEY or BRAVE_API_KEY to Vercel env vars to enable pre-call research.
+            </p>
+          )}
+
+          {hasDistress && (
+            <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 12, background: C.redS }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.red, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px' }}>Distress Signals</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {data!.distressSignals.map(s => (
+                  <span key={s} style={{ fontSize: 12, fontWeight: 700, color: C.red, background: 'rgba(255,59,48,0.15)', padding: '3px 10px', borderRadius: 8 }}>{s}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasMaps && (
+            <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 12, background: C.tealS }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.teal, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 4px' }}>Google Maps</p>
+              <p style={{ fontSize: 13, color: C.text, margin: 0, fontWeight: 500 }}>{data!.maps!.summary}</p>
+              {data!.maps!.hasActiveListing && (
+                <p style={{ fontSize: 11, fontWeight: 700, color: C.orange, margin: '4px 0 0' }}>Active listing detected</p>
+              )}
+            </div>
+          )}
+
+          {(data?.braveResults?.length ?? 0) > 0 && (
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 6px' }}>Web Results</p>
+              {data!.braveResults.map((r, i) => (
+                <a key={i} href={r.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', marginBottom: 6, padding: '8px 10px', borderRadius: 10, background: 'rgba(0,0,0,0.04)', textDecoration: 'none' }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: C.teal, margin: '0 0 2px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {r.title} <ExternalLink size={10} />
+                  </p>
+                  <p style={{ fontSize: 11, color: C.muted, margin: 0, lineHeight: 1.4 }}>{r.description}</p>
+                </a>
+              ))}
+            </div>
+          )}
+
+          {!isLoading && !hasDistress && !hasMaps && (data?.braveResults?.length ?? 0) === 0 && configured?.serp && (
+            <p style={{ fontSize: 13, color: C.muted, margin: 0 }}>No notable signals found for this property.</p>
+          )}
+        </div>
+      )}
+    </NeoTile>
+  );
+}
+
 function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
   lead: Lead;
   onClose: () => void;
@@ -554,6 +634,14 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
               </div>
             </NeoTile>
           )}
+
+          {/* Property Research */}
+          <PropertyResearchTile address={lead.propertyAddress} name={lead.sellerName} />
+
+          {/* Call Recordings */}
+          <NeoTile style={{ marginBottom: 16 }}>
+            <CallHistorySection phone={lead.phone} />
+          </NeoTile>
 
           {/* Actions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
