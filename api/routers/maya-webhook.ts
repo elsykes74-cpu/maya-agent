@@ -261,8 +261,10 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
       const name = c.req.query("name") ?? "";
       const address = c.req.query("address") ?? "";
       const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const notes = c.req.query("notes") ?? "";
+      const motivationLevel = c.req.query("motivation") ?? "";
       const appUrl = getAppUrl(c);
-      console.log("[maya/outbound] appUrl:", appUrl, "name:", name, "address:", address);
+      console.log("[maya/outbound] appUrl:", appUrl, "name:", name, "address:", address, "motivation:", motivationLevel);
 
       const body = await c.req.parseBody();
       const callSid = (body["CallSid"] as string) ?? "";
@@ -271,28 +273,63 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
       const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
       console.log("[maya/outbound] callSid:", callSid, "answeredBy:", answeredBy);
 
-      // Run AI config + property research in parallel — research enriches Maya's system prompt
+      // Fetch previous calls for this lead in parallel with research
       let elevenlabs: ElevenLabsConfig | null = null;
       let systemPromptOverride: string | null = null;
       try {
-        const [aiConfig, mapsData, braveData] = await Promise.all([
+        const [aiConfig, mapsData, braveData, prevCallsResult] = await Promise.all([
           getAIConfig(),
           address ? searchGoogleMapsAddress(address).catch(() => null) : Promise.resolve(null),
           (name && address) ? researchLead(name, address, "").catch(() => null) : Promise.resolve(null),
+          toPhone ? supabase
+            .from("maya_conversations")
+            .select("metadata, turns, updated_at")
+            .or(`metadata->>phone.eq.${toPhone},metadata->>phone.eq.${toPhone.replace(/\D/g, "")}`)
+            .order("updated_at", { ascending: false })
+            .limit(4)
+            .then(r => r.data ?? [])
+            .catch(() => [] as unknown[]) : Promise.resolve([] as unknown[]),
         ]);
         elevenlabs = aiConfig.elevenlabs;
 
-        const researchLines: string[] = [];
-        if (mapsData?.summary) researchLines.push(`Google Maps: ${mapsData.summary}`);
-        if (braveData?.distressSignals?.length) researchLines.push(`Distress signals: ${braveData.distressSignals.join(", ")}`);
-        if (braveData?.summary && !braveData.summary.includes("not configured")) researchLines.push(`Web research: ${braveData.summary}`);
+        // Build INTEL section from all available sources
+        const intelLines: string[] = [];
 
-        if (researchLines.length > 0) {
-          systemPromptOverride = aiConfig.systemPrompt + `\n\nPRE-CALL RESEARCH (use naturally in conversation, don't read verbatim):\n${researchLines.join("\n")}`;
-          console.log("[maya/outbound] enriched prompt with research:", researchLines.length, "signals");
-        } else {
-          systemPromptOverride = aiConfig.systemPrompt;
+        if (motivationLevel) {
+          const motLabel = motivationLevel === "hot" ? "🔥 HOT — seller is highly motivated, respond with urgency and confidence"
+            : motivationLevel === "warm" ? "🌡️ WARM — seller is open but not urgent, build rapport before pushing"
+            : "❄️ COLD — seller may be skeptical, lead with curiosity not pressure";
+          intelLines.push(`Motivation level: ${motLabel}`);
         }
+
+        if (notes) intelLines.push(`Seller's stated pain points: ${notes}`);
+
+        // Previous call history (skip current call if it somehow got saved already)
+        const prevCalls = (prevCallsResult as Array<Record<string, unknown>>).filter(
+          (r: Record<string, unknown>) => r.call_sid !== callSid
+        );
+        if (prevCalls.length > 0) {
+          const historyLines = prevCalls.slice(0, 3).map((call: Record<string, unknown>) => {
+            const meta = (call.metadata as Record<string, unknown>) ?? {};
+            const turns = (call.turns as Array<{ role: string; content: string }>) ?? [];
+            const daysAgo = Math.floor((Date.now() - new Date(call.updated_at as string).getTime()) / 86400000);
+            const when = daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo}d ago`;
+            const outcome = meta.appointment_set ? "appointment set" : meta.last_outcome ? String(meta.last_outcome).replace(/_/g, " ") : `${turns.length} exchanges`;
+            const lastLine = turns.length > 0 ? turns[turns.length - 1].content.substring(0, 80) : "";
+            return `  • ${when}: ${outcome}${lastLine ? ` — last said: "${lastLine}"` : ""}`;
+          });
+          intelLines.push(`Previous call history:\n${historyLines.join("\n")}`);
+        }
+
+        if (mapsData?.summary) intelLines.push(`Property context (Google Maps): ${mapsData.summary}`);
+        if (braveData?.distressSignals?.length) intelLines.push(`Distress signals detected: ${braveData.distressSignals.join(", ")}`);
+        if (braveData?.summary && !braveData.summary.includes("not configured")) intelLines.push(`Web research: ${braveData.summary}`);
+
+        systemPromptOverride = intelLines.length > 0
+          ? aiConfig.systemPrompt + `\n\nLEAD INTEL (use naturally — never read verbatim, weave into conversation):\n${intelLines.join("\n\n")}`
+          : aiConfig.systemPrompt;
+
+        if (intelLines.length > 0) console.log("[maya/outbound] enriched prompt:", intelLines.length, "intel signals");
       } catch (err) {
         console.error("[maya/outbound] getAIConfig error:", err);
       }
@@ -511,7 +548,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
 
       // Save recording URL into metadata (merging, not replacing)
       await supabase.from("maya_conversations").upsert(
-        { call_sid: callSid, metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration }, updated_at: new Date().toISOString() },
+        { call_sid: callSid, metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration, recording_sid: recordingSid }, updated_at: new Date().toISOString() },
         { onConflict: "call_sid" }
       );
 
@@ -578,6 +615,11 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
     </table>` : ""}
   </div>
 </div>`;
+
+          // Persist outcome key to metadata for UI filtering
+          supabase.from("maya_conversations").update({
+            metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration, recording_sid: recordingSid, last_outcome: analysis.outcome },
+          }).eq("call_sid", callSid).then().catch(() => {});
 
           const subject = `${subjectEmoji} ${subjectLabel} — ${name || phone} ${address ? `· ${address}` : ""}`;
           await sendEmail(subject, html);

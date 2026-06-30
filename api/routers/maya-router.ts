@@ -68,6 +68,8 @@ export const mayaRouter = createRouter({
       name: z.string().default(""),
       address: z.string().default(""),
       voice: z.string().default("Google.en-US-Neural2-F"),
+      notes: z.string().default(""),
+      motivationLevel: z.string().default(""),
     }))
     .mutation(async ({ input, ctx }) => {
       const { accountSid, authToken, fromNumber } = await getTwilioConfig();
@@ -87,6 +89,8 @@ export const mayaRouter = createRouter({
         address: input.address,
         appUrl,
         voice: input.voice,
+        notes: input.notes,
+        motivationLevel: input.motivationLevel,
         accountSid,
         authToken,
         fromNumber,
@@ -210,6 +214,33 @@ export const mayaRouter = createRouter({
         configured: { serp: serpConfigured, brave: braveConfigured },
       };
     }),
+
+  allRecordings: publicQuery.query(async () => {
+    const { data } = await supabase
+      .from("maya_conversations")
+      .select("call_sid, metadata, updated_at, turns")
+      .order("updated_at", { ascending: false })
+      .limit(200);
+
+    return {
+      calls: (data ?? []).map((row) => {
+        const meta = (row.metadata as Record<string, unknown>) ?? {};
+        const turns = (row.turns as Array<{ role: string; content: string }>) ?? [];
+        return {
+          callSid: row.call_sid as string,
+          date: row.updated_at as string,
+          name: (meta.name as string) ?? "",
+          phone: (meta.phone as string) ?? "",
+          address: (meta.address as string) ?? "",
+          recordingUrl: (meta.recording_url as string) ?? null,
+          recordingDuration: (meta.recording_duration as number) ?? null,
+          appointmentSet: !!(meta.appointment_set as boolean),
+          lastOutcome: (meta.last_outcome as string) ?? null,
+          turnCount: turns.length,
+        };
+      }),
+    };
+  }),
 
   callHistoryByPhone: publicQuery
     .input(z.object({ phone: z.string() }))

@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, ChevronDown, ChevronUp, Mail, Edit3, Check, X, Send, ExternalLink, Play, Pause, Mic } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, ChevronRight, ChevronDown, ChevronUp, Mail, Edit3, Check, X, Send, ExternalLink, Play, Pause, Mic, Radio } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet, BackBtn } from '@/components/Neo';
 import { loadLeads, saveLeads, addCallRecord, getNextId, getLeadCallLogs, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN, addAuditEntry, getSkyslopeTransactionId, setSkyslopeTransactionId, addLeadCallLog, assignLeadToCampaign } from '@/lib/persistence';
 import type { Lead, LeadCallLog, CallOutcome } from '@/lib/persistence';
@@ -18,15 +18,43 @@ export default function Leads() {
   useEffect(() => { setLeads(loadLeads()); }, []);
   useEffect(() => { if (leads.length > 0) saveLeads(leads); }, [leads]);
 
+  // Fetch all calls/recordings for badges and hub — poll every 30s
+  const { data: allCallsData } = trpc.maya.allRecordings.useQuery(undefined, {
+    staleTime: 30_000, refetchInterval: 30_000,
+  });
+
+  // Build per-phone summary for lead card badges
+  const callSummaryByPhone = useMemo(() => {
+    const map = new Map<string, { count: number; lastDate: string; hasRecording: boolean; appointmentSet: boolean; lastOutcome: string | null }>();
+    for (const rec of allCallsData?.calls ?? []) {
+      const key = rec.phone.replace(/\D/g, "").slice(-10);
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, { count: 1, lastDate: rec.date, hasRecording: !!rec.recordingUrl, appointmentSet: rec.appointmentSet, lastOutcome: rec.lastOutcome });
+      } else {
+        existing.count++;
+        if (rec.recordingUrl) existing.hasRecording = true;
+        if (rec.appointmentSet) existing.appointmentSet = true;
+      }
+    }
+    return map;
+  }, [allCallsData]);
+
+  const getCallSummary = (phone: string) => callSummaryByPhone.get(phone.replace(/\D/g, "").slice(-10));
+
   const filtered = search
     ? leads.filter(l => l.sellerName.toLowerCase().includes(search.toLowerCase()) || l.propertyAddress.toLowerCase().includes(search.toLowerCase()))
-    : filter === 'all' ? leads : leads.filter(l => l.motivationLevel === filter);
+    : filter === 'all' ? leads
+    : filter === 'calls' ? leads
+    : leads.filter(l => l.motivationLevel === filter);
 
+  const totalCalls = allCallsData?.calls.length ?? 0;
   const tabs = [
     { k: 'all', l: 'All', n: leads.length },
     { k: 'hot', l: '🔥 Hot', n: leads.filter(l => l.motivationLevel === 'hot').length },
     { k: 'warm', l: 'Warm', n: leads.filter(l => l.motivationLevel === 'warm').length },
     { k: 'cold', l: 'Cold', n: leads.filter(l => l.motivationLevel === 'cold').length },
+    { k: 'calls', l: '📼 Recordings', n: totalCalls },
   ];
 
   const deleteLead = (id: number) => {
@@ -78,14 +106,19 @@ export default function Leads() {
         ))}
       </div>
 
-      {filtered.map(l => (
-        <LeadCard key={l.id} lead={l}
-          onOpen={() => setSelectedLead(l)}
-          onDelete={() => deleteLead(l.id)}
-          onCallRecord={(rec) => { addCallRecord(rec); }} />
-      ))}
+      {filter === 'calls' ? (
+        <RecordingsHub calls={allCallsData?.calls ?? []} leads={leads} onOpenLead={l => setSelectedLead(l)} />
+      ) : (
+        <>
+          {filtered.map(l => (
+            <LeadCard key={l.id} lead={l}
+              callSummary={getCallSummary(l.phone)}
+              onOpen={() => setSelectedLead(l)}
+              onDelete={() => deleteLead(l.id)}
+              onCallRecord={(rec) => { addCallRecord(rec); }} />
+          ))}
 
-      {filtered.length === 0 && (
+          {filtered.length === 0 && (
         <div style={{ textAlign: 'center', padding: '48px 24px' }}>
           <NeoIcon bg={C.tealS} size={64} round={20} style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Search size={28} color={C.teal} strokeWidth={1.5} />
@@ -96,6 +129,8 @@ export default function Leads() {
             <Plus size={16} strokeWidth={2.5} /> Add Lead
           </button>
         </div>
+          )}
+        </>
       )}
 
       <div style={{ height: 20 }} />
@@ -116,6 +151,165 @@ export default function Leads() {
     </div>
   );
 }
+
+// ─── Recordings Hub ──────────────────────────────────────────────────────────
+
+type CallRecord = { callSid: string; date: string; name: string; phone: string; address: string; recordingUrl: string | null; recordingDuration: number | null; appointmentSet: boolean; lastOutcome: string | null; turnCount: number };
+
+const OUTCOME_COLORS: Record<string, { color: string; bg: string; label: string }> = {
+  connected_interested:     { color: C.green,  bg: C.greenS,  label: '✅ Interested' },
+  appointment_set:          { color: C.green,  bg: C.greenS,  label: '✅ Appt Set' },
+  callback_requested:       { color: C.orange, bg: C.orangeS, label: '📞 Callback' },
+  connected_not_interested: { color: C.red,    bg: C.redS,    label: '👎 Not Interested' },
+  voicemail:                { color: C.muted,  bg: 'rgba(0,0,0,0.05)', label: '📬 Voicemail' },
+  no_answer:                { color: C.muted,  bg: 'rgba(0,0,0,0.05)', label: '🔇 No Answer' },
+  hung_up:                  { color: C.muted,  bg: 'rgba(0,0,0,0.05)', label: '📵 Hung Up' },
+};
+
+function OutcomeBadge({ outcome, appointmentSet }: { outcome: string | null; appointmentSet: boolean }) {
+  const key = appointmentSet ? 'appointment_set' : (outcome ?? '');
+  const style = OUTCOME_COLORS[key] ?? { color: C.muted, bg: 'rgba(0,0,0,0.05)', label: outcome?.replace(/_/g, ' ') ?? 'Unknown' };
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, color: style.color, background: style.bg, borderRadius: 8, padding: '3px 8px', whiteSpace: 'nowrap' }}>
+      {style.label}
+    </span>
+  );
+}
+
+function RecordingsHub({ calls, leads, onOpenLead }: { calls: CallRecord[]; leads: Lead[]; onOpenLead: (l: Lead) => void }) {
+  const [hubFilter, setHubFilter] = useState<'all' | 'recording' | 'appointment' | 'callback'>('all');
+
+  const filtered = calls.filter(c => {
+    if (hubFilter === 'recording') return !!c.recordingUrl;
+    if (hubFilter === 'appointment') return c.appointmentSet;
+    if (hubFilter === 'callback') return c.lastOutcome === 'callback_requested';
+    return true;
+  });
+
+  const fmt = (s: number) => `${Math.floor(s / 60)}m ${s % 60}s`;
+  const fmtDate = (d: string) => {
+    const daysAgo = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+    if (daysAgo === 0) return 'Today';
+    if (daysAgo === 1) return 'Yesterday';
+    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const chips = [
+    { k: 'all' as const,         l: `All (${calls.length})` },
+    { k: 'recording' as const,   l: `🎙 Recordings (${calls.filter(c => c.recordingUrl).length})` },
+    { k: 'appointment' as const, l: `✅ Appointments (${calls.filter(c => c.appointmentSet).length})` },
+    { k: 'callback' as const,    l: `📞 Follow-Ups (${calls.filter(c => c.lastOutcome === 'callback_requested').length})` },
+  ];
+
+  if (calls.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: '48px 24px' }}>
+        <NeoIcon bg={C.tealS} size={64} round={20} style={{ margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Radio size={28} color={C.teal} strokeWidth={1.5} />
+        </NeoIcon>
+        <p style={{ fontSize: 17, fontWeight: 700, color: C.text, margin: '0 0 4px' }}>No calls yet</p>
+        <p style={{ fontSize: 14, color: C.muted }}>Every call Maya makes will appear here.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 16 }} className="hide-scrollbar">
+        {chips.map(c => (
+          <button key={c.k} onClick={() => setHubFilter(c.k)}
+            className={`${hubFilter === c.k ? 'neo-pressed' : 'neo-raised-sm'} press-sm`}
+            style={{ padding: '8px 14px', fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', border: 'none', cursor: 'pointer', color: hubFilter === c.k ? C.teal : C.muted, borderRadius: 14 }}>
+            {c.l}
+          </button>
+        ))}
+      </div>
+
+      {filtered.map(call => {
+        const matchedLead = leads.find(l => l.phone.replace(/\D/g, '').slice(-10) === call.phone.replace(/\D/g, '').slice(-10));
+        const sidMatch = call.recordingUrl?.match(/Recordings\/(RE[a-z0-9]+)/i);
+        const proxyUrl = sidMatch ? `/api/maya/recording-audio?sid=${sidMatch[1]}` : call.recordingUrl ?? '';
+
+        return (
+          <NeoTile key={call.callSid} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>
+                    {call.name || call.phone}
+                  </p>
+                  <OutcomeBadge outcome={call.lastOutcome} appointmentSet={call.appointmentSet} />
+                </div>
+                {call.address && (
+                  <p style={{ fontSize: 12, color: C.muted, margin: '3px 0 0', display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <MapPin size={11} strokeWidth={2} /> {call.address}
+                  </p>
+                )}
+                <p style={{ fontSize: 11, color: C.muted, margin: '3px 0 0', fontWeight: 600 }}>
+                  {fmtDate(call.date)}{call.recordingDuration ? ` · ${fmt(call.recordingDuration)}` : ''} · {call.turnCount} exchanges
+                </p>
+              </div>
+              {matchedLead && (
+                <button onClick={() => onOpenLead(matchedLead)}
+                  className="neo-raised-sm press-sm"
+                  style={{ marginLeft: 8, padding: '6px 12px', borderRadius: 12, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, color: C.teal, background: C.tealS, flexShrink: 0 }}>
+                  Open →
+                </button>
+              )}
+            </div>
+
+            {call.recordingUrl && proxyUrl ? (
+              <AudioPlayerInline proxyUrl={proxyUrl} duration={call.recordingDuration} />
+            ) : (
+              <div style={{ padding: '8px 12px', borderRadius: 12, background: 'rgba(0,0,0,0.03)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Mic size={14} color={C.muted} strokeWidth={2} />
+                <span style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>
+                  {call.turnCount === 0 ? 'No answer / voicemail' : 'Recording processing…'}
+                </span>
+              </div>
+            )}
+          </NeoTile>
+        );
+      })}
+
+      {filtered.length === 0 && (
+        <p style={{ textAlign: 'center', color: C.muted, fontSize: 14, padding: '24px 0' }}>No calls match this filter.</p>
+      )}
+    </div>
+  );
+}
+
+// Inline audio player for the hub (uses pre-computed proxy URL)
+function AudioPlayerInline({ proxyUrl, duration }: { proxyUrl: string; duration: number | null }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const total = duration ?? 0;
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  const toggle = () => { const el = audioRef.current; if (!el) return; playing ? el.pause() : el.play(); };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 12, background: C.tealS }}>
+      <audio ref={audioRef} src={proxyUrl}
+        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setProgress(0); setCurrentTime(0); }}
+        onTimeUpdate={() => { const el = audioRef.current; if (!el?.duration) return; setCurrentTime(el.currentTime); setProgress((el.currentTime / el.duration) * 100); }} />
+      <button onClick={toggle} style={{ width: 32, height: 32, borderRadius: 10, background: C.teal, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}>
+        {playing ? <Pause size={14} color="#fff" strokeWidth={2.5} /> : <Play size={14} color="#fff" strokeWidth={2.5} />}
+      </button>
+      <div style={{ flex: 1 }}>
+        <div style={{ height: 4, borderRadius: 2, background: 'rgba(0,0,0,0.1)', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${progress}%`, background: C.teal, borderRadius: 2, transition: 'width 0.25s linear' }} />
+        </div>
+        <p style={{ fontSize: 11, color: C.teal, margin: '3px 0 0', fontWeight: 600 }}>
+          {fmt(currentTime)}{total > 0 ? ` / ${fmt(total)}` : ''}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function AudioPlayer({ url, duration }: { url: string; duration?: number | null }) {
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -221,7 +415,21 @@ function CallHistorySection({ phone, forceOpen }: { phone: string; forceOpen?: b
   );
 }
 
-function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen: () => void; onDelete: () => void; onCallRecord: (r: any) => void }) {
+function CallBadge({ summary }: { summary?: { count: number; lastDate: string; hasRecording: boolean; appointmentSet: boolean; lastOutcome: string | null } }) {
+  if (!summary) return null;
+  const daysAgo = Math.floor((Date.now() - new Date(summary.lastDate).getTime()) / 86400000);
+  const when = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : `${daysAgo}d ago`;
+  const color = summary.appointmentSet ? C.green : summary.lastOutcome === 'callback_requested' ? C.orange : summary.hasRecording ? C.teal : C.muted;
+  const bg = summary.appointmentSet ? C.greenS : summary.lastOutcome === 'callback_requested' ? C.orangeS : summary.hasRecording ? C.tealS : 'transparent';
+  const label = summary.appointmentSet ? '✅ Appt set' : summary.lastOutcome === 'callback_requested' ? '📞 Callback' : summary.hasRecording ? `🎙 ${summary.count}` : `📞 ${summary.count}`;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color, background: bg, borderRadius: 8, padding: '2px 7px', marginTop: 4 }}>
+      {label} · {when}
+    </span>
+  );
+}
+
+function LeadCard({ lead, callSummary, onOpen, onDelete, onCallRecord }: { lead: Lead; callSummary?: { count: number; lastDate: string; hasRecording: boolean; appointmentSet: boolean; lastOutcome: string | null }; onOpen: () => void; onDelete: () => void; onCallRecord: (r: any) => void }) {
   const [calling, setCalling] = useState(false);
   const [callError, setCallError] = useState<string | null>(null);
   const [liveSid, setLiveSid] = useState<string | null>(null);
@@ -236,7 +444,7 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
       const res = await fetch('/api/trpc/maya.placeCall', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ json: { to: lead.phone, name: lead.sellerName, address: lead.propertyAddress } }),
+        body: JSON.stringify({ json: { to: lead.phone, name: lead.sellerName, address: lead.propertyAddress, notes: lead.keyPainPoints || '', motivationLevel: lead.motivationLevel || '' } }),
         credentials: 'include',
       });
       const data = await res.json();
@@ -260,6 +468,7 @@ function LeadCard({ lead, onOpen, onDelete, onCallRecord }: { lead: Lead; onOpen
           <p style={{ fontSize: 13, color: C.muted, margin: '3px 0 0', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 500 }}>
             <MapPin size={12} strokeWidth={2} /> {lead.propertyAddress}
           </p>
+          <CallBadge summary={callSummary} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <MotTag level={lead.motivationLevel} />
@@ -439,7 +648,7 @@ function LeadDetailSheet({ lead, onClose, onDelete, onUpdate, onCallRecord }: {
       const res = await fetch('/api/trpc/maya.placeCall', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ json: { to: lead.phone, name: lead.sellerName, address: lead.propertyAddress } }),
+        body: JSON.stringify({ json: { to: lead.phone, name: lead.sellerName, address: lead.propertyAddress, notes: lead.keyPainPoints || '', motivationLevel: lead.motivationLevel || '' } }),
         credentials: 'include',
       });
       const data = await res.json();
