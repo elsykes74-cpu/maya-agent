@@ -1,9 +1,13 @@
 import { Hono } from "hono";
 import type { Context, MiddlewareHandler } from "hono";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { supabase } from "../lib/supabase";
-import { getMayaResponse, type ConversationTurn } from "../lib/anthropic";
+import { getMayaResponse, analyzeCallOutcome, type ConversationTurn } from "../lib/anthropic";
 import { elevenLabsTTSStream } from "../lib/elevenlabs";
+import { searchGoogleMapsAddress } from "../lib/serpapi";
+import { researchLead } from "../lib/brave-search";
+import { env } from "../lib/env";
 
 // ---------------------------------------------------------------------------
 // Twilio webhook signature validation
@@ -65,7 +69,7 @@ function say(text: string, voice = "Google.en-US-Neural2-F"): string {
 }
 
 function gather(action: string, content: string): string {
-  return `<Gather input="speech" speechTimeout="2" timeout="10" action="${escXml(action)}" method="POST">${content}</Gather>`;
+  return `<Gather input="speech" speechTimeout="3" timeout="15" action="${escXml(action)}" method="POST">${content}</Gather>`;
 }
 
 function respondUrl(appUrl: string, name: string, address: string, voice: string): string {
@@ -115,13 +119,17 @@ function tts(appUrl: string, text: string, voice: string, el: ElevenLabsConfig |
   return el ? playEl(appUrl, text, el.voiceId) : say(text, voice);
 }
 
-async function loadConversation(callSid: string): Promise<ConversationTurn[]> {
+async function loadConversation(callSid: string): Promise<{ turns: ConversationTurn[]; systemPrompt?: string }> {
   const { data } = await supabase
     .from("maya_conversations")
-    .select("turns")
+    .select("turns, metadata")
     .eq("call_sid", callSid)
     .single();
-  return (data?.turns as ConversationTurn[]) ?? [];
+  const meta = (data?.metadata as Record<string, unknown>) ?? {};
+  return {
+    turns: (data?.turns as ConversationTurn[]) ?? [],
+    systemPrompt: meta.systemPrompt as string | undefined,
+  };
 }
 
 async function saveConversation(callSid: string, turns: ConversationTurn[], metadata: Record<string, unknown> = {}) {
@@ -132,13 +140,43 @@ async function saveConversation(callSid: string, turns: ConversationTurn[], meta
   if (error) console.error("[maya] saveConversation error:", error.message);
 }
 
+async function sendEmail(subject: string, html: string): Promise<void> {
+  if (!env.resendApiKey) return;
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.resendApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: env.resendFromEmail,
+        to: [env.notifyEmail],
+        subject,
+        html,
+      }),
+    });
+    if (!res.ok) console.error("[maya/email] Resend error:", res.status, await res.text());
+    else console.log("[maya/email] sent:", subject);
+  } catch (err) {
+    console.error("[maya/email] fetch error:", err);
+  }
+}
+
 async function extractAndSaveOutcome(callSid: string, turns: ConversationTurn[]) {
   try {
+    const { data: existing } = await supabase
+      .from("maya_conversations")
+      .select("metadata")
+      .eq("call_sid", callSid)
+      .single();
+    const meta = (existing?.metadata as Record<string, unknown>) ?? {};
+
     const fullText = turns.map(t => `${t.role}: ${t.content}`).join("\n");
     const appointmentSet = /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|confirm the detail/i.test(fullText);
 
     await supabase.from("maya_conversations")
-      .update({ metadata: { appointment_set: appointmentSet, outcome_processed: true } })
+      .update({ metadata: { ...meta, appointment_set: appointmentSet, outcome_processed: true } })
       .eq("call_sid", callSid);
   } catch (err) {
     console.error("[maya] outcome save error:", err);
@@ -161,6 +199,27 @@ COMPLIANCE RULES:
 
 TONE:
 Calm, confident, empathetic. You are solving a problem, not selling a product. Never rush. Never argue. Always end by moving the conversation forward.`;
+
+function scriptedFallback(priorTurnCount: number, name: string, address: string): string {
+  const first = name.split(" ")[0];
+  const prop = address || "your property";
+  // Cycle through conversation stages so the call progresses even when Claude is unavailable
+  const stage = Math.floor(priorTurnCount / 2);
+  switch (stage) {
+    case 0:
+      return first
+        ? `Hey ${first}, thanks for picking up. Are you still the owner of the property at ${prop}?`
+        : `Thanks for picking up. Are you the owner of the property we've been looking at?`;
+    case 1:
+      return `Got it. We work with a local buyer group here in Western Mass — we buy properties as-is, no repairs needed, no agent fees. Have you had any thoughts about selling?`;
+    case 2:
+      return `Totally understand. We can work around your timeline — no rush. Would it be okay if I sent over a quick text with some info on how we work?`;
+    case 3:
+      return `Of course. Could I grab the best number for a text, or would email work better for you?`;
+    default:
+      return `I really appreciate your time today. We'll follow up shortly. Hope you have a great rest of your day! [END_CALL]`;
+  }
+}
 
 export function createMayaWebhookRouter() {
   const app = new Hono();
@@ -202,17 +261,76 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
       const name = c.req.query("name") ?? "";
       const address = c.req.query("address") ?? "";
       const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
+      const notes = c.req.query("notes") ?? "";
+      const motivationLevel = c.req.query("motivation") ?? "";
       const appUrl = getAppUrl(c);
-      console.log("[maya/outbound] appUrl:", appUrl, "name:", name, "address:", address);
+      console.log("[maya/outbound] appUrl:", appUrl, "name:", name, "address:", address, "motivation:", motivationLevel);
 
       const body = await c.req.parseBody();
       const callSid = (body["CallSid"] as string) ?? "";
       const answeredBy = (body["AnsweredBy"] as string) ?? "";
+      const toPhone = (body["To"] as string) ?? "";
       const isMachine = answeredBy.startsWith("machine") || answeredBy === "fax";
       console.log("[maya/outbound] callSid:", callSid, "answeredBy:", answeredBy);
 
+      // Fetch previous calls for this lead in parallel with research
       let elevenlabs: ElevenLabsConfig | null = null;
-      try { ({ elevenlabs } = await getAIConfig()); } catch (err) {
+      let systemPromptOverride: string | null = null;
+      try {
+        const [aiConfig, mapsData, braveData, prevCallsResult] = await Promise.all([
+          getAIConfig(),
+          address ? searchGoogleMapsAddress(address).catch(() => null) : Promise.resolve(null),
+          (name && address) ? researchLead(name, address, "").catch(() => null) : Promise.resolve(null),
+          toPhone ? supabase
+            .from("maya_conversations")
+            .select("metadata, turns, updated_at")
+            .or(`metadata->>phone.eq.${toPhone},metadata->>phone.eq.${toPhone.replace(/\D/g, "")}`)
+            .order("updated_at", { ascending: false })
+            .limit(4)
+            .then(r => r.data ?? [])
+            .catch(() => [] as unknown[]) : Promise.resolve([] as unknown[]),
+        ]);
+        elevenlabs = aiConfig.elevenlabs;
+
+        // Build INTEL section from all available sources
+        const intelLines: string[] = [];
+
+        if (motivationLevel) {
+          const motLabel = motivationLevel === "hot" ? "🔥 HOT — seller is highly motivated, respond with urgency and confidence"
+            : motivationLevel === "warm" ? "🌡️ WARM — seller is open but not urgent, build rapport before pushing"
+            : "❄️ COLD — seller may be skeptical, lead with curiosity not pressure";
+          intelLines.push(`Motivation level: ${motLabel}`);
+        }
+
+        if (notes) intelLines.push(`Seller's stated pain points: ${notes}`);
+
+        // Previous call history (skip current call if it somehow got saved already)
+        const prevCalls = (prevCallsResult as Array<Record<string, unknown>>).filter(
+          (r: Record<string, unknown>) => r.call_sid !== callSid
+        );
+        if (prevCalls.length > 0) {
+          const historyLines = prevCalls.slice(0, 3).map((call: Record<string, unknown>) => {
+            const meta = (call.metadata as Record<string, unknown>) ?? {};
+            const turns = (call.turns as Array<{ role: string; content: string }>) ?? [];
+            const daysAgo = Math.floor((Date.now() - new Date(call.updated_at as string).getTime()) / 86400000);
+            const when = daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo}d ago`;
+            const outcome = meta.appointment_set ? "appointment set" : meta.last_outcome ? String(meta.last_outcome).replace(/_/g, " ") : `${turns.length} exchanges`;
+            const lastLine = turns.length > 0 ? turns[turns.length - 1].content.substring(0, 80) : "";
+            return `  • ${when}: ${outcome}${lastLine ? ` — last said: "${lastLine}"` : ""}`;
+          });
+          intelLines.push(`Previous call history:\n${historyLines.join("\n")}`);
+        }
+
+        if (mapsData?.summary) intelLines.push(`Property context (Google Maps): ${mapsData.summary}`);
+        if (braveData?.distressSignals?.length) intelLines.push(`Distress signals detected: ${braveData.distressSignals.join(", ")}`);
+        if (braveData?.summary && !braveData.summary.includes("not configured")) intelLines.push(`Web research: ${braveData.summary}`);
+
+        systemPromptOverride = intelLines.length > 0
+          ? aiConfig.systemPrompt + `\n\nLEAD INTEL (use naturally — never read verbatim, weave into conversation):\n${intelLines.join("\n\n")}`
+          : aiConfig.systemPrompt;
+
+        if (intelLines.length > 0) console.log("[maya/outbound] enriched prompt:", intelLines.length, "intel signals");
+      } catch (err) {
         console.error("[maya/outbound] getAIConfig error:", err);
       }
 
@@ -228,9 +346,10 @@ ${gather(respondUrl(appUrl, "", "", voice), tts(appUrl, opener, voice, elevenlab
         : `Hi there — this is Maya calling. I wanted to reach out about your property. Did I catch you at a bad time?`;
 
       if (callSid) {
-        saveConversation(callSid, [{ role: "assistant", content: opener }], { name, address }).catch(err =>
-          console.error("[maya/outbound] save error:", err)
-        );
+        saveConversation(callSid, [{ role: "assistant", content: opener }], {
+          name, address, phone: toPhone,
+          ...(systemPromptOverride ? { systemPrompt: systemPromptOverride } : {}),
+        }).catch(err => console.error("[maya/outbound] save error:", err));
       }
 
       return twimlResponse(c, `<Response>
@@ -252,7 +371,7 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
     // With AI config cached after first call, Supabase latency drops to ~0 on subsequent turns.
     let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
     const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 5000);
+      deadlineTimer = setTimeout(() => reject(new Error("handler_deadline")), 25000);
     });
 
     const work = (async () => {
@@ -264,12 +383,15 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
       const body = await c.req.parseBody();
       const speech = (body["SpeechResult"] as string) ?? "";
       const callSid = (body["CallSid"] as string) ?? "";
-      console.log("[maya/respond] speech:", speech.slice(0, 80), "callSid:", callSid);
+      console.error("[maya/respond] SpeechResult=%s callSid=%s", JSON.stringify(speech), callSid);
 
-      const [turns, { systemPrompt, elevenlabs }] = await Promise.all([
-        callSid ? loadConversation(callSid) : Promise.resolve([]),
+      const [convData, { systemPrompt: basePrompt, elevenlabs }] = await Promise.all([
+        callSid ? loadConversation(callSid) : Promise.resolve({ turns: [], systemPrompt: undefined }),
         getAIConfig(),
       ]);
+      const turns = convData.turns;
+      // Use research-enriched prompt stored at call start if available, fall back to base
+      const systemPrompt = convData.systemPrompt ?? basePrompt;
 
       const updatedTurns: ConversationTurn[] = [
         ...turns,
@@ -280,8 +402,9 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, opener, voice, el
       try {
         mayaResponse = await getMayaResponse(systemPrompt, updatedTurns, name, address);
       } catch (err) {
-        console.error("[maya/respond] Claude error:", err);
-        mayaResponse = "Sorry about that — can you say that again?";
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[maya/respond] Claude error:", errMsg);
+        mayaResponse = scriptedFallback(turns.length, name, address);
       }
 
       const endCall = mayaResponse.includes("[END_CALL]");
@@ -322,7 +445,7 @@ ${gather(respondUrl(appUrl, name, address, voice), spokenTts)}
       const address = c.req.query("address") ?? "";
       const voice = c.req.query("voice") ?? "Google.en-US-Neural2-F";
       return twimlResponse(c, `<Response>
-${gather(respondUrl(appUrl, name, address, voice), say("Sorry, one moment — can you say that again?", voice))}
+${gather(respondUrl(appUrl, name, address, voice), say(scriptedFallback(0, name, address), voice))}
 <Redirect method="POST">${escXml(noResponseUrl(appUrl, name, address, voice))}</Redirect>
 </Response>`);
     }
@@ -393,6 +516,151 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
     }
   });
 
+  // Recording status callback — save recording URL and send email notification
+  app.post("/recording-status", async (c) => {
+    try {
+      const body = await c.req.parseBody();
+      const callSid = (body["CallSid"] as string) ?? "";
+      const recordingUrl = (body["RecordingUrl"] as string) ?? "";
+      const recordingStatus = (body["RecordingStatus"] as string) ?? "";
+      const recordingSid = (body["RecordingSid"] as string) ?? "";
+      const duration = parseInt((body["RecordingDuration"] as string) ?? "0", 10);
+      console.log(`[maya/recording] callSid=${callSid} status=${recordingStatus} url=${recordingUrl}`);
+
+      if (!callSid || !recordingUrl || recordingStatus !== "completed") {
+        return c.body(null, 204);
+      }
+
+      const mp3Url = `${recordingUrl}.mp3`;
+
+      // Fetch full conversation to merge metadata and analyze outcome
+      const { data } = await supabase
+        .from("maya_conversations")
+        .select("metadata, turns")
+        .eq("call_sid", callSid)
+        .single();
+
+      const existingMeta = (data?.metadata as Record<string, unknown>) ?? {};
+      const name = (existingMeta.name as string) ?? "";
+      const address = (existingMeta.address as string) ?? "";
+      const phone = (existingMeta.phone as string) ?? "";
+      const turns = (data?.turns as ConversationTurn[]) ?? [];
+
+      // Save recording URL into metadata (merging, not replacing)
+      await supabase.from("maya_conversations").upsert(
+        { call_sid: callSid, metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration, recording_sid: recordingSid }, updated_at: new Date().toISOString() },
+        { onConflict: "call_sid" }
+      );
+
+      // Analyze outcome and send email notification (non-blocking)
+      if (turns.length > 0) {
+        analyzeCallOutcome(turns).then(async (analysis) => {
+          const isAppointment = analysis.outcome === "connected_interested" &&
+            /next week|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|schedule|appointment|meet|walkthrough/i.test(
+              turns.map(t => t.content).join(" ")
+            );
+          const isFollowUp = analysis.outcome === "callback_requested";
+
+          const durationFmt = duration > 0
+            ? `${Math.floor(duration / 60)}m ${duration % 60}s`
+            : "< 1 min";
+
+          const transcriptHtml = turns
+            .map(t => `<tr><td style="padding:4px 8px;font-weight:700;color:${t.role === "assistant" ? "#7c3aed" : "#374151"};white-space:nowrap;">${t.role === "assistant" ? "Maya" : "Seller"}</td><td style="padding:4px 8px;color:#374151;">${t.content}</td></tr>`)
+            .join("");
+
+          const audioLink = recordingSid
+            ? `<a href="${env.appUrl}/api/maya/recording-audio?sid=${recordingSid}" style="display:inline-block;margin-top:8px;padding:8px 16px;background:#7c3aed;color:white;border-radius:8px;text-decoration:none;font-weight:700;">▶ Play Recording</a>`
+            : "";
+
+          let subjectEmoji = "📋";
+          let subjectLabel = "Call Summary";
+          let alertBanner = "";
+          if (isAppointment) {
+            subjectEmoji = "🏠";
+            subjectLabel = "Appointment Set";
+            alertBanner = `<div style="background:#d1fae5;border:2px solid #10b981;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-weight:700;color:#065f46;font-size:15px;">✅ APPOINTMENT SET — follow up to confirm details</div>`;
+          } else if (isFollowUp) {
+            subjectEmoji = "📞";
+            subjectLabel = "Follow-Up Call Needed";
+            alertBanner = `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:10px;padding:12px 16px;margin-bottom:16px;font-weight:700;color:#92400e;font-size:15px;">📞 FOLLOW-UP REQUESTED — seller asked to be called back</div>`;
+          }
+
+          const html = `
+<div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f9fafb;">
+  <div style="background:white;border-radius:16px;padding:24px;border:1px solid #e5e7eb;">
+    <h2 style="margin:0 0 4px;color:#111827;">Maya Call Report</h2>
+    <p style="margin:0 0 20px;color:#6b7280;font-size:14px;">${new Date().toLocaleString("en-US", { timeZone: "America/New_York" })} ET</p>
+
+    ${alertBanner}
+
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;">
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;width:90px;">Lead</td><td style="padding:6px 0;font-weight:700;color:#111827;">${name || "Unknown"}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Phone</td><td style="padding:6px 0;font-weight:600;color:#111827;">${phone}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Address</td><td style="padding:6px 0;font-weight:600;color:#111827;">${address || "—"}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Duration</td><td style="padding:6px 0;font-weight:600;color:#111827;">${durationFmt}</td></tr>
+      <tr><td style="padding:6px 0;color:#6b7280;font-size:13px;">Outcome</td><td style="padding:6px 0;font-weight:600;color:#7c3aed;">${analysis.outcome.replace(/_/g, " ")}</td></tr>
+    </table>
+
+    <div style="background:#f3f4f6;border-radius:10px;padding:12px 16px;margin-bottom:20px;">
+      <p style="margin:0;font-size:13px;color:#374151;font-style:italic;">${analysis.notes}</p>
+    </div>
+
+    ${audioLink}
+
+    ${turns.length > 0 ? `
+    <h3 style="margin:24px 0 10px;color:#111827;font-size:14px;">Transcript</h3>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;background:#f9fafb;border-radius:10px;overflow:hidden;">
+      ${transcriptHtml}
+    </table>` : ""}
+  </div>
+</div>`;
+
+          // Persist outcome key to metadata for UI filtering
+          supabase.from("maya_conversations").update({
+            metadata: { ...existingMeta, recording_url: mp3Url, recording_duration: duration, recording_sid: recordingSid, last_outcome: analysis.outcome },
+          }).eq("call_sid", callSid).then().catch(() => {});
+
+          const subject = `${subjectEmoji} ${subjectLabel} — ${name || phone} ${address ? `· ${address}` : ""}`;
+          await sendEmail(subject, html);
+        }).catch(err => console.error("[maya/recording] email error:", err));
+      }
+    } catch (err) {
+      console.error("[maya/recording] error:", err);
+    }
+    return c.body(null, 204);
+  });
+
+  // Recording audio proxy — streams Twilio recording with server-side auth so browser can play it
+  app.get("/recording-audio", async (c) => {
+    const sid = c.req.query("sid") ?? "";
+    if (!sid) return c.body("Missing sid", 400);
+
+    const accountSid = process.env.TWILIO_ACCOUNT_SID ?? "";
+    const authToken = process.env.TWILIO_AUTH_TOKEN ?? "";
+    if (!accountSid || !authToken) return c.body("Twilio not configured", 503);
+
+    const recordingUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Recordings/${sid}.mp3`;
+    try {
+      const upstream = await fetch(recordingUrl, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+        },
+      });
+      if (!upstream.ok) return c.body("Recording not found", 404);
+      return new Response(upstream.body, {
+        status: 200,
+        headers: {
+          "Content-Type": "audio/mpeg",
+          "Cache-Control": "private, max-age=3600",
+        },
+      });
+    } catch (err) {
+      console.error("[maya/recording-audio] error:", err);
+      return c.body("Failed to fetch recording", 502);
+    }
+  });
+
   // Status callback — save outcome when call completes
   app.post("/status", twilioGuard, async (c) => {
     try {
@@ -402,9 +670,9 @@ ${gather(respondUrl(appUrl, name, address, voice), tts(appUrl, prompt, voice, el
       console.log(`[maya/status] call ${callSid} → ${callStatus}`);
 
       if ((callStatus === "completed" || callStatus === "no-answer") && callSid) {
-        const turns = await loadConversation(callSid);
-        if (turns.length > 1) {
-          await extractAndSaveOutcome(callSid, turns);
+        const convData = await loadConversation(callSid);
+        if (convData.turns.length > 1) {
+          await extractAndSaveOutcome(callSid, convData.turns);
         }
       }
     } catch (err) {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
 import { useDarkMode } from '@/hooks/useDarkMode';
-import { Bell, Moon, Shield, Globe } from 'lucide-react';
+import { Bell, Moon, Sun, Shield, Globe } from 'lucide-react';
 import { C, NeoTile, NeoIcon, NeoToggle, BackBtn } from '@/components/Neo';
 
 export default function Settings() {
@@ -22,6 +22,7 @@ export default function Settings() {
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: C.text, letterSpacing: '-0.02em' }}>Settings</h1>
       </div>
 
+      {/* Profile */}
       <NeoTile style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 24 }}>
         <div style={{ width: 56, height: 56, borderRadius: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20, fontWeight: 800, background: `linear-gradient(135deg, ${C.teal}, ${C.blue})`, flexShrink: 0 }}>
           {initials}
@@ -32,12 +33,58 @@ export default function Settings() {
         </div>
       </NeoTile>
 
-      <p className="maya-section-title">General</p>
-      <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
-        <ToggleRow icon={<Bell size={18} color={C.teal} strokeWidth={2} />} bg={C.tealS} label="Push Notifications" value={notif} onToggle={() => setNotif(!notif)} />
-        <ToggleRow icon={<Moon size={18} color={C.purple} strokeWidth={2} />} bg={C.purpleS} label="Dark Mode" value={isDark} onToggle={toggle} last />
+      {/* Appearance */}
+      <p className="maya-section-title">Appearance</p>
+      <NeoTile style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <NeoIcon bg={isDark ? C.purpleS : C.orangeS} size={36} round={12}>
+            {isDark
+              ? <Moon size={18} color={C.purple} strokeWidth={2} />
+              : <Sun size={18} color={C.orange} strokeWidth={2} />
+            }
+          </NeoIcon>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>App Theme</p>
+            <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0' }}>
+              {isDark ? 'Dark mode is active' : 'Light mode is active'}
+            </p>
+          </div>
+          <NeoToggle value={isDark} onChange={toggle} ariaLabel="Toggle app theme" />
+        </div>
+
+        {/* Light / Dark selector chips */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <ThemeChip
+            label="Light"
+            icon={<Sun size={15} strokeWidth={2} />}
+            active={!isDark}
+            activeColor={C.orange}
+            onClick={isDark ? toggle : undefined}
+          />
+          <ThemeChip
+            label="Dark"
+            icon={<Moon size={15} strokeWidth={2} />}
+            active={isDark}
+            activeColor={C.purple}
+            onClick={!isDark ? toggle : undefined}
+          />
+        </div>
       </NeoTile>
 
+      {/* General */}
+      <p className="maya-section-title">General</p>
+      <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
+        <ToggleRow
+          icon={<Bell size={18} color={C.teal} strokeWidth={2} />}
+          bg={C.tealS}
+          label="Push Notifications"
+          value={notif}
+          onToggle={() => setNotif(!notif)}
+          last
+        />
+      </NeoTile>
+
+      {/* Account */}
       <p className="maya-section-title" style={{ marginTop: 24 }}>Account</p>
       <NeoTile style={{ padding: 0, overflow: 'hidden' }}>
         <LinkRow icon={<Shield size={18} color={C.teal} strokeWidth={2} />} bg={C.tealS} label="Privacy & Security" />
@@ -47,6 +94,40 @@ export default function Settings() {
       <p style={{ textAlign: 'center', fontSize: 13, color: C.tertiary, marginTop: 28, fontWeight: 500 }}>Maya Agent v2.0.1</p>
       <div style={{ height: 20 }} />
     </div>
+  );
+}
+
+function ThemeChip({ label, icon, active, activeColor, onClick }: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  activeColor: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        padding: '10px 0',
+        borderRadius: 14,
+        border: `2px solid ${active ? activeColor : 'transparent'}`,
+        background: active ? `${activeColor}20` : 'rgba(128,128,128,0.08)',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'all 0.2s ease',
+        fontSize: 14,
+        fontWeight: 600,
+        color: active ? activeColor : C.muted,
+        outline: 'none',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
 

@@ -10,14 +10,9 @@ export default function Appointments() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
-    const stored = loadAppointments();
-    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
-      const seeded = INITIAL_APPOINTMENTS as Appointment[];
-      saveAppointments(seeded);
-      setAppointments(seeded);
-    } else {
-      setAppointments(stored);
-    }
+    const stored = loadAppointments().filter(a => a.id > 2);
+    saveAppointments(stored);
+    setAppointments(stored);
   }, []);
 
   return (

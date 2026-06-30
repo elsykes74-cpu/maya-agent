@@ -90,13 +90,9 @@ export default function Home() {
   useEffect(() => {
     setLeads(loadLeads());
     setCalls(loadCalls());
-    const stored = loadAppointments();
-    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
-      saveAppointments(INITIAL_APPOINTMENTS as Appointment[]);
-      setAppointments(INITIAL_APPOINTMENTS as Appointment[]);
-    } else {
-      setAppointments(stored);
-    }
+    const stored = loadAppointments().filter(a => a.id > 2);
+    saveAppointments(stored);
+    setAppointments(stored);
   }, []);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -155,7 +151,7 @@ export default function Home() {
               else if (agent.id === 'leads') navigate('/leads');
               else if (agent.id === 'messages') navigate('/sms');
               else if (agent.id === 'workflow') navigate('/ai-config');
-              else if (agent.id === 'camera') navigate('/appointments');
+              else if (agent.id === 'camera') navigate('/photos');
               else if (agent.id === 'instagram') navigate('/leads');
               else if (agent.id === 'whatsapp') navigate('/sms');
               else if (agent.id === 'facebook') navigate('/campaigns');

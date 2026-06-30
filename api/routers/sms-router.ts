@@ -2,8 +2,18 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { smsLogs, smsTemplates } from "../../db/schema";
+import { smsLogs, smsTemplates, aiConfig } from "../../db/schema";
 import { leads, campaignLeads } from "../../db/schema";
+import { sendTwilioSms } from "../lib/twilio";
+
+async function getTwilioCreds(db: ReturnType<typeof getDb>) {
+  const config = await db.query.aiConfig.findFirst();
+  return {
+    accountSid: config?.twilioAccountSid || process.env.TWILIO_ACCOUNT_SID || "",
+    authToken:  config?.twilioAuthToken  || process.env.TWILIO_AUTH_TOKEN  || "",
+    fromNumber: config?.twilioFromNumber || process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "",
+  };
+}
 
 export const smsRouter = createRouter({
   list: publicQuery
@@ -100,6 +110,29 @@ export const smsRouter = createRouter({
       return { success: true };
     }),
 
+  sendOne: publicQuery
+    .input(z.object({
+      to: z.string().min(10),
+      body: z.string().min(1),
+      leadId: z.number().optional(),
+      sequenceDay: z.number().default(0),
+    }))
+    .mutation(async ({ input }) => {
+      const db = getDb();
+      const creds = await getTwilioCreds(db);
+      const result = await sendTwilioSms({ to: input.to, body: input.body, ...creds });
+      if (input.leadId) {
+        await db.insert(smsLogs).values({
+          leadId: input.leadId,
+          sequenceDay: input.sequenceDay,
+          messageContent: input.body,
+          direction: "outbound",
+          status: result.error ? "failed" : "sent",
+        });
+      }
+      return result;
+    }),
+
   // ── Absorbed from Kimi automated_outreach_agent ──────────────────────────────
   // 1. Bulk-send SMS to all pending campaign_leads for a campaign.
   //    day=0 → "Initial Outreach", day=2 → "Day 2 – Follow-up",
@@ -130,7 +163,9 @@ export const smsRouter = createRouter({
         with: { lead: { columns: { id: true, phone: true, sellerName: true } } },
       });
 
+      const creds = await getTwilioCreds(db);
       let sent = 0;
+      let failed = 0;
       for (const cl of clRows) {
         if (!cl.lead?.phone) continue;
         const name    = (cl.lead.sellerName || "there").split(" ")[0];
@@ -138,19 +173,27 @@ export const smsRouter = createRouter({
           .replace(/{name}/g, name)
           .replace(/{address}/g, "");
 
+        const smsResult = await sendTwilioSms({ to: cl.lead.phone, body: content, ...creds });
+
         await db.insert(smsLogs).values({
-          leadId:        cl.lead.id,
-          sequenceDay:   templateDay,
+          leadId:         cl.lead.id,
+          sequenceDay:    templateDay,
           messageContent: content,
-          direction:     "outbound",
-          status:        "sent",
+          direction:      "outbound",
+          status:         smsResult.error ? "failed" : "sent",
         });
         await db.update(campaignLeads)
           .set({ lastAttemptAt: new Date() })
           .where(eq(campaignLeads.id, cl.id));
-        sent++;
+
+        if (smsResult.error) {
+          console.error("[sms] failed to send to lead", cl.lead.id, smsResult.error);
+          failed++;
+        } else {
+          sent++;
+        }
       }
-      return { sent, template: tplName };
+      return { sent, failed, template: tplName };
     }),
 
   // 2. Handle inbound SMS reply — auto-categorise lead status.

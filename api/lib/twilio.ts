@@ -83,6 +83,8 @@ export async function placeTwilioOutboundCall(opts: {
   accountSid?: string;
   authToken?: string;
   fromNumber?: string;
+  notes?: string;
+  motivationLevel?: string;
 }): Promise<TwilioCallResult> {
   const env = getTwilioEnv();
   const accountSid = opts.accountSid || env.accountSid;
@@ -97,9 +99,12 @@ export async function placeTwilioOutboundCall(opts: {
 
   const baseUrl = resolveAppUrl(opts.appUrl);
   const params = new URLSearchParams({ name: opts.name, address: opts.address, voice: opts.voice ?? "Google.en-US-Neural2-F" });
+  if (opts.notes) params.set("notes", opts.notes);
+  if (opts.motivationLevel) params.set("motivation", opts.motivationLevel);
   const webhookUrl = `${baseUrl}/api/maya/outbound?${params}`;
   const statusUrl = `${baseUrl}/api/maya/status`;
 
+  const recordingStatusUrl = `${baseUrl}/api/maya/recording-status`;
   const body = new URLSearchParams({
     To: normalizePhoneNumber(opts.to),
     From: normalizePhoneNumber(fromNumber),
@@ -108,6 +113,9 @@ export async function placeTwilioOutboundCall(opts: {
     StatusCallbackMethod: "POST",
     MachineDetection: "Enable",
     MachineDetectionTimeout: "30",
+    Record: "true",
+    RecordingStatusCallback: recordingStatusUrl,
+    RecordingStatusCallbackMethod: "POST",
   });
 
   try {
@@ -133,6 +141,64 @@ export async function placeTwilioOutboundCall(opts: {
     return { sid: "", status: "failed", error: friendlyError };
   } catch (err: any) {
     console.error("[twilio] outbound call exception:", err);
+    return { sid: "", status: "failed", error: err?.message ?? "Network error reaching Twilio." };
+  }
+}
+
+export async function sendTwilioSms(opts: {
+  to: string;
+  body: string;
+  accountSid?: string;
+  authToken?: string;
+  fromNumber?: string;
+}): Promise<{ sid: string; status: string; error?: string }> {
+  const env = getTwilioEnv();
+  const accountSid = opts.accountSid || env.accountSid;
+  const authToken = opts.authToken || env.credentials[0]?.secret || "";
+  const fromNumber = opts.fromNumber || env.fromNumber;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    return { sid: "", status: "failed", error: "Twilio not configured — add credentials in AI Config." };
+  }
+
+  const params = new URLSearchParams({
+    To: normalizePhoneNumber(opts.to),
+    From: normalizePhoneNumber(fromNumber),
+    Body: opts.body,
+  });
+
+  try {
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      }
+    );
+
+    if (res.ok) {
+      const data: any = await res.json();
+      return { sid: data.sid, status: data.status };
+    }
+
+    const errText = await res.text();
+    console.error("[twilio] sms error:", res.status, errText);
+    let friendlyError = `Twilio error ${res.status}`;
+    try {
+      const errJson = JSON.parse(errText);
+      if (errJson.message) friendlyError = errJson.message;
+      if (errJson.code === 21211) friendlyError = "Invalid 'To' phone number.";
+      if (errJson.code === 21212) friendlyError = "Invalid 'From' number. Check AI Config.";
+      if (errJson.code === 20003) friendlyError = "Twilio auth failed. Check Account SID and Auth Token in AI Config.";
+      if (errJson.code === 21610) friendlyError = "This number has opted out of SMS (STOP message received).";
+    } catch { /* not JSON */ }
+    return { sid: "", status: "failed", error: friendlyError };
+  } catch (err: any) {
+    console.error("[twilio] sms exception:", err);
     return { sid: "", status: "failed", error: err?.message ?? "Network error reaching Twilio." };
   }
 }

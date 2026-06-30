@@ -1125,3 +1125,274 @@ body {
 
 [data-theme="dark"] .neo-search { background: var(--bg); }
 [data-theme="dark"] .neo-search input { color: var(--text); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PREMIUM AESTHETICS — cinematic dark, metallic glass, neon depth
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Cinematic body ──────────────────────────────────────────── */
+[data-theme="dark"] body {
+  background:
+    radial-gradient(ellipse at 18% 0%,   rgba(40,65,140,0.30) 0%, transparent 55%),
+    radial-gradient(ellipse at 82% 5%,   rgba(75,30,130,0.22) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(15,55,80,0.18)  0%, transparent 50%),
+    linear-gradient(170deg, #090B14 0%, #0A0D1A 60%, #080A12 100%);
+  background-attachment: fixed;
+  color: var(--text);
+}
+
+/* ─── Deep glass cards (ios-card / card-3d / maya-tile) ──────── */
+[data-theme="dark"] .ios-card,
+[data-theme="dark"] .card-3d,
+[data-theme="dark"] .maya-tile {
+  background: rgba(11,13,22,0.88);
+  backdrop-filter: blur(28px) saturate(185%);
+  -webkit-backdrop-filter: blur(28px) saturate(185%);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow:
+    0 22px 64px rgba(0,0,0,0.62),
+    0 5px 18px rgba(0,0,0,0.42),
+    inset 0 1.5px 0 rgba(255,255,255,0.15),
+    inset 0 -1px 0 rgba(0,0,0,0.28),
+    0 0 0 0.5px rgba(130,185,215,0.07);
+}
+
+[data-theme="dark"] .ios-card::before,
+[data-theme="dark"] .card-3d::before,
+[data-theme="dark"] .maya-tile::before {
+  background: linear-gradient(
+    138deg,
+    rgba(255,255,255,0.14) 0%,
+    rgba(255,255,255,0.06) 25%,
+    transparent 50%
+  );
+}
+
+[data-theme="dark"] .ios-card:hover,
+[data-theme="dark"] .card-3d:hover,
+[data-theme="dark"] .maya-tile:hover {
+  border-color: rgba(255,255,255,0.13);
+  box-shadow:
+    0 30px 80px rgba(0,0,0,0.70),
+    0 8px 24px rgba(0,0,0,0.48),
+    inset 0 1.5px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(0,0,0,0.32),
+    0 0 0 0.5px rgba(45,212,191,0.10);
+}
+
+/* ─── NeoTile / neo-raised ────────────────────────────────────── */
+[data-theme="dark"] .maya-card,
+[data-theme="dark"] .neo-raised {
+  background: rgba(10,12,21,0.90);
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow:
+    0 14px 44px rgba(0,0,0,0.58),
+    0 3px 10px rgba(0,0,0,0.38),
+    inset 0 1.5px 0 rgba(255,255,255,0.13),
+    inset 0 -1px 0 rgba(0,0,0,0.22),
+    0 0 0 0.5px rgba(130,185,215,0.06);
+}
+
+[data-theme="dark"] .neo-raised-sm {
+  background: rgba(10,12,20,0.82);
+  border: 1px solid rgba(255,255,255,0.07);
+  box-shadow:
+    0 8px 26px rgba(0,0,0,0.52),
+    0 2px 6px rgba(0,0,0,0.32),
+    inset 0 1px 0 rgba(255,255,255,0.10);
+}
+
+[data-theme="dark"] .card-pressed,
+[data-theme="dark"] .neo-pressed {
+  background: rgba(6,8,14,0.90);
+  border: 1px solid rgba(255,255,255,0.05);
+  box-shadow: inset 0 4px 14px rgba(0,0,0,0.55), inset 0 -1px 3px rgba(255,255,255,0.03);
+}
+
+/* ─── Glossy icon tiles ───────────────────────────────────────── */
+[data-theme="dark"] .maya-icon-badge,
+[data-theme="dark"] .icon-3d,
+[data-theme="dark"] .neo-icon-circle {
+  border: 1px solid rgba(255,255,255,0.14);
+  box-shadow:
+    0 6px 20px rgba(0,0,0,0.48),
+    0 1px 4px rgba(0,0,0,0.30),
+    inset 0 1px 0 rgba(255,255,255,0.18);
+}
+
+[data-theme="dark"] .maya-icon-badge::after,
+[data-theme="dark"] .icon-3d::after {
+  background: linear-gradient(
+    140deg,
+    rgba(255,255,255,0.34) 0%,
+    rgba(255,255,255,0.14) 28%,
+    rgba(255,255,255,0.04) 52%,
+    transparent 68%
+  );
+}
+
+/* ─── Active tab glow pill ────────────────────────────────────── */
+[data-theme="dark"] .tab-item.active::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40px;
+  height: 34px;
+  border-radius: 12px;
+  background: rgba(45,212,191,0.11);
+  box-shadow: 0 0 20px rgba(45,212,191,0.24);
+  pointer-events: none;
+  animation: glow-breathe-teal 3.2s ease-in-out infinite;
+}
+
+@keyframes glow-breathe-teal {
+  0%, 100% { opacity: 0.72; }
+  50%       { opacity: 1.00; }
+}
+
+/* ─── Tab bar premium dark ────────────────────────────────────── */
+[data-theme="dark"] .tab-bar {
+  background: rgba(7,9,16,0.96);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  box-shadow:
+    0 -1px 0 rgba(0,0,0,0.60),
+    0 -20px 48px rgba(0,0,0,0.32);
+}
+
+/* ─── Premium buttons (dark) ──────────────────────────────────── */
+[data-theme="dark"] .ios-btn-primary {
+  background: linear-gradient(138deg, #2EE8D4 0%, #17C4B0 55%, #0DA898 100%);
+  box-shadow:
+    0 10px 36px rgba(45,212,191,0.54),
+    0 3px 10px rgba(45,212,191,0.32),
+    inset 0 1.5px 0 rgba(255,255,255,0.32);
+}
+[data-theme="dark"] .ios-btn-primary:active {
+  box-shadow: 0 4px 14px rgba(45,212,191,0.36), inset 0 1px 0 rgba(255,255,255,0.16);
+}
+
+[data-theme="dark"] .ios-btn-green {
+  box-shadow: 0 10px 36px rgba(52,211,153,0.52), 0 3px 10px rgba(52,211,153,0.30), inset 0 1.5px 0 rgba(255,255,255,0.30);
+}
+
+[data-theme="dark"] .ios-btn-red {
+  box-shadow: 0 10px 36px rgba(255,107,107,0.52), 0 3px 10px rgba(255,107,107,0.30), inset 0 1.5px 0 rgba(255,255,255,0.25);
+}
+
+[data-theme="dark"] .ios-btn-orange {
+  box-shadow: 0 10px 36px rgba(255,184,77,0.52), 0 3px 10px rgba(255,184,77,0.30), inset 0 1.5px 0 rgba(255,255,255,0.25);
+}
+
+/* ─── Toggle premium (dark) ───────────────────────────────────── */
+[data-theme="dark"] .toggle-3d.active,
+[data-theme="dark"] .maya-toggle-track.active,
+[data-theme="dark"] .neo-toggle-track.active {
+  background: linear-gradient(135deg, #2EE8D4 0%, #14B8A6 100%);
+  box-shadow: 0 0 14px rgba(45,212,191,0.40);
+}
+
+/* ─── Segmented tabs (dark) ───────────────────────────────────── */
+[data-theme="dark"] .seg-tab.active {
+  background: rgba(45,212,191,0.12);
+  color: var(--teal);
+  box-shadow:
+    0 2px 12px rgba(0,0,0,0.44),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 0 20px rgba(45,212,191,0.10);
+}
+
+/* ─── Bottom sheet (dark) ─────────────────────────────────────── */
+[data-theme="dark"] .bottom-sheet,
+[data-theme="dark"] .neo-sheet {
+  background: rgba(7,9,17,0.97);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-bottom: none;
+  box-shadow:
+    0 -22px 64px rgba(0,0,0,0.58),
+    0 -1px 0 rgba(255,255,255,0.06),
+    inset 0 1.5px 0 rgba(255,255,255,0.10);
+}
+
+/* ─── Glass panel (dark) ──────────────────────────────────────── */
+[data-theme="dark"] .glass-panel {
+  background: rgba(10,12,21,0.84);
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow:
+    0 22px 64px rgba(0,0,0,0.58),
+    0 6px 20px rgba(0,0,0,0.38),
+    inset 0 1.5px 0 rgba(255,255,255,0.12);
+}
+
+/* ─── IOS list (dark) ─────────────────────────────────────────── */
+[data-theme="dark"] .ios-list {
+  background: rgba(10,12,21,0.90);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.50), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+
+/* ─── Maya tile dark ──────────────────────────────────────────── */
+.maya-tile-dark {
+  background: linear-gradient(148deg, #131728 0%, #090B17 100%);
+  border: 1px solid rgba(255,255,255,0.09);
+  box-shadow:
+    0 14px 44px rgba(0,0,0,0.58),
+    0 3px 10px rgba(0,0,0,0.35),
+    inset 0 1.5px 0 rgba(255,255,255,0.10),
+    0 0 0 0.5px rgba(130,185,215,0.06);
+}
+
+/* ─── Inputs (dark premium) ───────────────────────────────────── */
+[data-theme="dark"] .input-3d,
+[data-theme="dark"] .neo-input,
+[data-theme="dark"] .maya-input {
+  background: rgba(6,8,15,0.78);
+  border-color: rgba(255,255,255,0.07);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.03);
+}
+
+[data-theme="dark"] .input-3d:focus,
+[data-theme="dark"] .neo-input:focus,
+[data-theme="dark"] .maya-input:focus {
+  border-color: rgba(45,212,191,0.30);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.42), 0 0 0 3px rgba(45,212,191,0.12);
+}
+
+[data-theme="dark"] .neo-search {
+  background: rgba(6,8,15,0.78);
+  border: 1px solid rgba(255,255,255,0.07);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,0.38);
+}
+
+/* ─── Skeleton premium dark ───────────────────────────────────── */
+[data-theme="dark"] .skeleton,
+[data-theme="dark"] .maya-skeleton {
+  background: linear-gradient(90deg, #0E1020 25%, #1C2038 50%, #0E1020 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* ─── Gold chrome logo (dark mode only) ──────────────────────── */
+[data-theme="dark"] .maya-chrome-logo {
+  background: linear-gradient(
+    178deg,
+    #FFFFFF   0%,
+    #FFE8A0   7%,
+    #D4A040  18%,
+    #F8D060  30%,
+    #B87C10  42%,
+    #ECC040  54%,
+    #C89020  66%,
+    #F0D060  78%,
+    #FFE080  90%,
+    #FFFFFF 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  filter: drop-shadow(0 0 24px rgba(255,200,80,0.55)) drop-shadow(0 2px 10px rgba(0,0,0,0.95));
+}

@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
+import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check, X } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
-import { loadLeads, loadCalls, addCallRecord, clearCalls } from '@/lib/persistence';
-import type { CallRecord } from '@/lib/persistence';
+import { loadLeads, loadCalls, addCallRecord, clearCalls, addLeadCallLog, assignLeadToCampaign, OUTCOME_LABELS, OUTCOME_TO_CAMPAIGN, addAuditEntry } from '@/lib/persistence';
+import type { CallRecord, CallOutcome } from '@/lib/persistence';
+import { pushCallLog, pushLead } from '@/lib/sync';
 import { trpc } from '@/providers/trpc';
 
 interface CallJob {
@@ -28,6 +29,7 @@ export default function CallCenter() {
   const [exp, setExp] = useState<number | null>(null);
   const [batchMode, setBatchMode] = useState(false);
   const [batchPaused, setBatchPaused] = useState(false);
+  const batchPausedRef = useRef(false);
   const [callQueue, setCallQueue] = useState<CallJob[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
@@ -43,6 +45,9 @@ export default function CallCenter() {
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [showOutcome, setShowOutcome] = useState(false);
+  const [outcomeDuration, setOutcomeDuration] = useState(0);
+  const [outcomePhone, setOutcomePhone] = useState('');
 
   const placeCallMut = trpc.maya.placeCall.useMutation();
   const hangUpMut = trpc.maya.hangUp.useMutation();
@@ -61,6 +66,13 @@ export default function CallCenter() {
       setTranscript(lines.map((text, i) => ({ speaker: i % 2 === 0 ? 'maya' : 'user', text, time: Date.now() })));
     }
   }, [transcriptData, stage]);
+
+  // Auto-hangup when Twilio reports the call is done (far-end hung up)
+  useEffect(() => {
+    if (transcriptData?.status === 'completed' && (stage === 'in_progress' || stage === 'ringing')) {
+      hangUp();
+    }
+  }, [transcriptData?.status]);
 
   useEffect(() => {
     if (transcriptRef.current) {
@@ -103,15 +115,61 @@ export default function CallCenter() {
       try { await hangUpMut.mutateAsync({ sid }); } catch { /* ignore */ }
     }
     const duration = timer;
-    if (number) {
-      const rec: CallRecord = { id: Date.now(), leadName: 'Test Call', phone: number, outcome: 'connected', duration, transcript: transcript.map(t => `${t.speaker}: ${t.text}`).join('\n') || null, notes: null, createdAt: new Date().toISOString() };
-      const updated = addCallRecord(rec);
-      setCallHistory(updated);
-    }
+    setOutcomeDuration(duration);
+    setOutcomePhone(number);
     setStage('completed');
     setSid(null);
-    setTimeout(() => setStage('idle'), 2000);
-  }, [sid, timer, number, transcript, hangUpMut]);
+    setShowOutcome(true);
+  }, [sid, timer, number, hangUpMut]);
+
+  const handleOutcomeSelect = useCallback((outcome: CallOutcome, notes: string) => {
+    const phone = outcomePhone;
+    const leads = loadLeads();
+    const lead = leads.find(l => l.phone.replace(/\D/g, '') === phone.replace(/\D/g, ''));
+
+    const outcomeMap: Record<CallOutcome, CallRecord['outcome']> = {
+      voicemail: 'voicemail',
+      connected_interested: 'connected',
+      connected_not_interested: 'connected',
+      callback_requested: 'connected',
+      no_answer: 'no_answer',
+      hung_up: 'no_answer',
+      other: 'no_answer',
+    };
+
+    const rec: CallRecord = {
+      id: Date.now(),
+      leadId: lead?.id,
+      leadName: lead?.sellerName ?? 'Manual Call',
+      phone,
+      outcome: outcomeMap[outcome],
+      duration: outcomeDuration,
+      transcript: transcript.map(t => `${t.speaker}: ${t.text}`).join('\n') || null,
+      notes: notes || null,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = addCallRecord(rec);
+    setCallHistory(updated);
+
+    if (lead) {
+      const newLog = addLeadCallLog({
+        leadId: lead.id, leadName: lead.sellerName, phone: lead.phone,
+        outcome, notes, duration: outcomeDuration,
+        campaignAssigned: OUTCOME_TO_CAMPAIGN[outcome],
+        createdAt: new Date().toISOString(),
+      });
+      pushCallLog(newLog);
+      assignLeadToCampaign(
+        { leadId: lead.id, leadName: lead.sellerName, phone: lead.phone, motivationLevel: lead.motivationLevel },
+        OUTCOME_TO_CAMPAIGN[outcome]
+      );
+    }
+
+    addAuditEntry({ action: 'call_logged', entityId: rec.id, entityName: rec.leadName, detail: `${OUTCOME_LABELS[outcome]} · ${outcomeDuration}s` });
+    setShowOutcome(false);
+    setTranscript([]);
+    setTimeout(() => setStage('idle'), 500);
+  }, [outcomePhone, outcomeDuration, transcript]);
 
   // Batch calling
   const startBatch = () => {
@@ -120,8 +178,9 @@ export default function CallCenter() {
     setCallQueue(jobs);
     setCurrentIdx(0);
     setOverallProgress(0);
-    setBatchMode(true);
+    batchPausedRef.current = false;
     setBatchPaused(false);
+    setBatchMode(true);
     runBatch(jobs, 0);
   };
 
@@ -138,7 +197,7 @@ export default function CallCenter() {
     setCurrentIdx(idx + 1);
     addCallRecord({ id: Date.now(), leadName: job.leadName, phone: job.phone, outcome: outcome as any, duration, transcript: null, notes: null, createdAt: new Date().toISOString() });
     setCallHistory(loadCalls());
-    if (!batchPaused) runBatch(jobs, idx + 1);
+    if (!batchPausedRef.current) runBatch(jobs, idx + 1);
   };
 
   const stats = {
@@ -153,9 +212,14 @@ export default function CallCenter() {
   return (
     <div style={{ padding: '28px 20px 20px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>AI Agent</h1>
-          <p style={{ fontSize: 14, color: C.muted, margin: '4px 0 0', fontWeight: 500 }}>Conversational calling powered by Maya</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 16, overflow: 'hidden', flexShrink: 0, background: '#111' }}>
+            <img src="/maya-logo.jpg" alt="Maya" style={{ width: '100%', height: '100%', objectFit: 'cover', mixBlendMode: 'screen' }} />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 30, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.03em' }}>Maya</h1>
+            <p style={{ fontSize: 14, color: C.muted, margin: '4px 0 0', fontWeight: 500 }}>Conversational calling powered by Maya</p>
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 100, background: 'rgba(52,199,89,0.1)', border: '1px solid rgba(52,199,89,0.2)' }}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: C.green, animation: 'mayaPulse 2.5s ease-in-out infinite' }} />
@@ -165,7 +229,7 @@ export default function CallCenter() {
 
       {/* Call All Leads batch button */}
       <button
-        onClick={batchMode ? () => setBatchPaused(p => !p) : startBatch}
+        onClick={batchMode ? () => { setBatchPaused(p => { batchPausedRef.current = !p; return !p; }); } : startBatch}
         className="maya-tile press-sm"
         style={{ width: '100%', height: 64, borderRadius: 22, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20, background: batchMode ? (batchPaused ? `linear-gradient(135deg, ${C.orange}, #E08900)` : `linear-gradient(135deg, ${C.red}, #C72020)`) : `linear-gradient(135deg, ${C.teal}, ${C.green})`, color: '#fff', padding: 0 }}
       >
@@ -313,6 +377,15 @@ export default function CallCenter() {
         ))
       )}
       <div style={{ height: 20 }} />
+
+      {showOutcome && (
+        <OutcomeSheet
+          phone={outcomePhone}
+          duration={outcomeDuration}
+          onSelect={handleOutcomeSelect}
+          onSkip={() => { setShowOutcome(false); setTranscript([]); setTimeout(() => setStage('idle'), 500); }}
+        />
+      )}
     </div>
   );
 }
@@ -397,10 +470,85 @@ function CallError({ error, onDismiss }: { error: string; onDismiss: () => void 
   );
 }
 
+// ── Outcome sheet ─────────────────────────────────────────────────
+
+const OUTCOME_CONFIGS: { outcome: CallOutcome; label: string; color: string; bg: string }[] = [
+  { outcome: 'voicemail',                label: 'Voicemail Left',          color: C.orange, bg: C.orangeS },
+  { outcome: 'connected_interested',     label: 'Connected — Interested',  color: C.green,  bg: C.greenS },
+  { outcome: 'connected_not_interested', label: 'Not Interested',          color: C.muted,  bg: 'rgba(128,128,128,0.1)' },
+  { outcome: 'callback_requested',       label: 'Callback Requested',      color: C.teal,   bg: C.tealS },
+  { outcome: 'no_answer',                label: 'No Answer',               color: C.blue,   bg: C.blueS },
+  { outcome: 'hung_up',                  label: 'Hung Up',                 color: C.red,    bg: C.redS },
+];
+
+function OutcomeSheet({ phone, duration, onSelect, onSkip }: {
+  phone: string; duration: number;
+  onSelect: (outcome: CallOutcome, notes: string) => void;
+  onSkip: () => void;
+}) {
+  const [notes, setNotes] = useState('');
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 60, backdropFilter: 'blur(8px)' }} />
+      <div className="neo-sheet hide-scrollbar" style={{ position: 'fixed', bottom: 0, left: '50%', transform: 'translateX(-50%)', width: '100%', maxWidth: 430, zIndex: 70, padding: '24px 24px 48px', borderRadius: '28px 28px 0 0', maxHeight: '92vh', overflowY: 'auto' }}>
+        <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.15)', margin: '0 auto 20px' }} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: C.text, margin: 0, letterSpacing: '-0.02em' }}>Log Call Outcome</h2>
+          <button onClick={onSkip} style={{ background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 12, width: 34, height: 34, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+            <X size={15} color={C.muted} />
+          </button>
+        </div>
+        <p style={{ fontSize: 13, color: C.muted, fontWeight: 500, margin: '0 0 20px' }}>
+          {phone} · {fmt(duration)}
+        </p>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+          {OUTCOME_CONFIGS.map(({ outcome, label, color, bg }) => (
+            <button
+              key={outcome}
+              onClick={() => onSelect(outcome, notes)}
+              className="press-sm"
+              style={{ width: '100%', padding: '14px 18px', borderRadius: 16, border: `1.5px solid ${color}30`, background: bg, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', textAlign: 'left' }}
+            >
+              <span style={{ fontSize: 15, fontWeight: 700, color }}>{label}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: color + 'AA' }}>→ {OUTCOME_TO_CAMPAIGN[outcome]}</span>
+            </button>
+          ))}
+        </div>
+
+        <label style={{ fontSize: 13, fontWeight: 700, color: C.muted, display: 'block', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notes (optional)</label>
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="What happened on the call?"
+          rows={3}
+          style={{ width: '100%', border: '1px solid rgba(128,128,128,0.2)', borderRadius: 14, padding: '12px 14px', fontSize: 14, background: 'rgba(128,128,128,0.08)', color: C.text, fontWeight: 500, fontFamily: 'inherit', outline: 'none', boxSizing: 'border-box', resize: 'none', marginBottom: 16 }}
+        />
+
+        <button onClick={onSkip} style={{ width: '100%', height: 44, background: 'none', border: 'none', color: C.muted, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}>
+          Skip Logging
+        </button>
+      </div>
+    </>
+  );
+}
+
 function CallHistoryCard({ call, expanded, onToggle }: { call: CallRecord; expanded: boolean; onToggle: () => void }) {
   const outcomeColor = call.outcome === 'connected' ? C.green : call.outcome === 'voicemail' ? C.orange : C.red;
   const outcomeBg = call.outcome === 'connected' ? C.greenS : call.outcome === 'voicemail' ? C.orangeS : C.redS;
   const outcomeLabel = call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer';
+
+  const { data: conv } = trpc.maya.getConversation.useQuery(
+    { callSid: call.callSid! },
+    { enabled: expanded && !!call.callSid, staleTime: 30_000 }
+  );
+
+  const turns = conv?.turns ?? [];
+  const storedTranscript = call.transcript && !call.transcript.startsWith('Maya called ') ? call.transcript : null;
+  const fmt = (s: number) => s > 0 ? `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` : '';
 
   return (
     <NeoTile style={{ marginBottom: 12, cursor: 'pointer' }} onClick={onToggle}>
@@ -412,16 +560,49 @@ function CallHistoryCard({ call, expanded, onToggle }: { call: CallRecord; expan
           <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>{call.leadName}</p>
           <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0', fontWeight: 500 }}>
             {new Date(call.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+            {call.duration > 0 ? ` · ${fmt(call.duration)}` : ''}
           </p>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
           <span style={{ fontSize: 11, fontWeight: 700, color: outcomeColor, background: outcomeBg, padding: '4px 10px', borderRadius: 20, textTransform: 'uppercase' }}>{outcomeLabel}</span>
-          {call.duration > 0 && <span style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>{call.duration}s</span>}
+          {(call.callSid || call.notes) && (
+            <span style={{ fontSize: 10, fontWeight: 600, color: C.muted }}>{expanded ? '▲ hide' : '▼ details'}</span>
+          )}
         </div>
       </div>
-      {expanded && call.transcript && (
-        <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 14, background: 'rgba(0,0,0,0.03)', fontSize: 13, color: C.text, lineHeight: 1.6, fontWeight: 500 }}>
-          {call.transcript}
+
+      {expanded && (
+        <div style={{ marginTop: 14 }}>
+          {call.notes && (
+            <div style={{ padding: '10px 12px', borderRadius: 12, background: C.tealS, marginBottom: 10 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.teal, margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Notes</p>
+              <p style={{ fontSize: 13, color: C.text, margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{call.notes}</p>
+            </div>
+          )}
+
+          {turns.length > 0 ? (
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 10px' }}>
+                Transcript · {turns.length} turns
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }} className="hide-scrollbar">
+                {turns.map((t, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: t.role === 'assistant' ? 'flex-start' : 'flex-end' }}>
+                    <div style={{ maxWidth: '85%', padding: '8px 12px', borderRadius: t.role === 'assistant' ? '12px 12px 12px 3px' : '12px 12px 3px 12px', background: t.role === 'assistant' ? C.purpleS : C.tealS, fontSize: 13, color: t.role === 'assistant' ? C.purple : C.teal, lineHeight: 1.5, fontWeight: 500 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, opacity: 0.7, display: 'block', marginBottom: 2 }}>{t.role === 'assistant' ? 'Maya' : 'Seller'}</span>
+                      {t.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : storedTranscript ? (
+            <div style={{ padding: '12px 14px', borderRadius: 14, background: 'rgba(0,0,0,0.03)', fontSize: 13, color: C.text, lineHeight: 1.6, fontWeight: 500 }}>
+              {storedTranscript}
+            </div>
+          ) : call.callSid ? (
+            <p style={{ fontSize: 13, color: C.muted, margin: 0, fontStyle: 'italic', fontWeight: 500 }}>Loading transcript…</p>
+          ) : null}
         </div>
       )}
     </NeoTile>

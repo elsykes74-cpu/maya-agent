@@ -1,4 +1,6 @@
 import { Routes, Route } from 'react-router'
+import { useEffect } from 'react'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import Home from './pages/Home'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
@@ -14,10 +16,20 @@ import DNCLists from './pages/DNCLists'
 import More from './pages/More'
 import CallQueue from './pages/CallQueue'
 import LeadFinder from './pages/LeadFinder'
+import Photos from './pages/Photos'
+import Analytics from './pages/Analytics'
 import Layout from './components/Layout'
+import { pullLeads, pullCallLogs, pushAllLeads } from './lib/sync'
 
 export default function App() {
+  useEffect(() => {
+    pullLeads();
+    pullCallLogs();
+    pushAllLeads();
+  }, []);
+
   return (
+    <ErrorBoundary>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="*" element={<NotFound />} />
@@ -28,13 +40,16 @@ export default function App() {
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/calls" element={<CallCenter />} />
         <Route path="/more" element={<More />} />
+        <Route path="/analytics" element={<Analytics />} />
         <Route path="/appointments" element={<Appointments />} />
         <Route path="/deals" element={<DealAnalysis />} />
         <Route path="/ai-config" element={<AIConfig />} />
         <Route path="/sms" element={<SMSSequences />} />
         <Route path="/dnc" element={<DNCLists />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/photos" element={<Photos />} />
       </Route>
     </Routes>
+    </ErrorBoundary>
   )
 }
