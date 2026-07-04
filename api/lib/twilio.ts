@@ -46,7 +46,7 @@ export function isTwilioConfigured(): boolean {
   return !!(accountSid && credentials.length && fromNumber);
 }
 
-function normalizePhoneNumber(value: string): string {
+export function normalizePhoneNumber(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith("+")) return trimmed;
 
@@ -56,7 +56,7 @@ function normalizePhoneNumber(value: string): string {
   return trimmed;
 }
 
-function resolveAppUrl(appUrl: string): string {
+export function resolveAppUrl(appUrl: string): string {
   return appUrl.replace(/\/$/, "");
 }
 

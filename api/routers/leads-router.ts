@@ -144,8 +144,8 @@ export const leadsRouter = createRouter({
         motivationLevel: motivation,
         callCount: 0,
         smsCount: 0,
-      });
-      const newId = Number((result as any)[0]?.insertId ?? 0);
+      }).returning({ id: leads.id });
+      const newId = result[0].id;
 
       if (score >= 80) {
         const preview = {

@@ -28,6 +28,7 @@ import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
+import { processDialerTick, getQueueStats, startDialerScheduler } from "./lib/dialer";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
@@ -400,6 +401,39 @@ app.get("/__env-debug", async (c) => {
   );
 });
 
+// Dialer tick — drains a small batch of due queued calls. Drive this from
+// any scheduler (Vercel cron, Supabase pg_cron, external cron). Secured with
+// CRON_SECRET via the Authorization header (Vercel cron sends it natively).
+app.post("/api/dialer/tick", async (c) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret || c.req.header("authorization") !== `Bearer ${secret}`) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  // Callback URLs must point at the deployment that received this request
+  const proto = c.req.header("x-forwarded-proto") ?? "https";
+  const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "";
+  const appUrl = host ? `${proto}://${host}` : env.appUrl;
+
+  const batchSize = Number(c.req.query("batch")) || undefined;
+  try {
+    const result = await processDialerTick({ appUrl, batchSize });
+    return c.json(result);
+  } catch (err) {
+    console.error("[dialer] tick failed:", err);
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
+// Dialer health — queue depth by status (read-only)
+app.get("/api/dialer/health", async (c) => {
+  try {
+    const queue = await getQueueStats();
+    return c.json({ ok: true, queue }, 200, { "Cache-Control": "no-store" });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err) }, 500);
+  }
+});
+
 // Maya webhook smoke-test — dev only, blocked in production
 app.all("/__maya-test", async (c) => {
   if (env.isProduction) return c.json({ error: "Not Found" }, 404);
@@ -616,6 +650,9 @@ if (env.isProduction && !process.env.VERCEL) {
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
       startDailyDigestScheduler();
+      // Long-running deployment drains the call queue continuously.
+      // Opt-in via DIALER_ENABLED=true; serverless uses /api/dialer/tick instead.
+      startDialerScheduler(env.appUrl);
       // Auto-register Telegram webhooks so bots don't go silent after redeploys
       if (env.appUrl && !env.appUrl.includes("localhost")) {
         registerAllWebhooks(env.appUrl).catch((err) =>

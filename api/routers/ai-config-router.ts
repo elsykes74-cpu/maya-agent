@@ -85,8 +85,8 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(objectionResponses).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const result = await db.insert(objectionResponses).values(input).returning({ id: objectionResponses.id });
+      return { id: result[0].id, success: true };
     }),
 
   updateObjection: publicQuery

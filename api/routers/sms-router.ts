@@ -38,8 +38,8 @@ export const smsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(smsLogs).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const result = await db.insert(smsLogs).values(input).returning({ id: smsLogs.id });
+      return { id: result[0].id, success: true };
     }),
 
   updateReply: publicQuery
@@ -72,8 +72,8 @@ export const smsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(smsTemplates).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const result = await db.insert(smsTemplates).values(input).returning({ id: smsTemplates.id });
+      return { id: result[0].id, success: true };
     }),
 
   updateTemplate: publicQuery
@@ -116,10 +116,10 @@ export const smsRouter = createRouter({
       else if (templateDay >= 2)   tplName = "Day 2 - Follow-up";
       else                         tplName = "Day 0 - Initial Outreach";
 
-      const [rows] = await db.execute(
+      const rows = await db.execute(
         sql`SELECT id, content FROM ${smsTemplates} WHERE name = ${tplName} LIMIT 1`
       );
-      const template = (rows as any[])[0];
+      const template = (rows as unknown as { id: number; content: string }[])[0];
       if (!template) throw new Error(`SMS template not found: ${tplName}`);
 
       const clRows = await db.query.campaignLeads.findMany({
@@ -134,7 +134,7 @@ export const smsRouter = createRouter({
       for (const cl of clRows) {
         if (!cl.lead?.phone) continue;
         const name    = (cl.lead.sellerName || "there").split(" ")[0];
-        const content = (template as any).content
+        const content = template.content
           .replace(/{name}/g, name)
           .replace(/{address}/g, "");
 
@@ -178,10 +178,9 @@ export const smsRouter = createRouter({
           .where(eq(leads.id, leadId));
         // Upsert DNC via raw SQL to avoid schema import loop
         await db.execute(
-          `INSERT INTO dnc_list (phone, reason, source, notes)
-           VALUES (?, 'seller_request', 'sms_reply', ?)
-           ON DUPLICATE KEY UPDATE notes = VALUES(notes)`,
-          [cleanPhone, `SMS STOP reply from lead ${leadId}`]
+          sql`INSERT INTO dnc_list (phone, reason, source, notes)
+              VALUES (${cleanPhone}, 'seller_request', 'sms_reply', ${`SMS STOP reply from lead ${leadId}`})
+              ON CONFLICT (phone) DO UPDATE SET notes = EXCLUDED.notes`
         );
       } else if (/\b(yes|interested|call me|sounds good|sure|great|let's talk|when can|available)\b/.test(lower)) {
         category = "responded";

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Wrench, DollarSign, Percent } from 'lucide-react';
-import { C, NeoTile, NeoIcon, BackBtn, BRow, HomeDot } from '@/components/Neo';
+import { C, NeoTile, BackBtn, BRow, HomeDot } from '@/components/Neo';
 
 export default function DealAnalysis() {
   const navigate = useNavigate();

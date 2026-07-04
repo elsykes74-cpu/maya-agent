@@ -71,8 +71,8 @@ export const callsRouter = createRouter({
       const result = await db.insert(calls).values({
         ...input,
         sellerAskingPrice: input.sellerAskingPrice ? String(input.sellerAskingPrice) : null,
-      });
-      return { id: Number(result[0].insertId), success: true };
+      }).returning({ id: calls.id });
+      return { id: result[0].id, success: true };
     }),
 
   update: publicQuery

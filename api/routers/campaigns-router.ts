@@ -3,8 +3,9 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { campaigns, campaignLeads, leads, dncList, callQueue } from "../../db/schema";
-import { getCallingConfig, isWithinCallWindow, scrubPhone, createVapiCall } from "../lib/vapi";
-import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
+import { getCallingConfig, isWithinCallWindow, scrubPhone } from "../lib/vapi";
+import { isTwilioConfigured } from "../lib/twilio";
+import { processDialerTick } from "../lib/dialer";
 import { env } from "../lib/env";
 
 export const campaignsRouter = createRouter({
@@ -50,8 +51,8 @@ export const campaignsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(campaigns).values({ ...input, status: "draft" });
-      return { id: Number(result[0].insertId), success: true };
+      const result = await db.insert(campaigns).values({ ...input, status: "draft" }).returning({ id: campaigns.id });
+      return { id: result[0].id, success: true };
     }),
 
   update: publicQuery
@@ -160,8 +161,11 @@ export const campaignsRouter = createRouter({
       }
 
       // Check call window
-      if (!isWithinCallWindow(config.callWindowStart || "09:00", config.callWindowEnd || "19:00", config.timezone || "America/New_York")) {
-        throw new Error(`Outside call window (${config.callWindowStart}–${config.callWindowEnd} ${config.timezone}). Calls will resume during business hours.`);
+      const callWindowStart = config?.callWindowStart || "09:00";
+      const callWindowEnd = config?.callWindowEnd || "19:00";
+      const timezone = config?.timezone || "America/New_York";
+      if (!isWithinCallWindow(callWindowStart, callWindowEnd, timezone)) {
+        throw new Error(`Outside call window (${callWindowStart}–${callWindowEnd} ${timezone}). Calls will resume during business hours.`);
       }
 
       // Update campaign status
@@ -178,10 +182,11 @@ export const campaignsRouter = createRouter({
         with: { lead: true },
       });
 
+      // Scrub + queue everything; actual dialing happens in small batches via
+      // the dialer tick (below, plus cron/scheduler) so this handler stays
+      // inside the serverless timeout budget no matter the campaign size.
       let queued = 0;
       let scrubFailed = 0;
-      let dialed = 0;
-      let failed = 0;
 
       for (const cl of pendingLeads) {
         if (!cl.lead || !cl.lead.phone) {
@@ -193,7 +198,7 @@ export const campaignsRouter = createRouter({
         }
 
         // Scrub
-        const scrub = await scrubPhone(cl.lead.phone, config.scrubDncBeforeCall || true, config.scrubLitigants || true);
+        const scrub = await scrubPhone(cl.lead.phone, config?.scrubDncBeforeCall ?? true, config?.scrubLitigants ?? true);
         if (!scrub.pass) {
           await db.update(campaignLeads)
             .set({ status: "skipped_dnc", scrubStatus: "fail_dnc", scrubDetails: scrub.reason })
@@ -202,13 +207,11 @@ export const campaignsRouter = createRouter({
           continue;
         }
 
-        // Update scrub status
         await db.update(campaignLeads)
           .set({ scrubStatus: "pass", scrubDetails: "Clean" })
           .where(eq(campaignLeads.id, cl.id));
 
-        // Create call queue entry
-        const queueResult = await db.insert(callQueue).values({
+        await db.insert(callQueue).values({
           campaignId: input.campaignId,
           campaignLeadId: cl.id,
           leadId: cl.leadId,
@@ -218,56 +221,21 @@ export const campaignsRouter = createRouter({
           scheduledAt: new Date(),
         });
         queued++;
-
-        // Dial via Twilio (preferred) or fall back to Vapi
-        try {
-          let callId: string | null = null;
-
-          if (twilioReady) {
-            const result = await placeTwilioOutboundCall({
-              to: cl.lead.phone,
-              name: cl.lead.sellerName ?? "",
-              address: cl.lead.propertyAddress ?? "",
-              appUrl,
-            });
-            callId = result?.sid ?? null;
-          } else {
-            const result = await createVapiCall(cl.leadId, cl.lead.phone, cl.lead.sellerName ?? "");
-            callId = result?.id ?? null;
-          }
-
-          if (callId) {
-            await db.update(callQueue)
-              .set({ status: "dialing", externalCallId: callId, startedAt: new Date() })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
-            await db.update(campaignLeads)
-              .set({ status: "queued", externalCallId: callId })
-              .where(eq(campaignLeads.id, cl.id));
-            dialed++;
-          } else {
-            await db.update(callQueue)
-              .set({ status: "failed", errorMessage: "Call provider returned no call ID" })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
-            failed++;
-          }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          await db.update(callQueue)
-            .set({ status: "failed", errorMessage: msg })
-            .where(eq(callQueue.id, Number(queueResult[0].insertId)));
-          failed++;
-        }
       }
+
+      // Dial the first small batch immediately for fast feedback; the
+      // dialer scheduler / cron drains the rest.
+      const tick = await processDialerTick({ appUrl, batchSize: 3 });
 
       return {
         queued,
         scrubFailed,
-        dialed,
-        failed,
+        dialed: tick.dialed,
+        failed: tick.failed,
         totalPending: pendingLeads.length,
-        message: dialed > 0
-          ? `Campaign activated! ${dialed} calls placed. ${scrubFailed} numbers scrubbed. ${failed} failed.`
-          : `No calls placed. ${scrubFailed} scrubbed. ${failed} failed.`,
+        message: queued > 0
+          ? `Campaign activated! ${queued} calls queued (${tick.dialed} dialing now). ${scrubFailed} numbers scrubbed.`
+          : `No calls queued. ${scrubFailed} scrubbed.`,
       };
     }),
 
