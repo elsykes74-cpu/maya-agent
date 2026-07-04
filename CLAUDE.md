@@ -15,6 +15,7 @@ Maya is an AI real-estate cold-calling/outreach agent for off-market acquisition
 
 - `api/boot.ts` — single backend entry: tRPC at `/api/trpc/*`, Twilio voice webhooks, Telegram multi-bot webhooks, Google OAuth, `/api/lead-intake` (CORS for meridianhomesma.com), Claude proxy at `/api/claude/messages`. Health probes: `/api/db/health`, `/api/claude/health`, dev-only `/__env-debug`.
 - `api/routers/` — tRPC + webhook routers; `api/lib/` — integrations (twilio, elevenlabs, vapi, anthropic, supabase, telegram, lead-scorer…); `api/bots/` — Telegram bots.
+- **Dialer**: campaign activation only *queues* calls (`call_queue`); `api/lib/dialer.ts` drains them in batches. Ticks are concurrency-safe (`FOR UPDATE SKIP LOCKED` claim) and retry non-terminal outcomes per campaign `maxCallsPerLead`/`callIntervalHours`. Drive via `POST /api/dialer/tick` (Bearer `CRON_SECRET`) from any cron, or `DIALER_ENABLED=true` for the in-process loop on Railway. Queue depth: `GET /api/dialer/health`. Never dial an entire campaign inline in one request.
 - `contracts/` — shared constants/errors/types, aliased `@contracts/*`. Fragile under esbuild — the `build` script's `createRequire` banner exists because of it.
 - `maya-integration/` — NOT code: the human-authored persona/prompts (system prompts, call scripts) that seed the `ai_config` DB table.
 - `skills/real-estate-acquisitions/` — domain skill for Maya's call logic, seller psychology, compliance.

@@ -2,7 +2,8 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList } from "../../db/schema";
+import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, campaigns } from "../../db/schema";
+import { scheduleRetryAfterOutcome } from "../lib/dialer";
 
 export const webhooksRouter = createRouter({
   receive: publicQuery
@@ -108,13 +109,18 @@ async function handleVapiWebhook(payload: any, db: any) {
       .where(eq(callQueue.id, queueEntry.id));
 
     // Update campaign lead
-    await db.update(campaignLeads)
+    const [updatedCl] = await db.update(campaignLeads)
       .set({
         status: "completed",
         callResult: outcome as any,
         attempts: sql`${campaignLeads.attempts} + 1`,
       })
-      .where(eq(campaignLeads.id, queueEntry.campaignLeadId));
+      .where(eq(campaignLeads.id, queueEntry.campaignLeadId))
+      .returning({ attempts: campaignLeads.attempts });
+
+    // Non-terminal outcome (no answer / busy / voicemail / failed):
+    // schedule the next touch per the campaign's cadence settings.
+    await scheduleRetryAfterOutcome(queueEntry, outcome, updatedCl?.attempts ?? 1);
 
     // Log in calls table
     await db.insert(calls).values({
@@ -160,13 +166,14 @@ async function handleVapiWebhook(payload: any, db: any) {
       }
     }
 
-    // Update campaign stats
-    await db.execute(sql`
-      UPDATE campaigns 
-      SET callsCompleted = callsCompleted + 1,
-          appointmentsSet = appointmentsSet + ${appointmentSet ? 1 : 0}
-      WHERE id = ${queueEntry.campaignId}
-    `);
+    // Update campaign stats (columns are snake_case in Postgres; the old
+    // unquoted camelCase raw SQL threw "column does not exist")
+    await db.update(campaigns)
+      .set({
+        callsCompleted: sql`${campaigns.callsCompleted} + 1`,
+        appointmentsSet: sql`${campaigns.appointmentsSet} + ${appointmentSet ? 1 : 0}`,
+      })
+      .where(eq(campaigns.id, queueEntry.campaignId));
   }
 
   if (eventType === "status-update" || eventType === "call.started") {
