@@ -136,7 +136,7 @@ export function BRow({ label, value }: { label: string; value: number }) {
   );
 }
 
-export function StatPill({ icon, value, label, bg }: { icon: ReactNode; value: number; label: string; bg: string }) {
+export function StatPill({ icon, value, label }: { icon: ReactNode; value: number; label: string; bg?: string }) {
   return <div className="neo-pressed-sm" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 14 }}>
     <div style={{ marginBottom: 6 }}>{icon}</div>
     <p style={{ fontSize: 24, fontWeight: 800, color: C.text, margin: 0 }}>{value}</p>

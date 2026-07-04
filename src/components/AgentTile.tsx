@@ -9,7 +9,7 @@ interface AgentTileProps extends Partial<AgentData> {
   style?: CSSProperties;
 }
 
-export function AgentTile({ title = 'Agent', description, icon = 'Zap', iconColor = C.teal, iconBg = C.tealS, tileBg = 'light', status, count, lastRun, isLoading, isDisabled, onClick, className = '', style }: AgentTileProps) {
+export function AgentTile({ title = 'Agent', icon = 'Zap', iconColor = C.teal, iconBg = C.tealS, tileBg = 'light', status, count, lastRun, isLoading, isDisabled, onClick, className = '', style }: AgentTileProps) {
   if (isLoading) {
     return <div className="maya-tile" style={{ padding: 20, height: 150, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, ...style }}>
       <div className="skeleton" style={{ width: 56, height: 56, borderRadius: 18 }} />

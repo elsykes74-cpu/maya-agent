@@ -84,8 +84,6 @@ export default function Home() {
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
-  const hours = new Date().getHours();
-  const greeting = hours < 12 ? 'Good Morning' : hours < 17 ? 'Good Afternoon' : 'Good Evening';
 
   useEffect(() => {
     setLeads(loadLeads());

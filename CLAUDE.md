@@ -5,10 +5,10 @@ Maya is an AI real-estate cold-calling/outreach agent for off-market acquisition
 ## Commands
 
 - `npm run dev` — Vite dev server on :3000; `/api/*` is served by `api/boot.ts` through `@hono/vite-dev-server` (single command runs both).
-- `npm run build` — `vite build` (frontend → `dist/public`) then esbuild bundles `api/boot.ts` → `dist/boot.js`. **This is currently the only green verification gate — keep it green.**
-- `npm run check` (`tsc -b`) — **fails on main** with pre-existing errors, mostly `.insertId` MySQL leftovers in `api/routers/{campaigns,dnc,sms,webhooks}-router.ts`. Judge your change by the error *delta*, not by red/green.
-- `npm run lint` — ~180 pre-existing errors on main. Same rule: delta, not absolute.
-- `npm test` — vitest runs but there are **zero test files** in the repo.
+- `npm run build` — `vite build` (frontend → `dist/public`) then esbuild bundles `api/boot.ts` → `dist/boot.js`. Required CI gate — keep it green.
+- `npm run check` (`tsc -b`) — green and a **required CI gate**. Keep it that way.
+- `npm test` — vitest; tests live in `api/**/*.test.ts` (lead-scorer, twilio helpers, call-window logic). Also a **required CI gate**. Add tests for any new pure logic.
+- `npm run lint` — ~180 pre-existing errors on main; advisory in CI. Judge your change by the error *delta*.
 - DB: `npm run db:generate` / `db:migrate` / `db:push` (drizzle-kit).
 
 ## Architecture
@@ -26,13 +26,13 @@ Maya is an AI real-estate cold-calling/outreach agent for off-market acquisition
 - `vercel.json`: `functions` and `builds` cannot coexist in the same file.
 - **Timeout budget**: Vercel's 10s clock starts at *request arrival*, and cold starts eat 3–6s of it. In Twilio call paths keep Claude calls ≤3s and the handler deadline ≤4s (see commit `e1aa65d`). Do not "fix" a timeout by raising these.
 - Changing a Vercel env var does **not** affect existing deployments — it needs a fresh build. Trigger a redeploy from the Vercel dashboard/API; do not push empty "chore: redeploy" commits.
-- Webhook callback URLs must be derived from `VERCEL_URL` (the current deployment) via `resolveAppUrl` in `api/lib/env.ts` — never from `APP_URL`/the production domain, or callbacks hit a deployment that doesn't have your code.
+- Webhook callback URLs must be derived from the incoming request's `x-forwarded-host`/`host` headers (see `maya-webhook.ts:46`, `campaigns-router.ts:152`) so callbacks return to the *current* deployment — never from `APP_URL`/the production domain, or callbacks hit a deployment that doesn't have your code.
 
 ## Hard rules (each cost multiple past sessions)
 
 1. **Never throw or do fallible work at module level in `api/**`.** A module-level throw crashes the serverless function before any handler runs and Twilio plays "application error." `api/lib/env.ts` is deliberately never-throw; preserve that property in anything it imports.
 2. **Secrets live in Vercel env vars only.** Never hardcode a fallback secret in source (this has already forced one token rotation). The Supabase `ai_config` table also stores API keys and goes stale — env vars are canonical (`bce74c2` fixed a 502 caused by a stale table key).
-3. **The database is PostgreSQL** (Supabase). Any `mysql2` / `SHOW COLUMNS` code in `db/*.{cjs,mjs}` or `scripts/_diag*.js` is abandoned pre-migration debris — don't trust or extend it. Postgres inserts have no `.insertId`; use Drizzle `.returning()`.
+3. **The database is PostgreSQL** (Supabase). Postgres inserts have no `.insertId` — use Drizzle `.returning()`. Upserts are `onConflictDoUpdate`/`ON CONFLICT`, never `ON DUPLICATE KEY UPDATE`. (The MySQL-era `.insertId` bug silently returned `NaN` ids in production for weeks; the mysql2 debris scripts have been deleted — don't reintroduce the pattern.)
 4. **Migrations in `db/migrations/` are tracked in git** (numbered `000N_name.sql`, see `.gitignore:35`). If you apply schema changes via the Supabase MCP, also commit the SQL file — one migration has already been lost by assuming migrations were gitignored.
 5. **Model config is load-bearing**: default is `claude-sonnet-4-6`; `BLOCKED_MODELS` in `api/boot.ts` blocks 1M-context models that error without paid credits. Don't "upgrade" the default or remove the guard.
 6. **When renaming/removing exports in `api/lib/`, grep all call sites first** — legacy webhook handlers import old symbols and have broken the build before (`7a5ca39`).

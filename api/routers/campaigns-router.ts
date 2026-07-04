@@ -50,8 +50,8 @@ export const campaignsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(campaigns).values({ ...input, status: "draft" });
-      return { id: Number(result[0].insertId), success: true };
+      const result = await db.insert(campaigns).values({ ...input, status: "draft" }).returning({ id: campaigns.id });
+      return { id: result[0].id, success: true };
     }),
 
   update: publicQuery
@@ -160,8 +160,11 @@ export const campaignsRouter = createRouter({
       }
 
       // Check call window
-      if (!isWithinCallWindow(config.callWindowStart || "09:00", config.callWindowEnd || "19:00", config.timezone || "America/New_York")) {
-        throw new Error(`Outside call window (${config.callWindowStart}–${config.callWindowEnd} ${config.timezone}). Calls will resume during business hours.`);
+      const callWindowStart = config?.callWindowStart || "09:00";
+      const callWindowEnd = config?.callWindowEnd || "19:00";
+      const timezone = config?.timezone || "America/New_York";
+      if (!isWithinCallWindow(callWindowStart, callWindowEnd, timezone)) {
+        throw new Error(`Outside call window (${callWindowStart}–${callWindowEnd} ${timezone}). Calls will resume during business hours.`);
       }
 
       // Update campaign status
@@ -193,7 +196,7 @@ export const campaignsRouter = createRouter({
         }
 
         // Scrub
-        const scrub = await scrubPhone(cl.lead.phone, config.scrubDncBeforeCall || true, config.scrubLitigants || true);
+        const scrub = await scrubPhone(cl.lead.phone, config?.scrubDncBeforeCall ?? true, config?.scrubLitigants ?? true);
         if (!scrub.pass) {
           await db.update(campaignLeads)
             .set({ status: "skipped_dnc", scrubStatus: "fail_dnc", scrubDetails: scrub.reason })
@@ -216,7 +219,8 @@ export const campaignsRouter = createRouter({
           status: "queued",
           scrubResult: "pass",
           scheduledAt: new Date(),
-        });
+        }).returning({ id: callQueue.id });
+        const queueId = queueResult[0].id;
         queued++;
 
         // Dial via Twilio (preferred) or fall back to Vapi
@@ -239,7 +243,7 @@ export const campaignsRouter = createRouter({
           if (callId) {
             await db.update(callQueue)
               .set({ status: "dialing", externalCallId: callId, startedAt: new Date() })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+              .where(eq(callQueue.id, queueId));
             await db.update(campaignLeads)
               .set({ status: "queued", externalCallId: callId })
               .where(eq(campaignLeads.id, cl.id));
@@ -247,14 +251,14 @@ export const campaignsRouter = createRouter({
           } else {
             await db.update(callQueue)
               .set({ status: "failed", errorMessage: "Call provider returned no call ID" })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+              .where(eq(callQueue.id, queueId));
             failed++;
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           await db.update(callQueue)
             .set({ status: "failed", errorMessage: msg })
-            .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+            .where(eq(callQueue.id, queueId));
           failed++;
         }
       }

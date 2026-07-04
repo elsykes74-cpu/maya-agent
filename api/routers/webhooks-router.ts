@@ -18,14 +18,14 @@ export const webhooksRouter = createRouter({
         provider: input.provider,
         eventType: input.eventType,
         payload: JSON.stringify(input.payload),
-      });
+      }).returning({ id: webhookEvents.id });
 
       // Process Vapi events
       if (input.provider === "vapi") {
         await handleVapiWebhook(input.payload, db);
       }
 
-      return { received: true, eventId: Number(result[0].insertId) };
+      return { received: true, eventId: result[0].id };
     }),
 
   list: publicQuery

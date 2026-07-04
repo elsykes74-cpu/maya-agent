@@ -21,6 +21,6 @@ description: How to change the maya-agent database schema safely — Drizzle + S
 
 ## Postgres idioms (MySQL ghosts to avoid)
 
-- Inserts return rows via `.returning()` — there is **no `.insertId`**. About a dozen `.insertId` usages in `api/routers/{campaigns,dnc,sms,webhooks}-router.ts` are broken leftovers and the reason `npm run check` is red on main. Don't copy them; fixing them is welcome.
-- Upserts: `onConflictDoUpdate`, not `onDuplicateKeyUpdate`.
-- Ignore/never extend the abandoned MySQL debris: `db/fix-appt*.{mjs,cjs}`, `db/check-appt.cjs`, `db/recreate-appt.cjs`, `scripts/_diag*.js` (they use `mysql2` and `SHOW COLUMNS` against a Postgres database).
+- Inserts return rows via `.returning()` — there is **no `.insertId`**. The MySQL-era `.insertId` pattern silently produced `NaN` ids at runtime and was purged from all routers; don't reintroduce it.
+- Upserts: `onConflictDoUpdate` (or raw `ON CONFLICT (col) DO UPDATE`), never `onDuplicateKeyUpdate`/`ON DUPLICATE KEY UPDATE`.
+- Raw SQL through `db.execute()` takes a single drizzle `sql\`\`` template — postgres-js has no `(query, params)` two-argument form and no `?` placeholders.

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Clock, MapPin, User } from 'lucide-react';
-import { C, NeoTile, NeoIcon, BackBtn } from '@/components/Neo';
+import { C, NeoTile, BackBtn } from '@/components/Neo';
 import { loadAppointments, saveAppointments, type Appointment } from '@/lib/persistence';
 import { APPOINTMENTS as INITIAL_APPOINTMENTS } from '@/data';
 

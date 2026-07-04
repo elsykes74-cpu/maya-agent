@@ -61,6 +61,8 @@ Logo/branding: 6 iterations (`e70bf32`…`fb09da6`); KPI/hub tiles: 4 (`8d9e9f9`
 | **`.claude/skills/db-migrations/SKILL.md`** — migration workflow + Postgres idioms (`.returning()` not `.insertId`) | #5 #8 |
 | **`.github/workflows/ci.yml`** — `npm run build` required; typecheck/lint advisory until baselines are fixed | #5 |
 
+**Update (same PR, phase 2 — reliability floor executed):** all typecheck errors on main are now fixed — including the `.insertId` sites, which were returning `NaN` ids at runtime, a campaign-activation loop whose queue-status updates matched no rows, and an SMS STOP handler whose MySQL-syntax upsert meant **opt-outs were never recorded** (compliance bug). The repo's first test suite was added (21 tests: lead scoring, phone normalization, call-window/timezone logic), 12 dead MySQL/debug scripts were deleted, and CI now requires **build + typecheck + test** (lint remains advisory). Item 6 of §5 below is done.
+
 ## 4. Proposed skills (not shipped)
 
 1. **`ui-iteration`** — require a reference screenshot before any style work; verify on the Vercel preview URL with a browser screenshot each iteration; cap exploration at 2 attempts before asking. Would have collapsed cluster #7. (Kept as proposal since it's as much your workflow as Claude's.)

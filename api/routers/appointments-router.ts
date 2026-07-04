@@ -55,8 +55,8 @@ export const appointmentsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(appointments).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const result = await db.insert(appointments).values(input).returning({ id: appointments.id });
+      return { id: result[0].id, success: true };
     }),
 
   update: publicQuery
