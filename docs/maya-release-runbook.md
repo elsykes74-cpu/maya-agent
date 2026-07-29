@@ -22,13 +22,13 @@ Any invalid configuration, DNC lookup failure, or policy denial must stop before
   - deployment ID: `dpl_6q14sretURnLfd4KRSWw7dYLmCiw`;
   - deployment URL: `https://maya-agent-5mnwuaq79-elsykes74-cpus-projects.vercel.app`;
   - created: 2026-06-30.
-- Latest Preview deployment observed READY on 2026-07-29:
-  - deployment ID: `dpl_CHqSaF1gF3yFpz9upAAjd4BcMTB7`;
-  - deployment URL: `https://maya-agent-4j3ihqddm-elsykes74-cpus-projects.vercel.app`;
-  - created: 2026-07-27.
-- Vercel did not expose a Git commit SHA for either inspected deployment. Deployment IDs, not an inferred commit, are therefore the authoritative rollback handles.
-- The outbound safety variables were absent from both Preview and Production during this audit. This leaves the new provider-boundary kill switch disabled by default when the new code is deployed.
-- Live health checks on both the production alias and the latest Preview deployment returned HTTP 503 for `/api/db/health` with `configured: true`. Durable DNC and outcome persistence cannot be accepted until database connectivity is restored.
+- Latest safety Preview deployment observed READY on 2026-07-29:
+  - deployment ID: `dpl_Ear6ABBSGvpsdEeLF9yAwa8D8T5p`;
+  - deployment URL: `https://maya-agent-igx81i2d9-elsykes74-cpus-projects.vercel.app`;
+  - source release commit at deployment time: `812cf8fca8a0f7aeb20a521e6be4ed6dd1a83147`.
+- Vercel did not expose a Git commit SHA in deployment metadata. The source SHA above is recorded from the clean local branch immediately before deployment, while the Vercel deployment ID is the authoritative deployed-artifact handle.
+- The outbound safety variables were absent from Preview during this audit. The deployed provider boundary therefore defaults to outbound calling disabled.
+- The `maya-agent` Supabase project was found `INACTIVE` and restored on 2026-07-29. Supabase reached `ACTIVE_HEALTHY`, a read-only `SELECT 1` succeeded, and both Production and the safety Preview returned HTTP 200 with `{"ok":true,"configured":true}` from `/api/db/health`.
 
 ## Pre-deployment gates
 
