@@ -1,16 +1,32 @@
 import { getDb } from "../queries/connection";
 import { callingConfig, leads, dncList } from "../../db/schema";
 import { eq } from "drizzle-orm";
+import {
+  buildVapiAssistantOverrides,
+  type VapiAssistantOverrides,
+  type VapiStartSpeakingPlan,
+  type VapiStopSpeakingPlan,
+} from "./vapi-config";
+import { env } from "./env";
+import {
+  checkOutboundCallSafety,
+  OutboundCallBlockedError,
+  type OutboundCallSafetyConfig,
+} from "./call-safety";
 
-const DEFAULT_VAPI_ASSISTANT_ID = "8f0c5749-74f5-4757-8377-10e10f47dd25";
 
 export interface VapiCallRequest {
   assistantId?: string;
-  assistantOverrides?: {
-    variableValues?: Record<string, string | number | boolean | null>;
-  };
+  assistantOverrides?: VapiAssistantOverrides;
   assistant?: {
     name?: string;
+    transcriber?: {
+      provider: "deepgram";
+      model: "flux-general-en";
+      language: "en";
+      eotThreshold: number;
+      eotTimeoutMs: number;
+    };
     voice?: {
       provider?: string;
       voiceId?: string;
@@ -18,10 +34,13 @@ export interface VapiCallRequest {
     model?: {
       provider?: string;
       model?: string;
-      systemPrompt?: string;
-      functions?: any[];
+      messages?: Array<{ role: "system"; content: string }>;
+      functions?: Array<Record<string, unknown>>;
     };
     firstMessage?: string;
+    startSpeakingPlan?: VapiStartSpeakingPlan;
+    stopSpeakingPlan?: VapiStopSpeakingPlan;
+    backgroundSound?: "off" | "office";
   };
   phoneNumberId?: string;
   customer?: {
@@ -48,7 +67,6 @@ export async function getCallingConfig() {
   if (!config) {
     await db.insert(callingConfig).values({
       provider: "vapi",
-      assistantId: DEFAULT_VAPI_ASSISTANT_ID,
       maxDailyCalls: 100,
       callWindowStart: "09:00",
       callWindowEnd: "19:00",
@@ -65,7 +83,7 @@ export async function getCallingConfig() {
 
 export async function getAIConfigForCall() {
   const db = getDb();
-  let config = await db.query.aiConfig.findFirst();
+  const config = await db.query.aiConfig.findFirst();
   if (!config) {
     throw new Error("AI config not found");
   }
@@ -78,7 +96,37 @@ function resolveVapiCallEndpoint(endpoint?: string | null): string {
   return trimmed.endsWith("/call") ? trimmed : `${trimmed.replace(/\/$/, "")}/call`;
 }
 
-function buildAssistantVariables(lead: any, sellerName: string) {
+type AssistantLeadContext = Partial<{
+  propertyAddress: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  motivationLevel: string | null;
+  timeline: string | null;
+  condition: string | null;
+  askingPrice: string | null;
+  arv: string | null;
+  leadScore: number | null;
+  leadType: string | null;
+  outreachAngle: string | null;
+}>;
+
+export type VapiCallOptions = {
+  appUrl?: string;
+  now?: Date;
+  safetyConfig?: OutboundCallSafetyConfig;
+  dncChecker?: (phone: string) => Promise<boolean>;
+  callingConfig?: {
+    apiKey: string;
+    assistantId?: string | null;
+    fromPhoneNumber?: string | null;
+    apiEndpoint?: string | null;
+  };
+  lead?: AssistantLeadContext;
+  aiCallConfig?: { elevenLabsVoiceId?: string | null };
+};
+
+function buildAssistantVariables(lead: AssistantLeadContext, sellerName: string) {
   const propertyAddress = lead.propertyAddress || "";
   const street = propertyAddress.split(",")[0] || propertyAddress;
 
@@ -102,105 +150,82 @@ function buildAssistantVariables(lead: any, sellerName: string) {
   };
 }
 
-function personalize(text: string, variables: ReturnType<typeof buildAssistantVariables>): string {
-  return text
-    .replace(/\[Name\]/g, String(variables.sellerName || ""))
-    .replace(/\[Street Address\]/g, String(variables.propertyAddress || ""))
-    .replace(/\[Street\]/g, String(variables.street || ""))
-    .replace(/\[Agent Name\]/g, "Erick");
+
+function buildNaturalOpener(variables: ReturnType<typeof buildAssistantVariables>): string {
+  const nameCheck = variables.sellerName ? `Hi, is this ${variables.sellerName}? ` : "Hi, ";
+  const propertyReference = variables.street ? ` about the property on ${variables.street}` : " about your property";
+  return `${nameCheck}This is Maya, an AI assistant calling for Erick's local property team${propertyReference}. Is now an okay time for a quick question?`;
 }
 
-export async function createVapiCall(leadId: number, phone: string, sellerName: string): Promise<VapiCallResponse | null> {
-  const config = await getCallingConfig();
+export async function createVapiCall(
+  leadId: number,
+  phone: string,
+  sellerName: string,
+  options: VapiCallOptions = {},
+): Promise<VapiCallResponse | null> {
+  const safety = checkOutboundCallSafety({
+    to: phone,
+    appUrl: options.appUrl ?? env.appUrl,
+    now: options.now,
+    config: options.safetyConfig,
+  });
+  if (!safety.allowed) {
+    throw new OutboundCallBlockedError(safety.reason, safety.message);
+  }
+
+  try {
+    const dncChecker = options.dncChecker ?? (async (destination: string) => {
+      const { isPhoneOnDncList } = await import("./dnc-safety");
+      return isPhoneOnDncList(destination);
+    });
+    if (await dncChecker(safety.destination)) {
+      throw new OutboundCallBlockedError("dnc", "Destination is on the do-not-call list.");
+    }
+  } catch (error) {
+    if (error instanceof OutboundCallBlockedError) throw error;
+    console.error("Vapi pre-dial DNC check failed:", error);
+    throw new OutboundCallBlockedError(
+      "dnc_check_failed",
+      "Call blocked because the do-not-call list could not be verified.",
+    );
+  }
+
+  const config = options.callingConfig ?? await getCallingConfig();
   if (!config || !config.apiKey) {
     console.error("Vapi API key not configured");
     return null;
   }
 
-  const db = getDb();
-  const lead = await db.query.leads.findFirst({ where: eq(leads.id, leadId) });
-  if (!lead) return null;
+  let lead: AssistantLeadContext | undefined = options.lead;
+  let aiCallConfig = options.aiCallConfig;
+  if (!lead) {
+    const db = getDb();
+    lead = await db.query.leads.findFirst({ where: eq(leads.id, leadId) });
+    if (!lead) return null;
+    aiCallConfig = await db.query.aiConfig.findFirst();
+  }
 
   const variables = buildAssistantVariables(lead, sellerName);
-  const assistantId = config.assistantId || process.env.VAPI_ASSISTANT_ID || DEFAULT_VAPI_ASSISTANT_ID;
+  const assistantId = config.assistantId || process.env.VAPI_ASSISTANT_ID;
+  if (!assistantId) {
+    throw new Error("Vapi assistant is not configured; transient assistants are disabled until provider tools are authenticated");
+  }
 
   const body: VapiCallRequest = {
     phoneNumberId: config.fromPhoneNumber || undefined,
     customer: {
-      number: phone,
+      number: safety.destination,
       name: sellerName,
     },
     maxDurationSeconds: 300,
   };
 
-  if (assistantId) {
-    body.assistantId = assistantId;
-    body.assistantOverrides = {
-      variableValues: variables,
-    };
-  } else {
-    const ai = await getAIConfigForCall();
-    const personalizedPrompt = personalize(ai.systemPrompt, variables);
-    const opener = personalize(ai.openerScript, variables);
-
-    body.assistant = {
-      name: "Real Estate Acquisitions",
-      voice: {
-        provider: "11labs",
-        voiceId: "josh",
-      },
-      model: {
-        provider: "openai",
-        model: "gpt-4o",
-        systemPrompt: personalizedPrompt,
-        functions: [
-          {
-            name: "setAppointment",
-            description: "When the seller agrees to a walkthrough appointment",
-            parameters: {
-              type: "object",
-              properties: {
-                day: { type: "string", description: "Day of week" },
-                time: { type: "string", description: "Time like 2pm" },
-              },
-              required: ["day", "time"],
-            },
-          },
-          {
-            name: "logPainSignal",
-            description: "When seller mentions a pain signal",
-            parameters: {
-              type: "object",
-              properties: {
-                signal: { type: "string" },
-              },
-              required: ["signal"],
-            },
-          },
-          {
-            name: "logAskingPrice",
-            description: "When seller mentions what they want for the property",
-            parameters: {
-              type: "object",
-              properties: {
-                price: { type: "string" },
-              },
-              required: ["price"],
-            },
-          },
-          {
-            name: "addToDNC",
-            description: "If seller says do not call, stop calling, take me off the list",
-            parameters: {
-              type: "object",
-              properties: {},
-            },
-          },
-        ],
-      },
-      firstMessage: opener,
-    };
-  }
+  body.assistantId = assistantId;
+  body.assistantOverrides = buildVapiAssistantOverrides(
+    variables,
+    buildNaturalOpener(variables),
+    aiCallConfig?.elevenLabsVoiceId,
+  );
 
   const res = await fetch(resolveVapiCallEndpoint(config.apiEndpoint), {
     method: "POST",
@@ -233,6 +258,7 @@ export function isWithinCallWindow(start: string, end: string, timezone: string)
 }
 
 export async function scrubPhone(phone: string, scrubDnc: boolean, _scrubLitigants: boolean) {
+  void _scrubLitigants;
   const db = getDb();
   const result = { pass: true, reason: "" as string };
 

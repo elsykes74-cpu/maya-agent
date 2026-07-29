@@ -54,7 +54,7 @@ export default function AIConfig() {
   const [fields, setFields] = useState<ConfigFields | null>(null);
   const [configId, setConfigId] = useState<number | null>(null);
 
-  const { isLoading, data, isError } = trpc.aiConfig.get.useQuery(undefined, { retry: 2 });
+  const { isPending, data, isError } = trpc.aiConfig.get.useQuery(undefined, { retry: 2 });
 
   useEffect(() => {
     if (data && !fields) {
@@ -110,7 +110,7 @@ export default function AIConfig() {
     );
   }
 
-  if (isLoading || !fields) {
+  if (isPending || !fields) {
     return (
       <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 300 }}>
         <p style={{ color: C.muted, fontWeight: 600 }}>Loading config…</p>
@@ -254,17 +254,17 @@ export default function AIConfig() {
       {/* Save button */}
       <button
         onClick={handleSave}
-        disabled={updateMut.isLoading}
+        disabled={updateMut.isPending}
         style={{
           width: '100%', height: 52, borderRadius: 16, marginTop: 8,
           background: saved ? `linear-gradient(135deg, ${C.green}, #28A745)` : `linear-gradient(135deg, ${C.purple}, #4F46E5)`,
           color: '#fff', border: 'none', fontSize: 16, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          cursor: updateMut.isLoading ? 'wait' : 'pointer',
+          cursor: updateMut.isPending ? 'wait' : 'pointer',
           transition: 'background 0.3s',
         }}
       >
-        {saved ? <><RotateCcw size={18} /> Saved!</> : <><Save size={18} /> {updateMut.isLoading ? 'Saving…' : 'Save Changes'}</>}
+        {saved ? <><RotateCcw size={18} /> Saved!</> : <><Save size={18} /> {updateMut.isPending ? 'Saving…' : 'Save Changes'}</>}
       </button>
 
       <p style={{ fontSize: 12, color: C.muted, textAlign: 'center', margin: '12px 0 0', fontWeight: 500 }}>

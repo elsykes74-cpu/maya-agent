@@ -1,14 +1,20 @@
 import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { campaigns, campaignLeads, leads, dncList, callQueue } from "../../db/schema";
-import { getCallingConfig, isWithinCallWindow, scrubPhone, createVapiCall } from "../lib/vapi";
+import {
+  createVapiCall,
+  getAIConfigForCall,
+  getCallingConfig,
+  isWithinCallWindow,
+  scrubPhone,
+} from "../lib/vapi";
 import { placeTwilioOutboundCall, isTwilioConfigured } from "../lib/twilio";
 import { env } from "../lib/env";
 
 export const campaignsRouter = createRouter({
-  list: publicQuery
+  list: authedQuery
     .input(z.object({ status: z.string().optional(), limit: z.number().default(50), offset: z.number().default(0) }).optional())
     .query(async ({ input }) => {
       const db = getDb();
@@ -26,7 +32,7 @@ export const campaignsRouter = createRouter({
       return { items };
     }),
 
-  getById: publicQuery
+  getById: authedQuery
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -38,7 +44,7 @@ export const campaignsRouter = createRouter({
       return campaign;
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(z.object({
       name: z.string().min(1),
       description: z.string().optional(),
@@ -50,11 +56,12 @@ export const campaignsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(campaigns).values({ ...input, status: "draft" });
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db.insert(campaigns).values({ ...input, status: "draft" }).returning({ id: campaigns.id });
+      if (!created) throw new Error("Insert failed");
+      return { id: created.id, success: true };
     }),
 
-  update: publicQuery
+  update: authedQuery
     .input(z.object({
       id: z.number(),
       name: z.string().min(1).optional(),
@@ -73,7 +80,7 @@ export const campaignsRouter = createRouter({
       return { success: true };
     }),
 
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -81,7 +88,7 @@ export const campaignsRouter = createRouter({
       return { success: true };
     }),
 
-  populate: publicQuery
+  populate: authedQuery
     .input(z.object({ campaignId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -90,10 +97,10 @@ export const campaignsRouter = createRouter({
 
       const leadFilters = [];
       if (campaign.motivationFilter && campaign.motivationFilter !== "all") {
-        leadFilters.push(eq(leads.motivationLevel, campaign.motivationFilter as any));
+        leadFilters.push(eq(leads.motivationLevel, campaign.motivationFilter as NonNullable<typeof leads.$inferSelect.motivationLevel>));
       }
       if (campaign.stageFilter && campaign.stageFilter !== "all") {
-        leadFilters.push(eq(leads.pipelineStage, campaign.stageFilter as any));
+        leadFilters.push(eq(leads.pipelineStage, campaign.stageFilter as NonNullable<typeof leads.$inferSelect.pipelineStage>));
       }
       if (campaign.profileFilter) {
         leadFilters.push(eq(leads.profileId, campaign.profileFilter));
@@ -105,7 +112,7 @@ export const campaignsRouter = createRouter({
       const existingCampaignLeadIds = await db.query.campaignLeads.findMany({
         where: eq(campaignLeads.campaignId, input.campaignId),
       });
-      const existingLeadIds = new Set(existingCampaignLeadIds.map((cl: any) => cl.leadId));
+      const existingLeadIds = new Set(existingCampaignLeadIds.map(cl => cl.leadId));
 
       let added = 0;
       for (const lead of campaignLeadsList) {
@@ -136,7 +143,7 @@ export const campaignsRouter = createRouter({
     }),
 
   // Activate campaign → queue calls → dial via Twilio (falls back to Vapi)
-  activate: publicQuery
+  activate: authedQuery
     .input(z.object({ campaignId: z.number() }))
     .mutation(async ({ input, ctx }) => {
       const db = getDb();
@@ -153,15 +160,27 @@ export const campaignsRouter = createRouter({
       const appUrl = host ? `${proto}://${host}` : env.appUrl;
 
 
-      const twilioReady = isTwilioConfigured();
       const config = await getCallingConfig();
-      if (!twilioReady && (!config || !config.apiKey)) {
+      let aiCallConfig: Awaited<ReturnType<typeof getAIConfigForCall>> | null = null;
+      try {
+        aiCallConfig = await getAIConfigForCall();
+      } catch {
+        // Vapi may still be configured independently of the shared AI row.
+      }
+      const databaseTwilioReady = !!(
+        aiCallConfig?.twilioAccountSid &&
+        aiCallConfig?.twilioAuthToken &&
+        aiCallConfig?.twilioFromNumber
+      );
+      const twilioReady = isTwilioConfigured() || databaseTwilioReady;
+      const vapiReady = !!config?.apiKey;
+      if (!twilioReady && !vapiReady) {
         throw new Error("No calling provider configured. Add your Twilio credentials (or Vapi API key) in Settings.");
       }
 
       // Check call window
-      if (!isWithinCallWindow(config.callWindowStart || "09:00", config.callWindowEnd || "19:00", config.timezone || "America/New_York")) {
-        throw new Error(`Outside call window (${config.callWindowStart}–${config.callWindowEnd} ${config.timezone}). Calls will resume during business hours.`);
+      if (!isWithinCallWindow(config?.callWindowStart || "09:00", config?.callWindowEnd || "19:00", config?.timezone || "America/New_York")) {
+        throw new Error(`Outside call window (${config?.callWindowStart}–${config?.callWindowEnd} ${config?.timezone}). Calls will resume during business hours.`);
       }
 
       // Update campaign status
@@ -193,7 +212,7 @@ export const campaignsRouter = createRouter({
         }
 
         // Scrub
-        const scrub = await scrubPhone(cl.lead.phone, config.scrubDncBeforeCall || true, config.scrubLitigants || true);
+        const scrub = await scrubPhone(cl.lead.phone, config?.scrubDncBeforeCall ?? true, config?.scrubLitigants ?? true);
         if (!scrub.pass) {
           await db.update(campaignLeads)
             .set({ status: "skipped_dnc", scrubStatus: "fail_dnc", scrubDetails: scrub.reason })
@@ -208,7 +227,7 @@ export const campaignsRouter = createRouter({
           .where(eq(campaignLeads.id, cl.id));
 
         // Create call queue entry
-        const queueResult = await db.insert(callQueue).values({
+        const [queuedCall] = await db.insert(callQueue).values({
           campaignId: input.campaignId,
           campaignLeadId: cl.id,
           leadId: cl.leadId,
@@ -216,19 +235,29 @@ export const campaignsRouter = createRouter({
           status: "queued",
           scrubResult: "pass",
           scheduledAt: new Date(),
-        });
+        }).returning({ id: callQueue.id });
+        if (!queuedCall) throw new Error("Queue insert failed");
         queued++;
 
-        // Dial via Twilio (preferred) or fall back to Vapi
+        // Honor the configured provider. Vapi supplies streaming endpointing,
+        // interruption handling, and backchannel detection; Twilio remains a
+        // fallback when Vapi is not selected or configured.
         try {
           let callId: string | null = null;
+          const preferVapi = config?.provider === "vapi" && vapiReady;
 
-          if (twilioReady) {
+          if (preferVapi) {
+            const result = await createVapiCall(cl.leadId, cl.lead.phone, cl.lead.sellerName ?? "");
+            callId = result?.id ?? null;
+          } else if (twilioReady) {
             const result = await placeTwilioOutboundCall({
               to: cl.lead.phone,
               name: cl.lead.sellerName ?? "",
               address: cl.lead.propertyAddress ?? "",
               appUrl,
+              accountSid: aiCallConfig?.twilioAccountSid || undefined,
+              authToken: aiCallConfig?.twilioAuthToken || undefined,
+              fromNumber: aiCallConfig?.twilioFromNumber || undefined,
             });
             callId = result?.sid ?? null;
           } else {
@@ -239,7 +268,7 @@ export const campaignsRouter = createRouter({
           if (callId) {
             await db.update(callQueue)
               .set({ status: "dialing", externalCallId: callId, startedAt: new Date() })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+              .where(eq(callQueue.id, queuedCall.id));
             await db.update(campaignLeads)
               .set({ status: "queued", externalCallId: callId })
               .where(eq(campaignLeads.id, cl.id));
@@ -247,14 +276,14 @@ export const campaignsRouter = createRouter({
           } else {
             await db.update(callQueue)
               .set({ status: "failed", errorMessage: "Call provider returned no call ID" })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+              .where(eq(callQueue.id, queuedCall.id));
             failed++;
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           await db.update(callQueue)
             .set({ status: "failed", errorMessage: msg })
-            .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+            .where(eq(callQueue.id, queuedCall.id));
           failed++;
         }
       }
@@ -271,7 +300,7 @@ export const campaignsRouter = createRouter({
       };
     }),
 
-  stats: publicQuery
+  stats: authedQuery
     .input(z.object({ campaignId: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -292,7 +321,7 @@ export const campaignsRouter = createRouter({
       };
     }),
 
-  callQueue: publicQuery
+  callQueue: authedQuery
     .input(z.object({ campaignId: z.number(), limit: z.number().default(50) }))
     .query(async ({ input }) => {
       const db = getDb();

@@ -14,7 +14,7 @@ import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { sql } from "drizzle-orm";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,12 +24,13 @@ import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
 import { leads } from "../db/schema";
 import { notify } from "./lib/telegram";
-import { createMayaWebhookRouter } from "./routers/maya-webhook";
+import { createMayaWebhookRouter, twilioGuard } from "./routers/maya-webhook";
+import { getTwilioConfig } from "./routers/maya-router";
+import { placeTwilioOutboundCall } from "./lib/twilio";
 import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { createOAuthCallbackHandler } from "./kimi/auth";
-import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
 import {
 	getGoogleAuthUrl,
@@ -37,7 +38,7 @@ import {
 	getGoogleUserInfo,
 } from "./lib/google";
 import { signSessionToken } from "./kimi/session";
-import { upsertGoogleUser } from "./queries/users";
+import { findUserByGoogleId, upsertGoogleUser } from "./queries/users";
 import type { Context } from "hono";
 
 // ---------------------------------------------------------------------------
@@ -110,14 +111,24 @@ const getBearerToken = (c: Context): string => {
 	return match?.[1]?.trim() ?? "";
 };
 
+const secretsMatch = (provided: string, expected: string): boolean => {
+	if (!provided || !expected) return false;
+	const providedDigest = createHash("sha256").update(provided).digest();
+	const expectedDigest = createHash("sha256").update(expected).digest();
+	return timingSafeEqual(providedDigest, expectedDigest);
+};
+
+const getServiceSecret = (c: Context, headerName: string): string =>
+	getBearerToken(c) || c.req.header(headerName) || "";
+
 const requireClaudeEndpointAuth = (c: Context) => {
 	const expected = env.claudeEndpointSecret || env.appSecret;
 	if (!expected) {
 		return c.json({ error: "Claude endpoint secret not configured" }, 503);
 	}
 
-	const provided = getBearerToken(c) || c.req.header("x-maya-agent-secret") || "";
-	if (provided !== expected) {
+	const provided = getServiceSecret(c, "x-maya-agent-secret");
+	if (!secretsMatch(provided, expected)) {
 		return c.json({ error: "Unauthorized" }, 401);
 	}
 	return null;
@@ -174,6 +185,12 @@ app.get("/api/oauth/google/callback", oauthLimiter, async (c) => {
 
 		if (!googleUser.email_verified) {
 			return c.json({ error: "Google email not verified" }, 400);
+		}
+
+		const existingUser = await findUserByGoogleId(googleUser.sub);
+		const configuredOwner = Boolean(env.ownerEmail) && googleUser.email.toLowerCase() === env.ownerEmail;
+		if (!configuredOwner && existingUser?.role !== "admin") {
+			return c.json({ error: "Account is not authorized for this workspace" }, 403);
 		}
 
 		await upsertGoogleUser({
@@ -295,7 +312,7 @@ app.get("/api/db/health", async (c) => {
 		);
 	} catch (err) {
 		console.error("[db/health]", err);
-		const message = err instanceof Error ? err.message : "Database health check failed";
+		const message = "Database health check failed";
 		return c.json(
 			{
 				ok: false,
@@ -308,13 +325,15 @@ app.get("/api/db/health", async (c) => {
 	}
 });
 
-// ── One-tap bot setup (migration + webhook registration) ──────────────────
-// Visit: GET /api/admin/setup?secret=<APP_SECRET>
-app.get("/api/admin/setup", async (c) => {
-	const provided = c.req.query("secret") ?? "";
+// Administrative setup is POST-only and never accepts credentials in URLs.
+app.post("/api/admin/setup", async (c) => {
+	const provided = getServiceSecret(c, "x-maya-admin-secret");
 	const expected = env.appSecret || env.claudeEndpointSecret;
-	if (!expected || provided !== expected) {
-		return c.json({ error: "Unauthorized — add ?secret=YOUR_APP_SECRET to the URL" }, 401);
+	if (!expected) {
+		return c.json({ error: "Administrative endpoint is not configured" }, 503);
+	}
+	if (!secretsMatch(provided, expected)) {
+		return c.json({ error: "Unauthorized" }, 401);
 	}
 
 	const results: Record<string, string> = {};
@@ -351,8 +370,9 @@ app.get("/api/admin/setup", async (c) => {
 			  ADD COLUMN IF NOT EXISTS twilio_from_number   TEXT
 		`);
 		results.migration = "✅ DB migration applied";
-	} catch (err: any) {
-		results.migration = `❌ Migration failed: ${err?.message ?? err}`;
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : String(err);
+		results.migration = `❌ Migration failed: ${message}`;
 	}
 
 	// 2. Register Telegram webhooks
@@ -423,10 +443,13 @@ app.route("/api/maya", createMayaWebhookRouter());
 // ---------------------------------------------------------------------------
 // Twilio inbound call webhook — connects to VAPI assistant
 // ---------------------------------------------------------------------------
-app.post("/api/twilio/voice", async (c) => {
+app.post("/api/twilio/voice", twilioGuard, async (c) => {
 	const { getCallingConfig } = await import("./lib/vapi");
 	const config = await getCallingConfig().catch(() => null);
-	const assistantId = config?.assistantId || process.env.VAPI_ASSISTANT_ID || "8f0c5749-74f5-4757-8377-10e10f47dd25";
+	const assistantId = config?.assistantId || process.env.VAPI_ASSISTANT_ID;
+	if (!assistantId) {
+		return c.json({ error: "Voice assistant is not configured" }, 503);
+	}
 
 	const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -438,16 +461,122 @@ app.post("/api/twilio/voice", async (c) => {
 	return c.text(twiml, 200, { "Content-Type": "text/xml" });
 });
 
-app.post("/api/twilio/status", async (c) => {
-	const body = await c.req.parseBody().catch(() => ({}));
-	console.log("[twilio/status]", body);
-	return c.text("ok");
+app.post("/api/twilio/status", twilioGuard, async (c) => {
+	return c.body(null, 204);
 });
 
 // ---------------------------------------------------------------------------
 // Telegram multi-bot webhook
 // ---------------------------------------------------------------------------
 app.route("/api/telegram", telegramApp);
+
+// Preview-only, short-lived trigger used for an explicitly authorized recorded test call.
+// It is disabled unless all three scoped environment values exist and the expiry is current.
+app.post("/api/internal/preview-test-call", async (c) => {
+	if (process.env.VERCEL_ENV !== "preview") return c.json({ error: "Not Found" }, 404);
+
+	const expectedSecret = process.env.PREVIEW_TEST_CALL_SECRET ?? "";
+	const destination = process.env.PREVIEW_TEST_CALL_TO ?? "";
+	const expiresAt = Number(process.env.PREVIEW_TEST_CALL_EXPIRES_AT ?? "0");
+	const providedSecret = getBearerToken(c);
+
+	if (!expectedSecret || !destination || !Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
+		return c.json({ error: "Test-call authorization expired" }, 410);
+	}
+	if (!secretsMatch(providedSecret, expectedSecret)) {
+		return c.json({ error: "Unauthorized" }, 401);
+	}
+
+	try {
+		const { accountSid, authToken, fromNumber } = await getTwilioConfig();
+		if (!accountSid || !authToken || !fromNumber) {
+			return c.json({ error: "Twilio is not configured" }, 503);
+		}
+		const result = await placeTwilioOutboundCall({
+			to: destination,
+			name: "Erick",
+			address: "authorized end-to-end test",
+			appUrl: env.appUrl,
+			accountSid,
+			authToken,
+			fromNumber,
+			record: true,
+		});
+		if (!result.sid) return c.json({ error: result.error ?? "Call creation failed" }, 502);
+		return c.json({ sid: result.sid, status: result.status });
+	} catch (error) {
+		console.error("[preview-test-call]", error);
+		return c.json({ error: "Call creation failed" }, 500);
+	}
+});
+
+app.get("/api/internal/preview-test-call/:sid", async (c) => {
+	if (process.env.VERCEL_ENV !== "preview") return c.json({ error: "Not Found" }, 404);
+	const expectedSecret = process.env.PREVIEW_TEST_CALL_SECRET ?? "";
+	const destination = process.env.PREVIEW_TEST_CALL_TO ?? "";
+	const expiresAt = Number(process.env.PREVIEW_TEST_CALL_EXPIRES_AT ?? "0");
+	if (!expectedSecret || !destination || Date.now() >= expiresAt) return c.json({ error: "Test-call authorization expired" }, 410);
+	if (!secretsMatch(getBearerToken(c), expectedSecret)) return c.json({ error: "Unauthorized" }, 401);
+
+	const sid = c.req.param("sid");
+	if (!/^CA[a-f0-9]{32}$/i.test(sid)) return c.json({ error: "Invalid call identifier" }, 400);
+	const { accountSid, authToken } = await getTwilioConfig();
+	if (!accountSid || !authToken) return c.json({ error: "Twilio is not configured" }, 503);
+	const authorization = `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
+	const base = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}`;
+	const [callResponse, recordingsResponse] = await Promise.all([
+		fetch(`${base}/Calls/${sid}.json`, { headers: { Authorization: authorization } }),
+		fetch(`${base}/Calls/${sid}/Recordings.json?PageSize=20`, { headers: { Authorization: authorization } }),
+	]);
+	if (!callResponse.ok) return c.json({ error: "Unable to read call status" }, 502);
+	const call = await callResponse.json() as Record<string, unknown>;
+	if (String(call.to ?? "").replace(/\D/g, "") !== destination.replace(/\D/g, "")) return c.json({ error: "Unauthorized" }, 403);
+	const recordingsPayload = recordingsResponse.ok
+		? await recordingsResponse.json() as { recordings?: Array<Record<string, unknown>> }
+		: { recordings: [] };
+	const recording = recordingsPayload.recordings?.[0];
+	return c.json({
+		status: call.status,
+		duration: call.duration,
+		answeredBy: call.answered_by,
+		recording: recording ? { sid: recording.sid, status: recording.status, duration: recording.duration, channels: recording.channels } : null,
+	});
+});
+
+app.get("/api/internal/preview-test-call/:sid/recording", async (c) => {
+	if (process.env.VERCEL_ENV !== "preview") return c.json({ error: "Not Found" }, 404);
+	const expectedSecret = process.env.PREVIEW_TEST_CALL_SECRET ?? "";
+	const destination = process.env.PREVIEW_TEST_CALL_TO ?? "";
+	const expiresAt = Number(process.env.PREVIEW_TEST_CALL_EXPIRES_AT ?? "0");
+	if (!expectedSecret || !destination || Date.now() >= expiresAt) return c.json({ error: "Test-call authorization expired" }, 410);
+	if (!secretsMatch(getBearerToken(c), expectedSecret)) return c.json({ error: "Unauthorized" }, 401);
+
+	const sid = c.req.param("sid");
+	if (!/^CA[a-f0-9]{32}$/i.test(sid)) return c.json({ error: "Invalid call identifier" }, 400);
+	const { accountSid, authToken } = await getTwilioConfig();
+	if (!accountSid || !authToken) return c.json({ error: "Twilio is not configured" }, 503);
+	const authorization = `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`;
+	const base = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}`;
+	const callResponse = await fetch(`${base}/Calls/${sid}.json`, { headers: { Authorization: authorization } });
+	if (!callResponse.ok) return c.json({ error: "Unable to read call status" }, 502);
+	const call = await callResponse.json() as Record<string, unknown>;
+	if (String(call.to ?? "").replace(/\D/g, "") !== destination.replace(/\D/g, "")) return c.json({ error: "Unauthorized" }, 403);
+	const listResponse = await fetch(`${base}/Calls/${sid}/Recordings.json?PageSize=20`, { headers: { Authorization: authorization } });
+	if (!listResponse.ok) return c.json({ error: "Unable to read recordings" }, 502);
+	const payload = await listResponse.json() as { recordings?: Array<{ sid?: string; status?: string }> };
+	const recording = payload.recordings?.find((item) => item.sid && item.status === "completed") ?? payload.recordings?.[0];
+	if (!recording?.sid) return c.json({ error: "Recording not ready" }, 404);
+	const mediaResponse = await fetch(`${base}/Recordings/${recording.sid}.mp3`, { headers: { Authorization: authorization } });
+	if (!mediaResponse.ok || !mediaResponse.body) return c.json({ error: "Recording download failed" }, 502);
+	return new Response(mediaResponse.body, {
+		status: 200,
+		headers: {
+			"Content-Type": "audio/mpeg",
+			"Content-Disposition": `attachment; filename="maya-test-call-${sid}.mp3"`,
+			"Cache-Control": "private, no-store",
+		},
+	});
+});
 
 // ---------------------------------------------------------------------------
 // tRPC
@@ -462,19 +591,20 @@ app.all("/api/trpc/*", async (c) =>
 );
 
 // ---------------------------------------------------------------------------
-// Telegram webhook + setup
-// ---------------------------------------------------------------------------
-app.post("/api/telegram/webhook", handleTelegramWebhook);
-
-app.get("/api/telegram/setup", async (c) => {
+// Telegram setup
+app.post("/api/telegram/setup", async (c) => {
+  const expected = env.appSecret || env.claudeEndpointSecret;
+  const provided = getServiceSecret(c, "x-maya-admin-secret");
+  if (!expected) return c.json({ error: "Administrative endpoint is not configured" }, 503);
+  if (!secretsMatch(provided, expected)) return c.json({ error: "Unauthorized" }, 401);
   const host = c.req.header("x-forwarded-host") ?? c.req.header("host") ?? "";
   const proto = c.req.header("x-forwarded-proto") ?? "https";
   const appUrl = `${proto}://${host}`;
   try {
     await registerAllWebhooks(appUrl);
     return c.json({ ok: true, appUrl });
-  } catch (err: any) {
-    return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  } catch {
+    return c.json({ ok: false, error: "Telegram webhook setup failed" }, 500);
   }
 });
 
@@ -491,10 +621,12 @@ const INTAKE_CORS = {
 app.options("/api/lead-intake", (c) => c.body(null, 204, INTAKE_CORS));
 
 app.post("/api/lead-intake", async (c) => {
-  // Validate shared secret
   const secret = process.env.LEAD_INTAKE_SECRET || env.appSecret;
-  const provided = c.req.header("x-intake-secret") ?? c.req.query("secret") ?? "";
-  if (secret && provided !== secret) {
+  const provided = c.req.header("x-intake-secret") ?? "";
+  if (!secret) {
+    return c.json({ error: "Lead intake is not configured" }, 503, INTAKE_CORS);
+  }
+  if (!secretsMatch(provided, secret)) {
     return c.json({ error: "Unauthorized" }, 401, INTAKE_CORS);
   }
 
@@ -533,11 +665,13 @@ app.post("/api/lead-intake", async (c) => {
     excellent: "move_in_ready", good: "move_in_ready", fair: "light_rehab",
     poor: "medium_rehab", bad: "heavy_rehab",
   };
-  const condition = (conditionMap[conditionRaw.toLowerCase()] ?? conditionRaw) || undefined;
+  const normalizedCondition = conditionMap[conditionRaw.toLowerCase()] ?? conditionRaw;
+  const allowedConditions = ["light_rehab", "medium_rehab", "heavy_rehab", "move_in_ready"] as const;
+  const condition = allowedConditions.find((value) => value === normalizedCondition);
 
   try {
     const db = getDb();
-    const result = await db.insert(leads).values({
+    const inserted = await db.insert(leads).values({
       sellerName,
       phone: phone || null,
       email: email || null,
@@ -549,13 +683,15 @@ app.post("/api/lead-intake", async (c) => {
       askingPrice: askingPriceRaw ? String(parseFloat(askingPriceRaw.replace(/[^0-9.]/g, ""))) : null,
       beds: bedsRaw ? parseInt(bedsRaw, 10) || null : null,
       baths: bathsRaw ? String(parseFloat(bathsRaw)) : null,
-      condition: (condition as any) || null,
+      condition: condition || null,
       notes: notes || null,
       pipelineStage: "lead",
       motivationLevel: "cold",
-    });
+    }).returning({ id: leads.id });
 
-    const leadId = Number((result as any)[0]?.insertId ?? 0);
+    const lead = inserted[0];
+    if (!lead) throw new Error("Lead intake insert returned no row");
+    const leadId = lead.id;
 
     await notify(
       `🌐 <b>New Website Lead</b>\n` +

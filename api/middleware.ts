@@ -13,10 +13,10 @@ export const publicQuery = t.procedure;
 const requireAuth = t.middleware(async (opts) => {
   const { ctx, next } = opts;
 
-  if (!ctx.user) {
+  if (!ctx.user || ctx.user.role !== "admin") {
     throw new TRPCError({
-      code: "UNAUTHORIZED",
-      message: ErrorMessages.unauthenticated,
+      code: ctx.user ? "FORBIDDEN" : "UNAUTHORIZED",
+      message: ctx.user ? ErrorMessages.insufficientRole : ErrorMessages.unauthenticated,
     });
   }
 

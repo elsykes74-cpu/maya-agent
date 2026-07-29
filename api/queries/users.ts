@@ -51,6 +51,7 @@ export async function upsertGoogleUser(data: {
   avatar?: string | null;
 }) {
   const existing = await findUserByGoogleId(data.googleId);
+  const isConfiguredOwner = Boolean(env.ownerEmail) && data.email?.toLowerCase() === env.ownerEmail;
 
   if (existing) {
     const updateSet: Partial<InsertUser> = {
@@ -58,6 +59,7 @@ export async function upsertGoogleUser(data: {
       name: data.name ?? existing.name,
       email: data.email ?? existing.email,
       avatar: data.avatar ?? existing.avatar,
+      ...(isConfiguredOwner ? { role: "admin" as const } : {}),
     };
     await getDb()
       .update(schema.users)
@@ -75,7 +77,7 @@ export async function upsertGoogleUser(data: {
       name: data.name ?? null,
       email: data.email ?? null,
       avatar: data.avatar ?? null,
-      role: "user",
+      role: isConfiguredOwner ? "admin" : "user",
       lastSignInAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -85,6 +87,7 @@ export async function upsertGoogleUser(data: {
         name: data.name ?? undefined,
         email: data.email ?? undefined,
         avatar: data.avatar ?? undefined,
+        ...(isConfiguredOwner ? { role: "admin" as const } : {}),
       },
     });
 }

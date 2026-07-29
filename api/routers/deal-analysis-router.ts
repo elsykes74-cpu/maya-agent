@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { leads } from "../../db/schema";
 
 export const dealAnalysisRouter = createRouter({
-  calculateMAO: publicQuery
+  calculateMAO: authedQuery
     .input(z.object({
       arv: z.number().positive(),
       estimatedRepairs: z.number().min(0),
@@ -26,7 +26,7 @@ export const dealAnalysisRouter = createRouter({
       };
     }),
 
-  updateLeadDeal: publicQuery
+  updateLeadDeal: authedQuery
     .input(z.object({
       leadId: z.number(),
       arv: z.string().optional(),
@@ -42,7 +42,7 @@ export const dealAnalysisRouter = createRouter({
       return { success: true };
     }),
 
-  getLeadAnalysis: publicQuery
+  getLeadAnalysis: authedQuery
     .input(z.object({ leadId: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();

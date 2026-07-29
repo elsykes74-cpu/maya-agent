@@ -1,12 +1,12 @@
 import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { calls, leads } from "../../db/schema";
 import { createVapiCall, scrubPhone, getCallingConfig } from "../lib/vapi";
 
 export const callsRouter = createRouter({
-  list: publicQuery
+  list: authedQuery
     .input(
       z.object({
         leadId: z.number().optional(),
@@ -38,7 +38,7 @@ export const callsRouter = createRouter({
       return { items };
     }),
 
-  getById: publicQuery
+  getById: authedQuery
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -49,7 +49,7 @@ export const callsRouter = createRouter({
       return call;
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(z.object({
       leadId: z.number(),
       callType: z.enum(["initial", "follow_up", "appointment_confirmation", "voicemail"]).default("initial"),
@@ -68,14 +68,15 @@ export const callsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(calls).values({
+      const [created] = await db.insert(calls).values({
         ...input,
         sellerAskingPrice: input.sellerAskingPrice ? String(input.sellerAskingPrice) : null,
-      });
-      return { id: Number(result[0].insertId), success: true };
+      }).returning({ id: calls.id });
+      if (!created) throw new Error("Insert failed");
+      return { id: created.id, success: true };
     }),
 
-  update: publicQuery
+  update: authedQuery
     .input(z.object({
       id: z.number(),
       callOutcome: z.enum(["answered", "voicemail", "no_answer", "busy", "wrong_number", "disconnected", "callback_requested", "appointment_set", "not_interested", "dnc"]).optional(),
@@ -96,7 +97,7 @@ export const callsRouter = createRouter({
       return { success: true };
     }),
 
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -105,7 +106,7 @@ export const callsRouter = createRouter({
     }),
 
   // Dial a single lead via VAPI — same AI conversational flow as inbound
-  dial: publicQuery
+  dial: authedQuery
     .input(z.object({ leadId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -125,7 +126,7 @@ export const callsRouter = createRouter({
       return { ok: true, callId: vapiCall.id, status: vapiCall.status };
     }),
 
-  stats: publicQuery.query(async () => {
+  stats: authedQuery.query(async () => {
     const db = getDb();
     const total = await db.select({ count: sql<number>`count(*)` }).from(calls);
     const answered = await db.select({ count: sql<number>`count(*)` }).from(calls).where(eq(calls.callOutcome, "answered"));

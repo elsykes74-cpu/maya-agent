@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { eq, gte, and, lt, desc, sql } from "drizzle-orm";
 import { getDb } from "./queries/connection";
 import { leads } from "../db/schema";
@@ -16,10 +17,40 @@ import {
   generateOutreachAngle,
 } from "./lib/lead-scorer";
 import { env } from "./lib/env";
+import { deriveScopedSecret, safeEqual } from "./lib/secrets";
 import { handleQuickKickCommand, handleQuickKickNaturalLanguage } from "./bots/quickkick";
 import { handleLadyJayeCommand, handleLadyJayeNaturalLanguage } from "./bots/ladyjaye";
 
 export const telegramApp = new Hono();
+
+type TelegramBotName = "quickkick" | "ladyjaye";
+
+function telegramWebhookSecret(botName: TelegramBotName): string {
+  return deriveScopedSecret(env.appSecret, `telegram-webhook:${botName}`);
+}
+
+function telegramGuard(botName: TelegramBotName): MiddlewareHandler {
+  return async (c, next) => {
+    const expected = telegramWebhookSecret(botName);
+    const supplied = c.req.header("x-telegram-bot-api-secret-token") ?? "";
+    if (!expected) return c.text("Webhook verification is not configured", 503);
+    if (!safeEqual(expected, supplied)) return c.text("Forbidden", 403);
+    return next();
+  };
+}
+
+function isAllowedChat(botName: TelegramBotName, chatId: string): boolean {
+  const allowed = botName === "ladyjaye" ? env.telegramChatIdLadyJaye : env.telegramChatId;
+  return Boolean(allowed) && safeEqual(allowed, chatId);
+}
+
+const adminGuard: MiddlewareHandler = async (c, next) => {
+  const expected = env.claudeEndpointSecret || env.appSecret;
+  const supplied = c.req.header("x-maya-agent-secret") ?? "";
+  if (!expected) return c.json({ error: "Administrative authentication is not configured" }, 503);
+  if (!safeEqual(expected, supplied)) return c.json({ error: "Unauthorized" }, 401);
+  return next();
+};
 
 // ── Shared command dispatcher ──────────────────────────────────────────────
 async function dispatchCommand(
@@ -115,11 +146,12 @@ function parseUpdate(body: any): { chatId: string; cmd: string; parts: string[] 
 }
 
 // ── Quickkick webhook ──────────────────────────────────────────────────────
-telegramApp.post("/webhook", async (c) => {
+telegramApp.post("/webhook", telegramGuard("quickkick"), async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = parseUpdate(body);
   if (!parsed) return c.text("ok");
   const { chatId, cmd, parts } = parsed;
+  if (!isAllowedChat("quickkick", chatId)) return c.text("Forbidden", 403);
   try {
     await dispatchCommand(chatId, cmd, parts, env.telegramBotToken, "quickkick");
   } catch (err) {
@@ -130,13 +162,14 @@ telegramApp.post("/webhook", async (c) => {
 });
 
 // ── LadyJaye webhook ───────────────────────────────────────────────────────
-telegramApp.post("/ladyjaye", async (c) => {
+telegramApp.post("/ladyjaye", telegramGuard("ladyjaye"), async (c) => {
   const token = env.telegramBotTokenLadyJaye;
   if (!token) return c.text("ok");
   const body = await c.req.json().catch(() => null);
   const parsed = parseUpdate(body);
   if (!parsed) return c.text("ok");
   const { chatId, cmd, parts } = parsed;
+  if (!isAllowedChat("ladyjaye", chatId)) return c.text("Forbidden", 403);
   try {
     await dispatchCommand(chatId, cmd, parts, token, "ladyjaye");
   } catch (err) {
@@ -150,27 +183,22 @@ telegramApp.post("/ladyjaye", async (c) => {
 export async function registerAllWebhooks(appUrl: string): Promise<void> {
   const base = appUrl.replace(/\/$/, "");
 
-  // Only register when the operator explicitly set the token — env.telegramBotToken
-  // has a hardcoded fallback that must not be used to claim a webhook.
+  // Only register when the operator explicitly set the token.
   if (process.env.TELEGRAM_BOT_TOKEN) {
     const url = `${base}/api/telegram/webhook`;
-    const ok = await registerWebhook(env.telegramBotToken, url);
+    const ok = await registerWebhook(env.telegramBotToken, url, telegramWebhookSecret("quickkick"));
     console.log(`[telegram] Quickkick webhook ${ok ? "registered" : "FAILED"}: ${url}`);
   }
 
   if (process.env.TELEGRAM_BOT_TOKEN_LADYJAYE) {
     const url = `${base}/api/telegram/ladyjaye`;
-    const ok = await registerWebhook(env.telegramBotTokenLadyJaye, url);
+    const ok = await registerWebhook(env.telegramBotTokenLadyJaye, url, telegramWebhookSecret("ladyjaye"));
     console.log(`[telegram] LadyJaye webhook ${ok ? "registered" : "FAILED"}: ${url}`);
   }
 }
 
 // ── Admin: manual re-registration endpoint ────────────────────────────────
-telegramApp.post("/register-webhooks", async (c) => {
-  const secret = c.req.header("x-maya-agent-secret") ?? "";
-  const expected = env.claudeEndpointSecret || env.appSecret;
-  if (!expected || secret !== expected) return c.json({ error: "Unauthorized" }, 401);
-
+telegramApp.post("/register-webhooks", adminGuard, async (c) => {
   const appUrl = env.appUrl;
   if (!appUrl || appUrl.includes("localhost")) {
     return c.json({ error: "APP_URL not set or is localhost — set it to your public domain" }, 400);
@@ -181,7 +209,7 @@ telegramApp.post("/register-webhooks", async (c) => {
 });
 
 // ── Health: show current webhook status for both bots ─────────────────────
-telegramApp.get("/health", async (c) => {
+telegramApp.get("/health", adminGuard, async (c) => {
   const [qk, lj] = await Promise.all([
     env.telegramBotToken ? getWebhookInfo(env.telegramBotToken) : null,
     env.telegramBotTokenLadyJaye ? getWebhookInfo(env.telegramBotTokenLadyJaye) : null,

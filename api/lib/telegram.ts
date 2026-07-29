@@ -39,12 +39,16 @@ export async function sendAlert(text: string, bot: "quickkick" | "ladyjaye" = "q
   await sendMessage(chatId, text, { parse_mode: "HTML", token });
 }
 
-export async function registerWebhook(token: string, webhookUrl: string): Promise<boolean> {
+export async function registerWebhook(token: string, webhookUrl: string, secretToken: string): Promise<boolean> {
   try {
     const res = await fetch(`${botUrl(token)}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: webhookUrl, drop_pending_updates: true }),
+      body: JSON.stringify({
+        url: webhookUrl,
+        drop_pending_updates: true,
+        secret_token: secretToken,
+      }),
     });
     const data = await res.json().catch(() => null) as any;
     if (!res.ok || !data?.ok) {

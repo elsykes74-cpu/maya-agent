@@ -8,98 +8,69 @@ const DATABASE_ENV_KEYS = [
   "SUPABASE_DB_URL",
 ] as const;
 
-/** Cache raw values so we can test them without side-effects */
-function _raw(name: string): string | undefined {
-  return process.env[name] || undefined;
+function optional(name: string): string {
+  return (process.env[name] ?? "").trim().replace(/^['"]|['"]$/g, "");
 }
 
-/** Return value OR empty string without throwing. */
-function soft(name: string): string {
-  return process.env[name] ?? "";
-}
-
-function normalizeEnvValue(value: string): string {
-  return value.trim().replace(/^['"]|['"]$/g, "");
+function required(name: string): string {
+  const value = optional(name);
+  if (!value && process.env.NODE_ENV === "production") {
+    console.error(`[env] Missing required variable: ${name}`);
+  }
+  return value;
 }
 
 function isPostgresConnectionString(value: string): boolean {
   try {
-    const parsed = new URL(value);
-    return ["postgres:", "postgresql:"].includes(parsed.protocol);
+    return ["postgres:", "postgresql:"].includes(new URL(value).protocol);
   } catch {
     return false;
   }
 }
 
-/**
- * Like required() but NO THROW.
- * Returns the raw value; logs a warning when production.
- */
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v && process.env.NODE_ENV === "production") {
-    console.error(`[env] MISSING required var: ${name}`);
-  }
-  return v ?? "";
-}
-
-function databaseUrl(): string {
-  const configuredNames: string[] = [];
-
+function resolveDatabaseUrl(): string {
   for (const name of DATABASE_ENV_KEYS) {
-    const raw = process.env[name];
-    if (!raw?.trim()) continue;
-
-    configuredNames.push(name);
-    const value = normalizeEnvValue(raw);
-    if (isPostgresConnectionString(value)) return value;
-
-    if (process.env.NODE_ENV === "production") {
-      console.error(`[env] Ignoring invalid database URL var: ${name}`);
+    const value = optional(name);
+    if (value && isPostgresConnectionString(value)) return value;
+    if (value && process.env.NODE_ENV === "production") {
+      console.error(`[env] Ignoring invalid PostgreSQL URL in ${name}`);
     }
   }
-
-  if (process.env.NODE_ENV === "production") {
-    const detail = configuredNames.length
-      ? `No valid database URL found in: ${configuredNames.join(", ")}`
-      : `MISSING database URL var: ${DATABASE_ENV_KEYS.join(" or ")}`;
-    console.error(`[env] ${detail}`);
-  }
-
   return "";
 }
 
-/** Run once at boot - returns list of bad / missing vars. */
 export function validateEnv(): string[] {
-  const required_keys = [
-    "APP_ID",
-    "APP_SECRET",
-    "KIMI_AUTH_URL",
-    "KIMI_OPEN_URL",
-    "NODE_ENV",
-  ] as const;
-  const missing = required_keys.filter((k) => !process.env[k]);
-  if (!databaseUrl()) missing.push("valid DATABASE_URL or POSTGRES_URL");
-  return missing;
+  const issues: string[] = [];
+  const requiredNames = ["APP_SECRET", "NODE_ENV"];
+
+  for (const name of requiredNames) {
+    if (!optional(name)) issues.push(name);
+  }
+  if (!resolveDatabaseUrl()) issues.push("valid DATABASE_URL or POSTGRES_URL");
+  if (optional("APP_SECRET").length > 0 && optional("APP_SECRET").length < 32) {
+    issues.push("APP_SECRET must contain at least 32 characters");
+  }
+  return issues;
 }
 
 export const env = {
-  appId: required("APP_ID"),
+  appId: optional("APP_ID"),
   appSecret: required("APP_SECRET"),
   isProduction: process.env.NODE_ENV === "production",
-  databaseUrl: databaseUrl(),
-  kimiAuthUrl: required("KIMI_AUTH_URL"),
-  kimiOpenUrl: required("KIMI_OPEN_URL"),
-  anthropicApiKey: soft("ANTHROPIC_API_KEY") || soft("ANTHROPIC_KEY"),
-  braveApiKey: soft("BRAVE_API_KEY"),
-  claudeEndpointSecret: soft("CLAUDE_ENDPOINT_SECRET"),
-  ownerUnionId: soft("OWNER_UNION_ID"),
-  appUrl: soft("APP_URL") || "http://localhost:3000",
-  googleClientId: soft("GOOGLE_CLIENT_ID"),
-  googleClientSecret: soft("GOOGLE_CLIENT_SECRET"),
-  telegramBotToken: soft("TELEGRAM_BOT_TOKEN") || "8063610170:AAFvRIccv3tH0U5xjEdqtFYe5Wq_L08OBR0",
-  telegramChatId: soft("TELEGRAM_CHAT_ID") || "8693969643",
-  // LadyJaye — second bot
-  telegramBotTokenLadyJaye: soft("TELEGRAM_BOT_TOKEN_LADYJAYE"),
-  telegramChatIdLadyJaye: soft("TELEGRAM_CHAT_ID_LADYJAYE"),
-};
+  databaseUrl: resolveDatabaseUrl(),
+  kimiAuthUrl: optional("KIMI_AUTH_URL"),
+  kimiOpenUrl: optional("KIMI_OPEN_URL"),
+  anthropicApiKey: optional("ANTHROPIC_API_KEY") || optional("ANTHROPIC_KEY"),
+  braveApiKey: optional("BRAVE_API_KEY"),
+  claudeEndpointSecret: optional("CLAUDE_ENDPOINT_SECRET"),
+  ownerUnionId: optional("OWNER_UNION_ID"),
+  ownerEmail: optional("OWNER_EMAIL").toLowerCase(),
+  appUrl: optional("APP_URL") || "http://localhost:3000",
+  pipecatWebsocketUrl: optional("PIPECAT_WEBSOCKET_URL"),
+  googleClientId: optional("GOOGLE_CLIENT_ID"),
+  googleClientSecret: optional("GOOGLE_CLIENT_SECRET"),
+  telegramBotToken: optional("TELEGRAM_BOT_TOKEN"),
+  telegramChatId: optional("TELEGRAM_CHAT_ID"),
+  telegramBotTokenLadyJaye: optional("TELEGRAM_BOT_TOKEN_LADYJAYE"),
+  telegramChatIdLadyJaye: optional("TELEGRAM_CHAT_ID_LADYJAYE"),
+} as const;

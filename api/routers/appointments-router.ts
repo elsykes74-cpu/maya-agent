@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { appointments } from "../../db/schema";
 
 export const appointmentsRouter = createRouter({
-  list: publicQuery
+  list: authedQuery
     .input(
       z.object({
         status: z.string().optional(),
@@ -33,7 +33,7 @@ export const appointmentsRouter = createRouter({
       return { items };
     }),
 
-  getById: publicQuery
+  getById: authedQuery
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -44,7 +44,7 @@ export const appointmentsRouter = createRouter({
       return appt;
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(z.object({
       leadId: z.number(),
       scheduledDate: z.date(),
@@ -55,11 +55,12 @@ export const appointmentsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(appointments).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db.insert(appointments).values(input).returning({ id: appointments.id });
+      if (!created) throw new Error("Insert failed");
+      return { id: created.id, success: true };
     }),
 
-  update: publicQuery
+  update: authedQuery
     .input(z.object({
       id: z.number(),
       scheduledDate: z.date().optional(),
@@ -78,7 +79,7 @@ export const appointmentsRouter = createRouter({
       return { success: true };
     }),
 
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -86,7 +87,7 @@ export const appointmentsRouter = createRouter({
       return { success: true };
     }),
 
-  stats: publicQuery.query(async () => {
+  stats: authedQuery.query(async () => {
     const db = getDb();
     const total = await db.select({ count: sql<number>`count(*)` }).from(appointments);
     const scheduled = await db.select({ count: sql<number>`count(*)` }).from(appointments).where(eq(appointments.status, "scheduled"));
