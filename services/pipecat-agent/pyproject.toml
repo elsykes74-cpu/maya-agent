@@ -1,0 +1,20 @@
+[project]
+name = "maya-pipecat-agent"
+version = "0.1.0"
+description = "Maya realtime Twilio voice agent powered by Pipecat"
+requires-python = ">=3.11"
+dependencies = [
+  "pipecat-ai[anthropic,elevenlabs,runner,silero,websocket]>=1.6.0,<2",
+]
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1.404,<2",
+  "ruff>=0.12.11,<1",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

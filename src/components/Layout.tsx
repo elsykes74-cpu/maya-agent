@@ -1,6 +1,7 @@
 import { Outlet, useLocation, useNavigate } from 'react-router'
-import { Home, Users, PhoneCall, Megaphone, LayoutGrid } from 'lucide-react'
+import { Home, Users, PhoneCall, Megaphone, LayoutGrid, Eye } from 'lucide-react'
 import { SpheresBackground } from './SpheresBackground'
+import { isPublicPreview } from '@/lib/preview'
 
 const TABS = [
   { path: '/', label: 'Home', icon: Home },
@@ -28,6 +29,15 @@ export default function Layout() {
     <div className="app-shell">
       <SpheresBackground />
       <main className="flex-1 overflow-y-auto hide-scrollbar pb-24">
+        {isPublicPreview && (
+          <div
+            role="status"
+            style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '9px 14px', background: 'linear-gradient(135deg, #0D9488, #2563EB)', color: '#fff', fontSize: 12, fontWeight: 800, letterSpacing: '0.02em', boxShadow: '0 4px 16px rgba(15,118,110,0.2)' }}
+          >
+            <Eye size={15} aria-hidden="true" />
+            PUBLIC PREVIEW · Protected actions are disabled
+          </div>
+        )}
         <Outlet />
       </main>
 

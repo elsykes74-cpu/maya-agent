@@ -38,16 +38,18 @@ async function exchangeAuthCode(
 }
 
 /** Lazy JWK set – fetched on first use, not at module load time. */
-let _jwksPromise: Promise<jose.CognitoJWKSCreator<jose.Any> | jose.CertificateJWKSCreator> | null = null;
-function getJwks(): Promise<jose.CognitoJWKSCreator<jose.Any> | jose.CertificateJWKSCreator> {
-  if (!_jwksPromise) {
+type RemoteJwkSet = ReturnType<typeof jose.createRemoteJWKSet>;
+let remoteJwks: RemoteJwkSet | null = null;
+
+function getJwks(): RemoteJwkSet {
+  if (!remoteJwks) {
     const base = env.kimiAuthUrl;
     if (!base) throw new Error("kimiAuthUrl is empty – cannot fetch JWKS");
-    _jwksPromise = jose.createRemoteJWKSet(
+    remoteJwks = jose.createRemoteJWKSet(
       new URL(`${base}/api/.well-known/jwks.json`),
     );
   }
-  return _jwksPromise;
+  return remoteJwks;
 }
 
 async function verifyAccessToken(
@@ -109,6 +111,12 @@ export function createOAuthCallbackHandler() {
       const userProfile = await kimiUsers.getProfile(tokenResp.access_token);
       if (!userProfile) {
         throw new Error("Failed to fetch user profile from Kimi Open");
+      }
+
+      const existingUser = await findUserByUnionId(userId);
+      const configuredOwner = Boolean(env.ownerUnionId) && userId === env.ownerUnionId;
+      if (!configuredOwner && existingUser?.role !== "admin") {
+        return c.json({ error: "Account is not authorized for this workspace" }, 403);
       }
 
       await upsertUser({

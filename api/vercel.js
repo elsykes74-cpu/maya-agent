@@ -24,9 +24,20 @@ export default async function handler(req, res) {
     const response = await app.fetch(request)
 
     res.statusCode = response.status
+
+    // Fetch Headers combines repeated values when iterated. That is unsafe for
+    // Set-Cookie because each cookie must remain a distinct response header.
+    // In particular, OAuth sets both a CSRF state cookie and a redirect cookie.
     for (const [key, value] of response.headers.entries()) {
-      res.setHeader(key, value)
+      if (key.toLowerCase() !== 'set-cookie') {
+        res.setHeader(key, value)
+      }
     }
+    const setCookies = response.headers.getSetCookie?.() ?? []
+    if (setCookies.length > 0) {
+      res.setHeader('set-cookie', setCookies)
+    }
+
     const responseBody = await response.arrayBuffer()
     res.end(Buffer.from(responseBody))
   } catch (err) {

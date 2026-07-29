@@ -4,9 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+
 import {
   Target,
   MapPin,
@@ -24,7 +23,6 @@ import {
   TrendingUp,
   CheckCircle2,
   Circle,
-  AlertTriangle,
   Building2,
   Users,
 } from 'lucide-react'
@@ -314,10 +312,6 @@ export default function LeadFinder() {
     onError: (e) => toast.error(e.message),
   })
 
-  const { data: exportData } = trpc.leadFinder.exportCRM.useQuery(
-    { minScore: Number(scoreFilter), leadType: typeFilter },
-    { enabled: false }
-  )
 
   const handleExportCSV = async () => {
     if (!queueData?.items?.length) { toast.error('No leads to export'); return }

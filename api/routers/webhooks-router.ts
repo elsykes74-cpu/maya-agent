@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList } from "../../db/schema";
 
 export const webhooksRouter = createRouter({
-  receive: publicQuery
+  receive: authedQuery
     .input(z.object({
       provider: z.enum(["vapi", "bland", "retell", "custom"]),
       eventType: z.string(),
@@ -14,21 +14,22 @@ export const webhooksRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
       
-      const result = await db.insert(webhookEvents).values({
+      const [event] = await db.insert(webhookEvents).values({
         provider: input.provider,
         eventType: input.eventType,
         payload: JSON.stringify(input.payload),
-      });
+      }).returning({ id: webhookEvents.id });
+      if (!event) throw new Error("Insert failed");
 
       // Process Vapi events
       if (input.provider === "vapi") {
         await handleVapiWebhook(input.payload, db);
       }
 
-      return { received: true, eventId: Number(result[0].insertId) };
+      return { received: true, eventId: event.id };
     }),
 
-  list: publicQuery
+  list: authedQuery
     .input(z.object({ provider: z.string().optional(), limit: z.number().default(50) }).optional())
     .query(async ({ input }) => {
       const db = getDb();
@@ -44,7 +45,7 @@ export const webhooksRouter = createRouter({
       return { items };
     }),
 
-  retry: publicQuery
+  retry: authedQuery
     .input(z.object({ eventId: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();

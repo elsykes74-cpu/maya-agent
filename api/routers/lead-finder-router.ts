@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, desc, sql, and, gte, lt } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { leads } from "../../db/schema";
 import {
@@ -13,7 +13,7 @@ import {
 import { sendAlert, formatLeadCard } from "../lib/telegram";
 
 export const leadFinderRouter = createRouter({
-  getStats: publicQuery.query(async () => {
+  getStats: authedQuery.query(async () => {
     const db = getDb();
 
     const [hot, warm, nurture, low, byType] = await Promise.all([
@@ -49,7 +49,7 @@ export const leadFinderRouter = createRouter({
     };
   }),
 
-  getPriorityQueue: publicQuery
+  getPriorityQueue: authedQuery
     .input(
       z.object({
         limit: z.number().default(50),
@@ -89,7 +89,7 @@ export const leadFinderRouter = createRouter({
       return { items, total: Number(countResult[0]?.count ?? 0) };
     }),
 
-  recomputeScore: publicQuery
+  recomputeScore: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -114,7 +114,7 @@ export const leadFinderRouter = createRouter({
       return { id: input.id, score, motivation };
     }),
 
-  recomputeAllScores: publicQuery.mutation(async () => {
+  recomputeAllScores: authedQuery.mutation(async () => {
     const db = getDb();
     const allLeads = await db.query.leads.findMany();
     let hotCount = 0;
@@ -140,7 +140,7 @@ export const leadFinderRouter = createRouter({
     return { updated: allLeads.length };
   }),
 
-  generateOutreach: publicQuery
+  generateOutreach: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -159,7 +159,7 @@ export const leadFinderRouter = createRouter({
       return { callOpening, smsOpener, outreachAngle };
     }),
 
-  generateAllOutreach: publicQuery.mutation(async () => {
+  generateAllOutreach: authedQuery.mutation(async () => {
     const db = getDb();
     // Only generate for leads that don't have outreach yet
     const pending = await db.query.leads.findMany({
@@ -180,7 +180,7 @@ export const leadFinderRouter = createRouter({
     return { generated: pending.length };
   }),
 
-  exportCRM: publicQuery
+  exportCRM: authedQuery
     .input(
       z
         .object({

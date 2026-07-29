@@ -3,7 +3,7 @@ export async function elevenLabsTTSStream(
   voiceId: string,
   apiKey: string
 ): Promise<Response> {
-  return fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`, {
+  return fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=3&output_format=mp3_22050_32`, {
     method: "POST",
     headers: {
       "xi-api-key": apiKey,
@@ -12,8 +12,13 @@ export async function elevenLabsTTSStream(
     },
     body: JSON.stringify({
       text,
-      model_id: "eleven_turbo_v2_5",
-      voice_settings: { stability: 0.45, similarity_boost: 0.80, style: 0.35, use_speaker_boost: true },
+      model_id: "eleven_flash_v2_5",
+      voice_settings: {
+        stability: 0.36,
+        similarity_boost: 0.78,
+        style: 0.18,
+        use_speaker_boost: true,
+      },
     }),
   });
 }

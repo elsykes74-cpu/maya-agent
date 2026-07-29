@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { leads, leadSources, leadProfiles } from "../../db/schema";
 import { computeLeadScore, scoreToMotivation } from "../lib/lead-scorer";
@@ -13,7 +13,7 @@ const LEAD_TYPES = [
 ] as const;
 
 export const leadsRouter = createRouter({
-  list: publicQuery
+  list: authedQuery
     .input(
       z.object({
         stage: z.string().optional(),
@@ -61,7 +61,7 @@ export const leadsRouter = createRouter({
       return { items, total: countResult[0]?.count ?? 0 };
     }),
 
-  getById: publicQuery
+  getById: authedQuery
     .input(z.object({ id: z.number() }))
     .query(async ({ input }) => {
       const db = getDb();
@@ -72,7 +72,7 @@ export const leadsRouter = createRouter({
       return lead;
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(z.object({
       sellerName: z.string().min(1),
       phone: z.string().optional(),
@@ -163,7 +163,7 @@ export const leadsRouter = createRouter({
       return { id: newId, success: true };
     }),
 
-  update: publicQuery
+  update: authedQuery
     .input(z.object({
       id: z.number(),
       sellerName: z.string().min(1).optional(),
@@ -250,7 +250,7 @@ export const leadsRouter = createRouter({
       return { success: true };
     }),
 
-  delete: publicQuery
+  delete: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -258,7 +258,7 @@ export const leadsRouter = createRouter({
       return { success: true };
     }),
 
-  stats: publicQuery.query(async () => {
+  stats: authedQuery.query(async () => {
     const db = getDb();
     
     const hot = await db.select({ count: sql<number>`count(*)` }).from(leads).where(eq(leads.motivationLevel, "hot"));
@@ -282,14 +282,14 @@ export const leadsRouter = createRouter({
     };
   }),
 
-  sources: publicQuery.query(async () => {
+  sources: authedQuery.query(async () => {
     const db = getDb();
     return db.query.leadSources.findMany({
       orderBy: [desc(leadSources.createdAt)],
     });
   }),
 
-  profiles: publicQuery.query(async () => {
+  profiles: authedQuery.query(async () => {
     const db = getDb();
     return db.query.leadProfiles.findMany({
       orderBy: [desc(leadProfiles.priority)],

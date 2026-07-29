@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
-import { PhoneCall, Bot, Shield, Zap, Sparkles } from 'lucide-react';
+import { useLocation } from 'react-router';
+import { PhoneCall, Bot, Shield, Zap } from 'lucide-react';
 
 const kimiConfigured = !!(import.meta.env.VITE_KIMI_AUTH_URL && import.meta.env.VITE_APP_ID);
 
@@ -19,21 +19,22 @@ function getKimiOAuthUrl(): string {
 }
 
 export default function Login() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState<'kimi' | 'google' | 'demo' | null>(null);
+  const location = useLocation();
+  const [loading, setLoading] = useState<'kimi' | 'google' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const returnTo = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/';
 
   const handleKimiLogin = () => {
     setError(null);
     if (!kimiConfigured) {
-      setError('Kimi OAuth is not configured on this deployment. Use Demo Mode or add VITE_KIMI_AUTH_URL and VITE_APP_ID to your environment variables.');
+      setError('Kimi sign-in is not available on this deployment. Please use Google sign-in or contact support.');
       return;
     }
     try {
       setLoading('kimi');
       window.location.href = getKimiOAuthUrl();
-    } catch (e: any) {
-      setError('Failed to build Kimi OAuth URL: ' + e.message);
+    } catch {
+      setError('Unable to start Kimi sign-in. Please try again or use Google sign-in.');
       setLoading(null);
     }
   };
@@ -42,12 +43,12 @@ export default function Login() {
     setError(null);
     setLoading('google');
     try {
-      const res = await fetch('/api/auth/google/url');
+      const res = await fetch(`/api/auth/google/url?redirectTo=${encodeURIComponent(returnTo)}`);
       const data = await res.json();
       if (data.authUrl) {
         window.location.href = data.authUrl;
       } else {
-        setError(data.error || 'Google OAuth is not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to your environment variables.');
+        setError(data.error || 'Google sign-in is not available on this deployment. Please try Kimi or contact support.');
         setLoading(null);
       }
     } catch {
@@ -56,11 +57,6 @@ export default function Login() {
     }
   };
 
-  const handleDemo = () => {
-    setLoading('demo');
-    localStorage.setItem('maya_demo_mode', 'true');
-    navigate('/');
-  };
 
   return (
     <div className="app-shell" style={{ background: 'linear-gradient(180deg, var(--bg) 0%, var(--bg-warm) 100%)' }}>
@@ -75,10 +71,10 @@ export default function Login() {
           <Bot size={48} className="text-white" />
         </div>
 
-        <h1 className="text-[32px] font-bold text-[#1A1D26] text-center" style={{ letterSpacing: '-0.03em' }}>
+        <h1 className="text-[32px] font-bold text-[#F5F7FA] text-center" style={{ letterSpacing: '-0.03em' }}>
           AI Calling Agent
         </h1>
-        <p className="text-[17px] text-[#8E92A0] text-center mt-2 leading-relaxed">
+        <p className="text-[17px] text-[#C7CBD6] text-center mt-2 leading-relaxed">
           Never miss a motivated seller lead. Your AI agent calls 24/7.
         </p>
 
@@ -91,7 +87,7 @@ export default function Login() {
 
       <div className="px-6 pb-12 space-y-3">
         {error && (
-          <div style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: 16, padding: '12px 16px', marginBottom: 4 }}>
+          <div role="alert" aria-live="polite" style={{ background: '#FFF5F5', border: '1px solid #FED7D7', borderRadius: 16, padding: '12px 16px', marginBottom: 4 }}>
             <p style={{ fontSize: 13, color: '#C53030', margin: 0, lineHeight: 1.5, fontWeight: 500 }}>{error}</p>
           </div>
         )}
@@ -99,7 +95,7 @@ export default function Login() {
         <button
           onClick={handleKimiLogin}
           disabled={loading !== null}
-          className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50"
+          className="w-full ios-btn ios-btn-primary text-[18px] py-4 disabled:opacity-50 focus-visible:outline focus-visible:outline-4 focus-visible:outline-[#5EEAD4] focus-visible:outline-offset-2"
         >
           {loading === 'kimi' ? 'Signing in…' : 'Sign in with Kimi'}
         </button>
@@ -107,7 +103,7 @@ export default function Login() {
         <button
           onClick={handleGoogleLogin}
           disabled={loading !== null}
-          className="w-full ios-btn bg-white border border-[#E5E5EA] text-[#1A1D26] text-[18px] py-4 disabled:opacity-50"
+          className="w-full ios-btn bg-white border border-[#E5E5EA] text-[#1A1D26] text-[18px] py-4 disabled:opacity-50 focus-visible:outline focus-visible:outline-4 focus-visible:outline-[#5EEAD4] focus-visible:outline-offset-2"
           style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.9)' }}
         >
           {loading === 'google' ? 'Signing in…' : (
@@ -117,24 +113,9 @@ export default function Login() {
           )}
         </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0' }}>
-          <div style={{ flex: 1, height: 1, background: '#E5E5EA' }} />
-          <span style={{ fontSize: 13, color: '#B8BCC8', fontWeight: 600 }}>or</span>
-          <div style={{ flex: 1, height: 1, background: '#E5E5EA' }} />
-        </div>
-
-        <button
-          onClick={handleDemo}
-          disabled={loading !== null}
-          className="w-full ios-btn disabled:opacity-50"
-          style={{ background: 'linear-gradient(135deg, #8B5CF6, #7C3AED)', color: '#fff', fontSize: 18, padding: '16px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-        >
-          <Sparkles size={20} />
-          {loading === 'demo' ? 'Loading…' : 'Try Demo Mode'}
-        </button>
-
-        <p className="text-center text-[13px] text-[#B8BCC8] pt-2">
-          Demo mode uses sample data. Sign in for live features.
+        <p className="flex items-center justify-center gap-1.5 pt-2 text-center text-[13px] text-[#AEB4C2]">
+          <Shield size={14} aria-hidden="true" />
+          Encrypted workspace access. Production data stays private.
         </p>
       </div>
     </div>
@@ -155,7 +136,7 @@ function FeaturePill({ icon, label }: { icon: React.ReactNode; label: string }) 
 
 function GoogleG() {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24">
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
       <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
       <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
       <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />

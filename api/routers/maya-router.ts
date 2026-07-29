@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { Buffer } from "node:buffer";
 import { z } from "zod";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { placeTwilioOutboundCall } from "../lib/twilio";
 import { supabase } from "../lib/supabase";
 import { env } from "../lib/env";
@@ -17,7 +17,7 @@ const VOICES = [
 
 const activeCalls = new Map<string, { to: string; status: string; startedAt: Date }>();
 
-async function getTwilioConfig() {
+export async function getTwilioConfig() {
   const { data } = await supabase
     .from("ai_config")
     .select("twilio_account_sid, twilio_auth_token, twilio_from_number")
@@ -31,9 +31,9 @@ async function getTwilioConfig() {
 }
 
 export const mayaRouter = createRouter({
-  listVoices: publicQuery.query(() => ({ voices: VOICES })),
+  listVoices: authedQuery.query(() => ({ voices: VOICES })),
 
-  checkConfig: publicQuery.query(async () => {
+  checkConfig: authedQuery.query(async () => {
     const { accountSid, authToken, fromNumber } = await getTwilioConfig();
     const missing = [
       !accountSid && "TWILIO_ACCOUNT_SID",
@@ -43,7 +43,7 @@ export const mayaRouter = createRouter({
     return { twilioConfigured: missing.length === 0, missingVars: missing };
   }),
 
-  placeCall: publicQuery
+  placeCall: authedQuery
     .input(z.object({
       to: z.string(),
       name: z.string().default(""),
@@ -84,7 +84,7 @@ export const mayaRouter = createRouter({
       return { sid: result.sid, status: "ringing" };
     }),
 
-  hangUp: publicQuery
+  hangUp: authedQuery
     .input(z.object({ sid: z.string() }))
     .mutation(async ({ input }) => {
       const { accountSid, authToken } = await getTwilioConfig();
@@ -105,7 +105,7 @@ export const mayaRouter = createRouter({
       return { success: true };
     }),
 
-  getTranscript: publicQuery
+  getTranscript: authedQuery
     .input(z.object({ sid: z.string().optional() }))
     .query(async ({ input }) => {
       if (!input.sid) return { transcript: null, status: "idle" };

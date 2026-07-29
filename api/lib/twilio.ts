@@ -1,5 +1,7 @@
 import { Buffer } from "node:buffer";
 
+import { checkOutboundCallSafety, normalizeE164, type OutboundCallSafetyConfig } from "./call-safety";
+
 /**
  * Twilio outbound call helper.
  * Places a call via Twilio REST API and points the answered webhook
@@ -10,6 +12,7 @@ export interface TwilioCallResult {
   sid: string;
   status: string;
   error?: string;
+  blockedReason?: string;
 }
 
 type TwilioCredential = {
@@ -46,16 +49,6 @@ export function isTwilioConfigured(): boolean {
   return !!(accountSid && credentials.length && fromNumber);
 }
 
-function normalizePhoneNumber(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("+")) return trimmed;
-
-  const digits = trimmed.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return trimmed;
-}
-
 function resolveAppUrl(appUrl: string): string {
   return appUrl.replace(/\/$/, "");
 }
@@ -83,14 +76,52 @@ export async function placeTwilioOutboundCall(opts: {
   accountSid?: string;
   authToken?: string;
   fromNumber?: string;
+  record?: boolean;
+  now?: Date;
+  safetyConfig?: OutboundCallSafetyConfig;
+  dncChecker?: (phone: string) => Promise<boolean>;
 }): Promise<TwilioCallResult> {
+  const safety = checkOutboundCallSafety({
+    to: opts.to,
+    appUrl: opts.appUrl,
+    now: opts.now,
+    config: opts.safetyConfig,
+  });
+  if ("reason" in safety) {
+    return { sid: "", status: "blocked", error: safety.message, blockedReason: safety.reason };
+  }
+
+  try {
+    const dncChecker = opts.dncChecker ?? (async (phone: string) => {
+      const { isPhoneOnDncList } = await import("./dnc-safety");
+      return isPhoneOnDncList(phone);
+    });
+    const blockedByDnc = await dncChecker(safety.destination);
+    if (blockedByDnc) {
+      return {
+        sid: "",
+        status: "blocked",
+        error: "Destination is on the do-not-call list.",
+        blockedReason: "dnc",
+      };
+    }
+  } catch (error) {
+    console.error("[twilio] DNC preflight failed:", error);
+    return {
+      sid: "",
+      status: "blocked",
+      error: "Unable to verify do-not-call status; call blocked for safety.",
+      blockedReason: "dnc_check_failed",
+    };
+  }
+
   const env = getTwilioEnv();
   const accountSid = opts.accountSid || env.accountSid;
   const authToken = opts.authToken || env.credentials[0]?.secret || "";
-  const fromNumber = opts.fromNumber || env.fromNumber;
+  const fromNumber = normalizeE164(opts.fromNumber || env.fromNumber);
 
   if (!accountSid || !authToken || !fromNumber) {
-    return { sid: "", status: "failed", error: "Twilio not configured — add credentials in AI Config." };
+    return { sid: "", status: "failed", error: "Twilio not configured — add valid credentials and a US From number in AI Config." };
   }
 
   const credential: TwilioCredential = { label: "account-token", user: accountSid, secret: authToken };
@@ -101,14 +132,19 @@ export async function placeTwilioOutboundCall(opts: {
   const statusUrl = `${baseUrl}/api/maya/status`;
 
   const body = new URLSearchParams({
-    To: normalizePhoneNumber(opts.to),
-    From: normalizePhoneNumber(fromNumber),
+    To: safety.destination,
+    From: fromNumber,
     Url: webhookUrl,
     StatusCallback: statusUrl,
     StatusCallbackMethod: "POST",
+    StatusCallbackEvent: "initiated ringing answered completed",
     MachineDetection: "Enable",
     MachineDetectionTimeout: "30",
   });
+  if (opts.record) {
+    body.set("Record", "true");
+    body.set("RecordingChannels", "dual");
+  }
 
   try {
     const res = await postTwilioCall(accountSid, credential, body);

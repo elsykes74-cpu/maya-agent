@@ -1,11 +1,24 @@
 import { z } from "zod";
 import { eq, desc } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { aiConfig, objectionResponses } from "../../db/schema";
 
+const SECRET_PLACEHOLDER = "••••••••";
+
+function redactSecrets<T extends {
+  elevenLabsApiKey?: string | null;
+  twilioAuthToken?: string | null;
+}>(config: T) {
+  return {
+    ...config,
+    elevenLabsApiKey: config.elevenLabsApiKey ? SECRET_PLACEHOLDER : null,
+    twilioAuthToken: config.twilioAuthToken ? SECRET_PLACEHOLDER : null,
+  };
+}
+
 export const aiConfigRouter = createRouter({
-  get: publicQuery.query(async () => {
+  get: authedQuery.query(async () => {
     const db = getDb();
     const config = await db.query.aiConfig.findFirst();
     
@@ -38,13 +51,15 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
         complianceDisclaimer: "Selling equitable interest — not the property. No brokerage implication. AI never says 'we'll buy your house' as a guarantee. AI positions Erick as 'a local buyer working with a network of investment partners'. Never deceptive language. Disclose RE license when required.",
       });
       
-      return await db.query.aiConfig.findFirst()!;
+      const created = await db.query.aiConfig.findFirst();
+      if (!created) throw new Error("AI configuration insert failed");
+      return redactSecrets(created);
     }
-    
-    return config;
+
+    return redactSecrets(config);
   }),
 
-  update: publicQuery
+  update: authedQuery
     .input(z.object({
       id: z.number(),
       systemPrompt: z.string().min(1).optional(),
@@ -65,18 +80,20 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
     .mutation(async ({ input }) => {
       const db = getDb();
       const { id, ...data } = input;
+      if (data.elevenLabsApiKey === SECRET_PLACEHOLDER) delete data.elevenLabsApiKey;
+      if (data.twilioAuthToken === SECRET_PLACEHOLDER) delete data.twilioAuthToken;
       await db.update(aiConfig).set(data).where(eq(aiConfig.id, id));
       return { success: true };
     }),
 
-  objections: publicQuery.query(async () => {
+  objections: authedQuery.query(async () => {
     const db = getDb();
     return db.query.objectionResponses.findMany({
       orderBy: [desc(objectionResponses.priority)],
     });
   }),
 
-  createObjection: publicQuery
+  createObjection: authedQuery
     .input(z.object({
       objection: z.string().min(1),
       response: z.string().min(1),
@@ -85,11 +102,15 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(objectionResponses).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(objectionResponses)
+        .values(input)
+        .returning({ id: objectionResponses.id });
+      if (!created) throw new Error("Insert failed");
+      return { id: created.id, success: true };
     }),
 
-  updateObjection: publicQuery
+  updateObjection: authedQuery
     .input(z.object({
       id: z.number(),
       objection: z.string().min(1).optional(),
@@ -105,7 +126,7 @@ Calm, confident, empathetic. You are solving a problem, not selling a product. N
       return { success: true };
     }),
 
-  deleteObjection: publicQuery
+  deleteObjection: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();

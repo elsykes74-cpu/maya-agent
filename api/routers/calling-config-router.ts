@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { callingConfig } from "../../db/schema";
 
 export const callingConfigRouter = createRouter({
-  get: publicQuery.query(async () => {
+  get: authedQuery.query(async () => {
     const db = getDb();
     let config = await db.query.callingConfig.findFirst();
     
@@ -27,7 +27,7 @@ export const callingConfigRouter = createRouter({
     return config;
   }),
 
-  update: publicQuery
+  update: authedQuery
     .input(z.object({
       id: z.number(),
       provider: z.enum(["vapi", "bland", "retell", "custom"]).optional(),

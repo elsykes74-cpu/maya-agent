@@ -1,12 +1,12 @@
 import { z } from "zod";
-import { eq, desc, and, sql } from "drizzle-orm";
-import { createRouter, publicQuery } from "../middleware";
+import { eq, desc, and } from "drizzle-orm";
+import { createRouter, authedQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { smsLogs, smsTemplates } from "../../db/schema";
-import { leads, campaignLeads } from "../../db/schema";
+import { leads, campaignLeads, dncList } from "../../db/schema";
 
 export const smsRouter = createRouter({
-  list: publicQuery
+  list: authedQuery
     .input(
       z.object({
         leadId: z.number().optional(),
@@ -28,7 +28,7 @@ export const smsRouter = createRouter({
       return { items };
     }),
 
-  create: publicQuery
+  create: authedQuery
     .input(z.object({
       leadId: z.number(),
       sequenceDay: z.number().default(0),
@@ -38,11 +38,12 @@ export const smsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(smsLogs).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db.insert(smsLogs).values(input).returning({ id: smsLogs.id });
+      if (!created) throw new Error("Insert failed");
+      return { id: created.id, success: true };
     }),
 
-  updateReply: publicQuery
+  updateReply: authedQuery
     .input(z.object({
       id: z.number(),
       replyContent: z.string().min(1),
@@ -55,14 +56,14 @@ export const smsRouter = createRouter({
       return { success: true };
     }),
 
-  templates: publicQuery.query(async () => {
+  templates: authedQuery.query(async () => {
     const db = getDb();
     return db.query.smsTemplates.findMany({
       orderBy: [desc(smsTemplates.day)],
     });
   }),
 
-  createTemplate: publicQuery
+  createTemplate: authedQuery
     .input(z.object({
       name: z.string().min(1),
       day: z.number().default(0),
@@ -72,11 +73,12 @@ export const smsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(smsTemplates).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db.insert(smsTemplates).values(input).returning({ id: smsTemplates.id });
+      if (!created) throw new Error("Insert failed");
+      return { id: created.id, success: true };
     }),
 
-  updateTemplate: publicQuery
+  updateTemplate: authedQuery
     .input(z.object({
       id: z.number(),
       name: z.string().min(1).optional(),
@@ -92,7 +94,7 @@ export const smsRouter = createRouter({
       return { success: true };
     }),
 
-  deleteTemplate: publicQuery
+  deleteTemplate: authedQuery
     .input(z.object({ id: z.number() }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -104,7 +106,7 @@ export const smsRouter = createRouter({
   // 1. Bulk-send SMS to all pending campaign_leads for a campaign.
   //    day=0 → "Initial Outreach", day=2 → "Day 2 – Follow-up",
   //    day=5 → "Day 5 – Second Follow-up", day=10 → "Day 10 – Breakup / Final Message"
-  sendCampaignSms: publicQuery
+  sendCampaignSms: authedQuery
     .input(z.object({ campaignId: z.number(), templateDay: z.number().default(0) }))
     .mutation(async ({ input }) => {
       const db = getDb();
@@ -116,10 +118,9 @@ export const smsRouter = createRouter({
       else if (templateDay >= 2)   tplName = "Day 2 - Follow-up";
       else                         tplName = "Day 0 - Initial Outreach";
 
-      const [rows] = await db.execute(
-        sql`SELECT id, content FROM ${smsTemplates} WHERE name = ${tplName} LIMIT 1`
-      );
-      const template = (rows as any[])[0];
+      const template = await db.query.smsTemplates.findFirst({
+        where: eq(smsTemplates.name, tplName),
+      });
       if (!template) throw new Error(`SMS template not found: ${tplName}`);
 
       const clRows = await db.query.campaignLeads.findMany({
@@ -157,7 +158,7 @@ export const smsRouter = createRouter({
   //    STOP / unsubscribe → DNC list + cold_drip
   //    positive keywords   → outreach
   //    negative keywords   → cold_drip
-  handleReply: publicQuery
+  handleReply: authedQuery
     .input(z.object({
       leadId:    z.number(),
       fromPhone: z.string().min(10),
@@ -176,13 +177,15 @@ export const smsRouter = createRouter({
         await db.update(leads)
           .set({ pipelineStage: "cold_drip" })
           .where(eq(leads.id, leadId));
-        // Upsert DNC via raw SQL to avoid schema import loop
-        await db.execute(
-          `INSERT INTO dnc_list (phone, reason, source, notes)
-           VALUES (?, 'seller_request', 'sms_reply', ?)
-           ON DUPLICATE KEY UPDATE notes = VALUES(notes)`,
-          [cleanPhone, `SMS STOP reply from lead ${leadId}`]
-        );
+        await db.insert(dncList).values({
+          phone: cleanPhone,
+          reason: "seller_request",
+          source: "sms_reply",
+          notes: `SMS STOP reply from lead ${leadId}`,
+        }).onConflictDoUpdate({
+          target: dncList.phone,
+          set: { notes: `SMS STOP reply from lead ${leadId}` },
+        });
       } else if (/\b(yes|interested|call me|sounds good|sure|great|let's talk|when can|available)\b/.test(lower)) {
         category = "responded";
         await db.update(leads)
