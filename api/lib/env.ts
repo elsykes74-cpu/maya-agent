@@ -8,11 +8,6 @@ const DATABASE_ENV_KEYS = [
   "SUPABASE_DB_URL",
 ] as const;
 
-/** Cache raw values so we can test them without side-effects */
-function _raw(name: string): string | undefined {
-  return process.env[name] || undefined;
-}
-
 /** Return value OR empty string without throwing. */
 function soft(name: string): string {
   return process.env[name] ?? "";
@@ -78,7 +73,7 @@ export function validateEnv(): string[] {
     "KIMI_OPEN_URL",
     "NODE_ENV",
   ] as const;
-  const missing = required_keys.filter((k) => !process.env[k]);
+  const missing: string[] = required_keys.filter((k) => !process.env[k]);
   if (!databaseUrl()) missing.push("valid DATABASE_URL or POSTGRES_URL");
   return missing;
 }

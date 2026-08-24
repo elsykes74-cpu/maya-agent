@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { eq, desc, and, sql } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { smsLogs, smsTemplates } from "../../db/schema";
-import { leads, campaignLeads } from "../../db/schema";
+import { leads, campaignLeads, dncList } from "../../db/schema";
 
 export const smsRouter = createRouter({
   list: publicQuery
@@ -38,8 +38,11 @@ export const smsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(smsLogs).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(smsLogs)
+        .values(input)
+        .returning({ id: smsLogs.id });
+      return { id: created.id, success: true };
     }),
 
   updateReply: publicQuery
@@ -72,8 +75,11 @@ export const smsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(smsTemplates).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(smsTemplates)
+        .values(input)
+        .returning({ id: smsTemplates.id });
+      return { id: created.id, success: true };
     }),
 
   updateTemplate: publicQuery
@@ -116,10 +122,9 @@ export const smsRouter = createRouter({
       else if (templateDay >= 2)   tplName = "Day 2 - Follow-up";
       else                         tplName = "Day 0 - Initial Outreach";
 
-      const [rows] = await db.execute(
-        sql`SELECT id, content FROM ${smsTemplates} WHERE name = ${tplName} LIMIT 1`
-      );
-      const template = (rows as any[])[0];
+      const template = await db.query.smsTemplates.findFirst({
+        where: eq(smsTemplates.name, tplName),
+      });
       if (!template) throw new Error(`SMS template not found: ${tplName}`);
 
       const clRows = await db.query.campaignLeads.findMany({
@@ -176,13 +181,13 @@ export const smsRouter = createRouter({
         await db.update(leads)
           .set({ pipelineStage: "cold_drip" })
           .where(eq(leads.id, leadId));
-        // Upsert DNC via raw SQL to avoid schema import loop
-        await db.execute(
-          `INSERT INTO dnc_list (phone, reason, source, notes)
-           VALUES (?, 'seller_request', 'sms_reply', ?)
-           ON DUPLICATE KEY UPDATE notes = VALUES(notes)`,
-          [cleanPhone, `SMS STOP reply from lead ${leadId}`]
-        );
+        // Upsert DNC — phone is unique, so a retry/reply is a no-op.
+        await db.insert(dncList).values({
+          phone: cleanPhone,
+          reason: "seller_request",
+          source: "sms_reply",
+          notes: `SMS STOP reply from lead ${leadId}`,
+        }).onConflictDoNothing({ target: dncList.phone });
       } else if (/\b(yes|interested|call me|sounds good|sure|great|let's talk|when can|available)\b/.test(lower)) {
         category = "responded";
         await db.update(leads)

@@ -12,7 +12,6 @@ import Settings from './pages/Settings'
 import Campaigns from './pages/Campaigns'
 import DNCLists from './pages/DNCLists'
 import More from './pages/More'
-import CallQueue from './pages/CallQueue'
 import LeadFinder from './pages/LeadFinder'
 import Layout from './components/Layout'
 

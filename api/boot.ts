@@ -28,6 +28,7 @@ import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
+import { startCallWorker } from "./lib/call-worker";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
@@ -616,6 +617,8 @@ if (env.isProduction && !process.env.VERCEL) {
     serve({ fetch: app.fetch, port }, () => {
       console.log(`[server] listening on port ${port}`);
       startDailyDigestScheduler();
+      // Background call worker — drains queued campaign calls off the request path.
+      startCallWorker();
       // Auto-register Telegram webhooks so bots don't go silent after redeploys
       if (env.appUrl && !env.appUrl.includes("localhost")) {
         registerAllWebhooks(env.appUrl).catch((err) =>

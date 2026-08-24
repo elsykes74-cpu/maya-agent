@@ -47,8 +47,11 @@ export const dncRouter = createRouter({
       const db = getDb();
       // Remove non-digits and format
       const cleanPhone = input.phone.replace(/\D/g, "");
-      const result = await db.insert(dncList).values({ ...input, phone: cleanPhone });
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(dncList)
+        .values({ ...input, phone: cleanPhone })
+        .returning({ id: dncList.id });
+      return { id: created.id, success: true };
     }),
 
   remove: publicQuery
@@ -106,8 +109,11 @@ export const dncRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(scrubLists).values(input);
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(scrubLists)
+        .values(input)
+        .returning({ id: scrubLists.id });
+      return { id: created.id, success: true };
     }),
 
   addScrubEntry: publicQuery
@@ -120,7 +126,10 @@ export const dncRouter = createRouter({
     .mutation(async ({ input }) => {
       const db = getDb();
       const cleanPhone = input.phone.replace(/\D/g, "");
-      const result = await db.insert(scrubListEntries).values({ ...input, phone: cleanPhone });
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(scrubListEntries)
+        .values({ ...input, phone: cleanPhone })
+        .returning({ id: scrubListEntries.id });
+      return { id: created.id, success: true };
     }),
 });

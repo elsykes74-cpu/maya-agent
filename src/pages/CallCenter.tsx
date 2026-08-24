@@ -32,7 +32,6 @@ export default function CallCenter() {
   const [currentIdx, setCurrentIdx] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [stage, setStage] = useState<CallStage>('idle');
   const [sid, setSid] = useState<string | null>(null);
