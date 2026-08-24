@@ -13,19 +13,23 @@ export const webhooksRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      
-      const result = await db.insert(webhookEvents).values({
+
+      const [event] = await db.insert(webhookEvents).values({
         provider: input.provider,
         eventType: input.eventType,
         payload: JSON.stringify(input.payload),
-      });
+      }).returning({ id: webhookEvents.id });
 
-      // Process Vapi events
+      // Process Vapi events — handleVapiWebhook is idempotent (skips already-completed calls)
       if (input.provider === "vapi") {
         await handleVapiWebhook(input.payload, db);
       }
 
-      return { received: true, eventId: Number(result[0].insertId) };
+      await db.update(webhookEvents)
+        .set({ processed: true })
+        .where(eq(webhookEvents.id, event.id));
+
+      return { received: true, eventId: event.id };
     }),
 
   list: publicQuery
@@ -72,6 +76,12 @@ async function handleVapiWebhook(payload: any, db: any) {
   });
 
   if (!queueEntry) return;
+
+  // Idempotency guard: if we've already processed this call to completion, ignore
+  // the repeated webhook delivery (Vapi retries on transient network issues).
+  if (queueEntry.status === "completed") {
+    return;
+  }
 
   if (eventType === "call-ended" || eventType === "call.ended" || eventType === "end-of-call-report") {
     const analysis = payload.message?.analysis || payload.analysis || {};
