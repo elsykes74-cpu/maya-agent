@@ -50,8 +50,11 @@ export const campaignsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(campaigns).values({ ...input, status: "draft" });
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(campaigns)
+        .values({ ...input, status: "draft" })
+        .returning({ id: campaigns.id });
+      return { id: created.id, success: true };
     }),
 
   update: publicQuery
@@ -155,7 +158,10 @@ export const campaignsRouter = createRouter({
 
       const twilioReady = isTwilioConfigured();
       const config = await getCallingConfig();
-      if (!twilioReady && (!config || !config.apiKey)) {
+      if (!config) {
+        throw new Error("No calling provider configured. Add your Twilio credentials (or Vapi API key) in Settings.");
+      }
+      if (!twilioReady && !config.apiKey) {
         throw new Error("No calling provider configured. Add your Twilio credentials (or Vapi API key) in Settings.");
       }
 
@@ -208,7 +214,7 @@ export const campaignsRouter = createRouter({
           .where(eq(campaignLeads.id, cl.id));
 
         // Create call queue entry
-        const queueResult = await db.insert(callQueue).values({
+        const [queueEntry] = await db.insert(callQueue).values({
           campaignId: input.campaignId,
           campaignLeadId: cl.id,
           leadId: cl.leadId,
@@ -216,7 +222,7 @@ export const campaignsRouter = createRouter({
           status: "queued",
           scrubResult: "pass",
           scheduledAt: new Date(),
-        });
+        }).returning({ id: callQueue.id });
         queued++;
 
         // Dial via Twilio (preferred) or fall back to Vapi
@@ -239,7 +245,7 @@ export const campaignsRouter = createRouter({
           if (callId) {
             await db.update(callQueue)
               .set({ status: "dialing", externalCallId: callId, startedAt: new Date() })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+              .where(eq(callQueue.id, queueEntry.id));
             await db.update(campaignLeads)
               .set({ status: "queued", externalCallId: callId })
               .where(eq(campaignLeads.id, cl.id));
@@ -247,14 +253,14 @@ export const campaignsRouter = createRouter({
           } else {
             await db.update(callQueue)
               .set({ status: "failed", errorMessage: "Call provider returned no call ID" })
-              .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+              .where(eq(callQueue.id, queueEntry.id));
             failed++;
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           await db.update(callQueue)
             .set({ status: "failed", errorMessage: msg })
-            .where(eq(callQueue.id, Number(queueResult[0].insertId)));
+            .where(eq(callQueue.id, queueEntry.id));
           failed++;
         }
       }

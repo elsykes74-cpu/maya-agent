@@ -38,8 +38,8 @@ async function exchangeAuthCode(
 }
 
 /** Lazy JWK set – fetched on first use, not at module load time. */
-let _jwksPromise: Promise<jose.CognitoJWKSCreator<jose.Any> | jose.CertificateJWKSCreator> | null = null;
-function getJwks(): Promise<jose.CognitoJWKSCreator<jose.Any> | jose.CertificateJWKSCreator> {
+let _jwksPromise: ReturnType<typeof jose.createRemoteJWKSet> | null = null;
+function getJwks(): ReturnType<typeof jose.createRemoteJWKSet> {
   if (!_jwksPromise) {
     const base = env.kimiAuthUrl;
     if (!base) throw new Error("kimiAuthUrl is empty – cannot fetch JWKS");

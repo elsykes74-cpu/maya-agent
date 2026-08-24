@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Plus, PhoneCall, Pause, Play, Trash2, Megaphone, MessageSquare,
-  ChevronDown, ChevronUp, Flame, Zap, Snowflake, TrendingUp, CheckCircle,
+  ChevronDown, ChevronUp, Flame, Zap, Snowflake, TrendingUp,
 } from 'lucide-react';
 import { C, NeoTile, NeoIcon, ConfirmSheet } from '@/components/Neo';
 import { loadLeads, loadCampaigns, saveCampaigns } from '@/lib/persistence';

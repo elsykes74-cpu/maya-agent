@@ -68,11 +68,14 @@ export const callsRouter = createRouter({
     }))
     .mutation(async ({ input }) => {
       const db = getDb();
-      const result = await db.insert(calls).values({
-        ...input,
-        sellerAskingPrice: input.sellerAskingPrice ? String(input.sellerAskingPrice) : null,
-      });
-      return { id: Number(result[0].insertId), success: true };
+      const [created] = await db
+        .insert(calls)
+        .values({
+          ...input,
+          sellerAskingPrice: input.sellerAskingPrice ? String(input.sellerAskingPrice) : null,
+        })
+        .returning({ id: calls.id });
+      return { id: created.id, success: true };
     }),
 
   update: publicQuery
