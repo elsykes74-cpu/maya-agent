@@ -150,9 +150,9 @@ telegramApp.post("/ladyjaye", async (c) => {
 export async function registerAllWebhooks(appUrl: string): Promise<void> {
   const base = appUrl.replace(/\/$/, "");
 
-  // Only register when the operator explicitly set the token — env.telegramBotToken
-  // has a hardcoded fallback that must not be used to claim a webhook.
-  if (process.env.TELEGRAM_BOT_TOKEN) {
+  // Register when QUICKKICK_BOT_TOKEN is explicitly set (preferred) or the legacy
+  // TELEGRAM_BOT_TOKEN is set — env.telegramBotToken resolves the right value.
+  if (process.env.QUICKKICK_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN) {
     const url = `${base}/api/telegram/webhook`;
     const ok = await registerWebhook(env.telegramBotToken, url);
     console.log(`[telegram] Quickkick webhook ${ok ? "registered" : "FAILED"}: ${url}`);
