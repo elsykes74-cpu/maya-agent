@@ -3,6 +3,7 @@ import { getDb } from "../queries/connection";
 import { leads } from "../../db/schema";
 import { sendAlert, formatDailyDigest } from "./telegram";
 import { env } from "./env";
+import { runLeadsAutomation } from "../bots/quickkick";
 
 let lastDigestDate = "";
 
@@ -12,6 +13,15 @@ function isDigestTime(): boolean {
   );
   return et.getHours() === 8 && et.getMinutes() === 0;
 }
+
+function isLeadRunTime(): boolean {
+  const et = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/New_York" })
+  );
+  return et.getHours() === 9 && et.getMinutes() === 0;
+}
+
+let lastLeadRunDate = "";
 
 export async function sendDailyDigestNow(): Promise<void> {
   const db = getDb();
@@ -57,17 +67,29 @@ export function startDailyDigestScheduler(): void {
   }
 
   setInterval(async () => {
-    if (!isDigestTime()) return;
     const today = new Date().toISOString().slice(0, 10);
-    if (lastDigestDate === today) return;
-    lastDigestDate = today;
-    try {
-      await sendDailyDigestNow();
-      console.log("[telegram-scheduler] Daily digest sent");
-    } catch (err) {
-      console.error("[telegram-scheduler] digest error:", err);
+
+    if (isDigestTime() && lastDigestDate !== today) {
+      lastDigestDate = today;
+      try {
+        await sendDailyDigestNow();
+        console.log("[telegram-scheduler] Daily digest sent");
+      } catch (err) {
+        console.error("[telegram-scheduler] digest error:", err);
+      }
+    }
+
+    if (isLeadRunTime() && lastLeadRunDate !== today) {
+      lastLeadRunDate = today;
+      try {
+        console.log("[telegram-scheduler] Starting scheduled lead run");
+        await runLeadsAutomation();
+        console.log("[telegram-scheduler] Scheduled lead run complete");
+      } catch (err) {
+        console.error("[telegram-scheduler] lead run error:", err);
+      }
     }
   }, 60 * 1000);
 
-  console.log("[telegram-scheduler] Started — digest fires at 8:00 AM ET");
+  console.log("[telegram-scheduler] Started — digest at 8:00 AM ET, lead run at 9:00 AM ET");
 }
