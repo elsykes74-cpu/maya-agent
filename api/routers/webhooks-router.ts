@@ -3,6 +3,7 @@ import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList } from "../../db/schema";
+import { sendAlert } from "../lib/telegram";
 
 export const webhooksRouter = createRouter({
   receive: publicQuery
@@ -155,6 +156,18 @@ async function handleVapiWebhook(payload: any, db: any) {
       leadUpdate.askingPrice = sellerAskingPrice;
     }
     await db.update(leads).set(leadUpdate).where(eq(leads.id, queueEntry.leadId));
+
+    // Notify via Telegram when appointment is set
+    if (appointmentSet) {
+      const apptLead = await db.query.leads.findFirst({ where: eq(leads.id, queueEntry.leadId) });
+      const msg =
+        `🔥 <b>Appointment Set!</b>\n\n` +
+        `<b>${apptLead?.sellerName ?? "Unknown"}</b>\n` +
+        `📍 ${apptLead?.propertyAddress ?? ""}\n` +
+        `📞 ${apptLead?.phone ?? ""}\n\n` +
+        `Call outcome logged. Follow up to confirm time.`;
+      await sendAlert(msg, "quickkick");
+    }
 
     // Handle DNC request
     if (dncRequested) {

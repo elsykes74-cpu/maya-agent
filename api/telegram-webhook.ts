@@ -16,7 +16,7 @@ import {
   generateOutreachAngle,
 } from "./lib/lead-scorer";
 import { env } from "./lib/env";
-import { handleQuickKickCommand, handleQuickKickNaturalLanguage } from "./bots/quickkick";
+import { handleQuickKickCommand, handleQuickKickNaturalLanguage, runLeadsAutomation } from "./bots/quickkick";
 import { handleLadyJayeCommand, handleLadyJayeNaturalLanguage } from "./bots/ladyjaye";
 
 export const telegramApp = new Hono();
@@ -73,6 +73,7 @@ async function dispatchCommand(
     case "/leadstatus":
     case "/callnow":
     case "/comps":
+    case "/runleads":
       if (botName === "quickkick") {
         await handleQuickKickCommand(chatId, cmd, parts, token);
       } else {

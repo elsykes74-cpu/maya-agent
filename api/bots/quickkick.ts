@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, and, isNull, lt, desc } from "drizzle-orm";
 import { getDb } from "../queries/connection";
-import { leads } from "../../db/schema";
+import { leads, callQueue } from "../../db/schema";
 import { sendMessage } from "../lib/telegram";
 import { computeLeadScore, generateCallOpening, generateOutreachAngle, scoreToMotivation, scoreToPriorityLabel, computeSTACKScore, formatSTACKBreakdown } from "../lib/lead-scorer";
 import { braveSearch, researchLead } from "../lib/brave-search";
@@ -22,6 +22,7 @@ function quickKickHelp(): string {
     `/leadstatus [id] — Full lead status snapshot\n` +
     `/callnow [id] — Dial lead with AI agent (VAPI)\n` +
     `/comps [address] — Comp Analyzer (ARV estimate)\n` +
+    `/runleads — Auto-scrub, score & dial all ready leads\n` +
     `/help — Show this menu\n\n` +
     `Also available: /hot /warm /leads /digest /outreach /score`
   );
@@ -59,10 +60,26 @@ async function handleCallNow(chatId: string, parts: string[], token: string): Pr
 
   await sendMessage(chatId, `📞 Dialing <b>${lead.sellerName}</b> (${lead.phone}) with AI agent…`, { parse_mode: "HTML", token } as any);
 
+  // Insert a callQueue row so the VAPI webhook can record the outcome
+  const [queueRow] = await db.insert(callQueue).values({
+    campaignId: 0,
+    campaignLeadId: 0,
+    leadId: lead.id,
+    phone: lead.phone,
+    status: "queued",
+  } as any).returning({ id: callQueue.id });
+
   const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName);
   if (!vapiCall) {
     await sendMessage(chatId, "❌ VAPI call failed to start. Check your VAPI API key and phone number ID in settings.", { token } as any);
     return;
+  }
+
+  // Bind the external call ID so webhook can match it
+  if (queueRow?.id) {
+    await db.update(callQueue)
+      .set({ externalCallId: vapiCall.id, status: "dialing" } as any)
+      .where(eq(callQueue.id, queueRow.id));
   }
 
   let msg = `✅ <b>AI Agent Dialing</b>\n`;
@@ -117,6 +134,90 @@ async function handleComps(chatId: string, parts: string[], token: string): Prom
   msg += analysis;
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+export async function runLeadsAutomation(notifyChatId?: string, notifyToken?: string): Promise<void> {
+  const db = getDb();
+  const config = await getCallingConfig();
+
+  const send = async (text: string) => {
+    if (notifyChatId && notifyToken) {
+      await sendMessage(notifyChatId, text, { parse_mode: "HTML", token: notifyToken } as any);
+    }
+  };
+
+  if (!config?.apiKey) {
+    await send("❌ VAPI not configured — add VAPI_API_KEY in settings.");
+    return;
+  }
+
+  const candidates = await db.query.leads.findMany({
+    where: and(
+      isNull(leads.lastContactDate),
+      isNull(leads.appointmentSet),
+    ),
+    orderBy: [desc(leads.leadScore)],
+    limit: 20,
+  });
+
+  const withPhone = candidates.filter((l) => !!l.phone);
+  if (!withPhone.length) {
+    await send("📭 No uncontacted leads with phone numbers found.");
+    return;
+  }
+
+  await send(`🚀 <b>Lead Automation Starting</b>\n${withPhone.length} candidates found. Scrubbing & scoring…`);
+
+  let dialed = 0;
+  let blocked = 0;
+  const skipped: string[] = [];
+
+  for (const lead of withPhone) {
+    const score = lead.leadScore ?? computeLeadScore(lead);
+
+    if (score < 40) {
+      skipped.push(`#${lead.id} ${lead.sellerName} (score ${score})`);
+      continue;
+    }
+
+    const scrub = await scrubPhone(lead.phone!, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+    if (!scrub.pass) {
+      blocked++;
+      continue;
+    }
+
+    const [queueRow] = await db.insert(callQueue).values({
+      campaignId: 0,
+      campaignLeadId: 0,
+      leadId: lead.id,
+      phone: lead.phone!,
+      status: "queued",
+    } as any).returning({ id: callQueue.id });
+
+    const vapiCall = await createVapiCall(lead.id, lead.phone!, lead.sellerName);
+    if (!vapiCall) {
+      await db.update(callQueue).set({ status: "failed" } as any).where(eq(callQueue.id, queueRow.id));
+      continue;
+    }
+
+    await db.update(callQueue)
+      .set({ externalCallId: vapiCall.id, status: "dialing" } as any)
+      .where(eq(callQueue.id, queueRow.id));
+
+    dialed++;
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
+  let summary = `✅ <b>Run Complete</b>\n`;
+  summary += `📞 Dialed: ${dialed}\n`;
+  summary += `🚫 Blocked (DNC/scrub): ${blocked}\n`;
+  if (skipped.length) summary += `⏭ Skipped (low score): ${skipped.length}\n`;
+  summary += `\nAppointment alerts will fire automatically when a call lands.`;
+  await send(summary);
+}
+
+async function handleRunLeads(chatId: string, token: string): Promise<void> {
+  await runLeadsAutomation(chatId, token);
 }
 
 async function handleResearchLead(chatId: string, parts: string[], token: string): Promise<void> {
@@ -350,6 +451,9 @@ export async function handleQuickKickCommand(
         break;
       case "/comps":
         await handleComps(chatId, parts, token);
+        break;
+      case "/runleads":
+        await handleRunLeads(chatId, token);
         break;
       case "/help":
         await sendMessage(chatId, quickKickHelp(), { parse_mode: "HTML", token } as any);
