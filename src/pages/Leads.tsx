@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, LayoutList } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet } from '@/components/Neo';
 import { loadLeads, saveLeads, addCallRecord, getNextId } from '@/lib/persistence';
 import type { Lead } from '@/lib/persistence';
@@ -88,6 +89,7 @@ export default function Leads() {
 }
 
 function LeadCard({ lead, onDelete, onCallRecord }: { lead: Lead; onDelete: () => void; onCallRecord: (r: any) => void }) {
+  const navigate = useNavigate();
   const [calling, setCalling] = useState(false);
   const [callResult, setCallResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -149,6 +151,9 @@ function LeadCard({ lead, onDelete, onCallRecord }: { lead: Lead; onDelete: () =
         </a>
         <button onClick={callWithMaya} disabled={calling} className="maya-tile press-sm" aria-label={`Call ${lead.sellerName} with Maya`} style={{ flex: 1.3, height: 48, borderRadius: 14, background: calling ? C.orange : `linear-gradient(135deg, ${C.purple}, #7C3AED)`, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', padding: 0, opacity: calling ? 0.7 : 1 }}>
           {calling ? <><Sparkles size={16} className="pulse-glow" /> Calling…</> : <><Bot size={16} strokeWidth={2} /> Call with Maya</>}
+        </button>
+        <button onClick={() => navigate(`/leads/${lead.id}`)} className="neo-pressed-sm press-sm" aria-label={`View CRM for ${lead.sellerName}`} style={{ width: 48, height: 48, borderRadius: 14, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
+          <LayoutList size={16} color={C.teal} strokeWidth={2} />
         </button>
         <button onClick={onDelete} className="neo-pressed-sm press-sm" aria-label={`Delete ${lead.sellerName}`} style={{ width: 48, height: 48, borderRadius: 14, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14zM10 11v6M14 11v6"/></svg>
