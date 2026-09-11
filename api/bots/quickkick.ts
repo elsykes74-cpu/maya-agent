@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { leads } from "../../db/schema";
 import { sendMessage } from "../lib/telegram";
-import { computeLeadScore, generateCallOpening, generateOutreachAngle, scoreToMotivation, scoreToPriorityLabel } from "../lib/lead-scorer";
+import { computeLeadScore, generateCallOpening, generateOutreachAngle, scoreToMotivation, scoreToPriorityLabel, computeSTACKScore, formatSTACKBreakdown } from "../lib/lead-scorer";
 import { braveSearch, researchLead } from "../lib/brave-search";
 import { formatScoreBreakdown, getMotivationFlags } from "../lib/telegram";
 import { saveResearchToLead } from "../lib/crm-saver";
@@ -17,10 +17,11 @@ function quickKickHelp(): string {
   return (
     `🔍 <b>QuickKickBot — Lead Research & Intelligence</b>\n\n` +
     `/researchlead [address or name] — Brave Search + distress signals\n` +
-    `/scorelead [id] — Compute & display lead score\n` +
+    `/scorelead [id] — STACK score + traditional score breakdown\n` +
     `/callbrief [id] — 30-sec call briefing + opening line\n` +
     `/leadstatus [id] — Full lead status snapshot\n` +
     `/callnow [id] — Dial lead with AI agent (VAPI)\n` +
+    `/comps [address] — Comp Analyzer (ARV estimate)\n` +
     `/help — Show this menu\n\n` +
     `Also available: /hot /warm /leads /digest /outreach /score`
   );
@@ -69,6 +70,52 @@ async function handleCallNow(chatId: string, parts: string[], token: string): Pr
   msg += `Phone: ${lead.phone}\n`;
   msg += `VAPI Call ID: <code>${vapiCall.id}</code>\n`;
   msg += `Status: ${vapiCall.status}`;
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+async function handleComps(chatId: string, parts: string[], token: string): Promise<void> {
+  const address = parts.slice(1).join(" ").trim();
+  if (!address) {
+    await sendMessage(chatId, "Usage: /comps [address]\nExample: /comps 42 Elm St Springfield", { token } as any);
+    return;
+  }
+
+  await sendMessage(chatId, `🏠 Running Comp Analyzer for <b>${address}</b>…`, { parse_mode: "HTML", token } as any);
+
+  const searchQuery = `${address} Western Massachusetts sold homes comparable sales site:zillow.com OR site:redfin.com OR site:realtor.com`;
+  const results = await braveSearch(searchQuery, 8);
+
+  if (!results.length) {
+    await sendMessage(chatId, "❌ No comp data found. Try a more specific address.", { token } as any);
+    return;
+  }
+
+  const snippets = results
+    .slice(0, 5)
+    .map((r, i) => `[${i + 1}] ${r.title}\n${r.description}`)
+    .join("\n\n");
+
+  const compPrompt =
+    `You are a real estate comp analyzer for Western Massachusetts wholesale investing.\n\n` +
+    `Subject property: ${address}\n\n` +
+    `Apply strict comp filters: ±20% sqft, ±1 bed/bath, within 1 mile, sold last 90 days.\n\n` +
+    `Search results:\n${snippets}\n\n` +
+    `From the data above, extract:\n` +
+    `1. Up to 3 qualifying comps (address, beds/baths, sqft, sold price, sold date)\n` +
+    `2. ARV estimate range (low/mid/high)\n` +
+    `3. Confidence: Low / Medium / High\n` +
+    `4. Max offer at 70% ARV minus repairs\n\n` +
+    `If insufficient data, say so and note what's missing. Keep response concise and Telegram-friendly.`;
+
+  const analysis = await callClaudeConversation(
+    "You are a precise real estate comp analyst. Extract only what the data supports. Never hallucinate prices.",
+    compPrompt
+  );
+
+  let msg = `🏠 <b>Comp Analyzer — ${address}</b>\n`;
+  msg += `${"─".repeat(22)}\n\n`;
+  msg += analysis;
+
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
 }
 
@@ -154,11 +201,14 @@ async function handleScoreLead(chatId: string, parts: string[], token: string): 
 
   const score = computeLeadScore(lead);
   const priority = scoreToPriorityLabel(score);
-  const motivation = scoreToMotivation(score);
+  const stack = computeSTACKScore(lead);
 
-  // Build a score breakdown message
-  let msg = formatScoreBreakdown({ ...lead, leadScore: score });
-  msg += `\n\n📊 Computed score: <b>${score}/100</b> — ${priority} (${motivation})`;
+  let msg = `🎯 <b>Lead Score — #${id} ${lead.sellerName}</b>\n`;
+  msg += `📍 ${lead.propertyAddress}\n\n`;
+  msg += formatSTACKBreakdown(stack);
+  msg += `\n`;
+  msg += formatScoreBreakdown({ ...lead, leadScore: score });
+  msg += `\n\n<b>Traditional:</b> ${score}/100 — ${priority}`;
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
 }
@@ -179,6 +229,7 @@ async function handleCallBrief(chatId: string, parts: string[], token: string): 
 
   const score = computeLeadScore(lead);
   const priority = scoreToPriorityLabel(score);
+  const stack = computeSTACKScore(lead);
   const flags = getMotivationFlags(lead);
   const angle = lead.outreachAngle ?? generateOutreachAngle(lead.leadType);
   const opening = lead.callOpening ?? generateCallOpening(lead.propertyAddress);
@@ -187,7 +238,9 @@ async function handleCallBrief(chatId: string, parts: string[], token: string): 
   briefing += `📍 ${lead.propertyAddress}`;
   if (lead.city) briefing += `, ${lead.city} MA`;
   briefing += `\n\n`;
-  briefing += `🎯 <b>Score:</b> ${score}/100 — ${priority}\n`;
+  briefing += formatSTACKBreakdown(stack);
+  briefing += `\n`;
+  briefing += `🎯 <b>Traditional Score:</b> ${score}/100 — ${priority}\n`;
   briefing += `💡 <b>Motivation Level:</b> ${lead.motivationLevel ?? "unknown"}\n`;
 
   if (flags.length > 0) {
@@ -294,6 +347,9 @@ export async function handleQuickKickCommand(
         break;
       case "/callnow":
         await handleCallNow(chatId, parts, token);
+        break;
+      case "/comps":
+        await handleComps(chatId, parts, token);
         break;
       case "/help":
         await sendMessage(chatId, quickKickHelp(), { parse_mode: "HTML", token } as any);
