@@ -1,6 +1,6 @@
-import { eq, and, isNull, lt, desc } from "drizzle-orm";
+import { eq, and, isNull, lt, desc, lte } from "drizzle-orm";
 import { getDb } from "../queries/connection";
-import { leads, callQueue } from "../../db/schema";
+import { leads, callQueue, tasks, activities, offers, buyers } from "../../db/schema";
 import { sendMessage } from "../lib/telegram";
 import { computeLeadScore, generateCallOpening, generateOutreachAngle, scoreToMotivation, scoreToPriorityLabel, computeSTACKScore, formatSTACKBreakdown } from "../lib/lead-scorer";
 import { braveSearch, researchLead } from "../lib/brave-search";
@@ -16,16 +16,141 @@ function getTelegramFlags(lead: any): string[] {
 function quickKickHelp(): string {
   return (
     `🔍 <b>QuickKickBot — Lead Research & Intelligence</b>\n\n` +
+    `<b>Research & Scoring</b>\n` +
     `/researchlead [address or name] — Brave Search + distress signals\n` +
     `/scorelead [id] — STACK score + traditional score breakdown\n` +
     `/callbrief [id] — 30-sec call briefing + opening line\n` +
     `/leadstatus [id] — Full lead status snapshot\n` +
+    `/timeline [id] — Recent activity timeline for a lead\n` +
+    `\n<b>Dialing & Automation</b>\n` +
     `/callnow [id] — Dial lead with AI agent (VAPI)\n` +
     `/comps [address] — Comp Analyzer (ARV estimate)\n` +
     `/runleads — Auto-scrub, score & dial all ready leads\n` +
-    `/help — Show this menu\n\n` +
+    `\n<b>CRM Commands</b>\n` +
+    `/tasks [id] — Pending tasks for a lead\n` +
+    `/offer [id] [amount] — Create an offer for a lead\n` +
+    `/addbuyer [name] — Add a cash buyer to the database\n` +
+    `\n/help — Show this menu\n\n` +
     `Also available: /hot /warm /leads /digest /outreach /score`
   );
+}
+
+async function handleTasks(chatId: string, parts: string[], token: string): Promise<void> {
+  const id = parts[1] ? parseInt(parts[1], 10) : NaN;
+  if (isNaN(id)) {
+    await sendMessage(chatId, "Usage: /tasks [lead_id]\nExample: /tasks 42", { token } as any);
+    return;
+  }
+  const db = getDb();
+  const lead = await db.query.leads.findFirst({ where: eq(leads.id, id) });
+  if (!lead) {
+    await sendMessage(chatId, `❌ Lead #${id} not found.`, { token } as any);
+    return;
+  }
+  const pendingTasks = await db.query.tasks.findMany({
+    where: and(eq(tasks.leadId, id), eq(tasks.status, "pending")),
+    orderBy: [desc(tasks.dueAt)],
+    limit: 10,
+  });
+
+  let msg = `📋 <b>Tasks — #${id} ${lead.sellerName}</b>\n`;
+  if (!pendingTasks.length) {
+    msg += `\n✅ No pending tasks.`;
+  } else {
+    for (const t of pendingTasks) {
+      const dueStr = t.dueAt
+        ? new Date(t.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+        : "no due date";
+      const typeLabel = t.type === "call_back" ? "📞" : t.type === "send_sms" ? "💬" : t.type === "send_email" ? "📧" : "📌";
+      msg += `\n${typeLabel} <b>${t.title}</b>\n   Due: ${dueStr}\n`;
+      if (t.notes) msg += `   <i>${t.notes}</i>\n`;
+    }
+  }
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+async function handleTimeline(chatId: string, parts: string[], token: string): Promise<void> {
+  const id = parts[1] ? parseInt(parts[1], 10) : NaN;
+  if (isNaN(id)) {
+    await sendMessage(chatId, "Usage: /timeline [lead_id]\nExample: /timeline 42", { token } as any);
+    return;
+  }
+  const db = getDb();
+  const lead = await db.query.leads.findFirst({ where: eq(leads.id, id) });
+  if (!lead) {
+    await sendMessage(chatId, `❌ Lead #${id} not found.`, { token } as any);
+    return;
+  }
+  const recentActivities = await db.query.activities.findMany({
+    where: eq(activities.leadId, id),
+    orderBy: [desc(activities.createdAt)],
+    limit: 8,
+  });
+
+  let msg = `📅 <b>Timeline — #${id} ${lead.sellerName}</b>\n`;
+  if (!recentActivities.length) {
+    msg += `\n<i>No activity yet.</i>`;
+  } else {
+    for (const a of recentActivities) {
+      const dateStr = new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      msg += `\n<b>${dateStr}</b> ${a.body.slice(0, 120)}`;
+    }
+  }
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+async function handleOffer(chatId: string, parts: string[], token: string): Promise<void> {
+  const id = parts[1] ? parseInt(parts[1], 10) : NaN;
+  const rawAmount = parts[2] ? parts[2].replace(/[$,]/g, "") : "";
+  const amount = parseFloat(rawAmount);
+  if (isNaN(id) || isNaN(amount) || amount <= 0) {
+    await sendMessage(chatId, "Usage: /offer [lead_id] [amount]\nExample: /offer 42 85000", { token } as any);
+    return;
+  }
+  const db = getDb();
+  const lead = await db.query.leads.findFirst({ where: eq(leads.id, id) });
+  if (!lead) {
+    await sendMessage(chatId, `❌ Lead #${id} not found.`, { token } as any);
+    return;
+  }
+  const [created] = await db.insert(offers).values({
+    leadId: id,
+    offerAmount: String(amount),
+    status: "draft",
+  } as any).returning({ id: offers.id });
+  await db.insert(activities).values({
+    leadId: id,
+    type: "offer",
+    body: `💰 Offer created via bot: $${amount.toLocaleString()}`,
+    linkedTable: "offers",
+    linkedId: created.id,
+    metadata: JSON.stringify({ offerAmount: amount, source: "telegram_bot" }),
+  } as any);
+
+  const msg =
+    `💰 <b>Offer Created</b>\n\n` +
+    `Lead: #${id} ${lead.sellerName}\n` +
+    `📍 ${lead.propertyAddress}\n` +
+    `Offer Amount: <b>$${amount.toLocaleString()}</b>\n` +
+    `Status: Draft\n\n` +
+    `Use the web app to submit or update this offer.`;
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
+async function handleAddBuyer(chatId: string, parts: string[], token: string): Promise<void> {
+  const name = parts.slice(1).join(" ").trim();
+  if (!name) {
+    await sendMessage(chatId, "Usage: /addbuyer [name]\nExample: /addbuyer John Smith\n\nUse the web app to add phone, email, and buy box criteria after creating.", { token } as any);
+    return;
+  }
+  const db = getDb();
+  const [created] = await db.insert(buyers).values({ name, status: "active" } as any).returning({ id: buyers.id });
+  const msg =
+    `✅ <b>Buyer Added</b>\n\n` +
+    `Name: <b>${name}</b>\n` +
+    `Buyer ID: #${created.id}\n\n` +
+    `Open the web app to add phone, email, and buy box criteria (zip codes, price range, etc.).`;
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
 }
 
 async function handleCallNow(chatId: string, parts: string[], token: string): Promise<void> {
@@ -454,6 +579,18 @@ export async function handleQuickKickCommand(
         break;
       case "/runleads":
         await handleRunLeads(chatId, token);
+        break;
+      case "/tasks":
+        await handleTasks(chatId, parts, token);
+        break;
+      case "/timeline":
+        await handleTimeline(chatId, parts, token);
+        break;
+      case "/offer":
+        await handleOffer(chatId, parts, token);
+        break;
+      case "/addbuyer":
+        await handleAddBuyer(chatId, parts, token);
         break;
       case "/help":
         await sendMessage(chatId, quickKickHelp(), { parse_mode: "HTML", token } as any);
