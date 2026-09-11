@@ -13,6 +13,7 @@ import Campaigns from './pages/Campaigns'
 import DNCLists from './pages/DNCLists'
 import More from './pages/More'
 import LeadFinder from './pages/LeadFinder'
+import LeadDetail from './pages/LeadDetail'
 import Layout from './components/Layout'
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
       <Route element={<Layout />}>
         <Route path="/" element={<Home />} />
         <Route path="/leads" element={<Leads />} />
+        <Route path="/leads/:id" element={<LeadDetail />} />
         <Route path="/lead-finder" element={<LeadFinder />} />
         <Route path="/campaigns" element={<Campaigns />} />
         <Route path="/calls" element={<CallCenter />} />
