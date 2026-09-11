@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList } from "../../db/schema";
+import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities, tasks } from "../../db/schema";
 import { sendAlert } from "../lib/telegram";
 
 export const webhooksRouter = createRouter({
@@ -128,7 +128,7 @@ async function handleVapiWebhook(payload: any, db: any) {
       .where(eq(campaignLeads.id, queueEntry.campaignLeadId));
 
     // Log in calls table
-    await db.insert(calls).values({
+    const [callRow] = await db.insert(calls).values({
       leadId: queueEntry.leadId,
       callType: "initial",
       callOutcome: outcome as any,
@@ -140,7 +140,7 @@ async function handleVapiWebhook(payload: any, db: any) {
       voicemailLeft: outcome === "voicemail",
       appointmentSet,
       callRecordingUrl: recordingUrl,
-    } as any);
+    } as any).returning({ id: calls.id });
 
     // Update lead
     const leadUpdate: any = {
@@ -156,6 +156,54 @@ async function handleVapiWebhook(payload: any, db: any) {
       leadUpdate.askingPrice = sellerAskingPrice;
     }
     await db.update(leads).set(leadUpdate).where(eq(leads.id, queueEntry.leadId));
+
+    // Write activity to unified timeline
+    const outcomeEmoji: Record<string, string> = {
+      answered: "📞", voicemail: "📬", no_answer: "🔕", busy: "🔄",
+      appointment_set: "🔥", not_interested: "❌", dnc: "🚫", failed: "⚠️",
+    };
+    const emoji = outcomeEmoji[outcome] ?? "📞";
+    const durationStr = duration ? ` (${Math.round(duration)}s)` : "";
+    const parts = [`${emoji} VAPI call — ${outcome}${durationStr}`];
+    if (appointmentSet) parts.push("🔥 Appointment set");
+    if (painSignals) parts.push(`Pain signals: ${painSignals}`);
+    if (sellerAskingPrice) parts.push(`Asking price: $${sellerAskingPrice}`);
+    if (outcome === "voicemail") parts.push("Voicemail left");
+
+    await db.insert(activities).values({
+      leadId: queueEntry.leadId,
+      type: "call",
+      body: parts.join(" | "),
+      linkedTable: "calls",
+      linkedId: callRow?.id ?? null,
+      metadata: JSON.stringify({
+        outcome,
+        duration,
+        recordingUrl: recordingUrl || null,
+        transcript: transcript ? transcript.substring(0, 600) : null,
+        externalCallId,
+      }),
+    } as any);
+
+    // Auto-create follow-up task when call ends without appointment
+    if (!appointmentSet && outcome !== "dnc" && outcome !== "not_interested") {
+      const followUpHours = outcome === "voicemail" ? 48 : outcome === "no_answer" ? 24 : 72;
+      const dueAt = new Date(Date.now() + followUpHours * 60 * 60 * 1000);
+      const taskTitles: Record<string, string> = {
+        voicemail: "Follow-up call — voicemail left",
+        no_answer: "Follow-up call — no answer",
+        busy: "Follow-up call — line busy",
+        answered: "Follow-up call — conversation, no appointment",
+      };
+      await db.insert(tasks).values({
+        leadId: queueEntry.leadId,
+        type: "call_back",
+        title: taskTitles[outcome] ?? "Follow-up call",
+        notes: painSignals ? `Pain signals: ${painSignals}` : undefined,
+        dueAt,
+        status: "pending",
+      } as any);
+    }
 
     // Notify via Telegram when appointment is set
     if (appointmentSet) {
@@ -180,6 +228,14 @@ async function handleVapiWebhook(payload: any, db: any) {
           source: "vapi_ai_call",
           notes: `Seller requested DNC during AI call ${externalCallId}`,
         });
+        await db.insert(activities).values({
+          leadId: queueEntry.leadId,
+          type: "system",
+          body: "🚫 Seller requested Do Not Call — added to DNC list",
+          linkedTable: "calls",
+          linkedId: callRow?.id ?? null,
+          metadata: JSON.stringify({ phone: lead.phone, source: "vapi_ai_call", externalCallId }),
+        } as any);
       }
     }
 
