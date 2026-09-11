@@ -72,6 +72,7 @@ async function dispatchCommand(
     case "/callbrief":
     case "/leadstatus":
     case "/callnow":
+    case "/comps":
     case "/runleads":
       if (botName === "quickkick") {
         await handleQuickKickCommand(chatId, cmd, parts, token);

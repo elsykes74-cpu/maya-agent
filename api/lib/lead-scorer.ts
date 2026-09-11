@@ -14,6 +14,93 @@ export type LeadForScoring = {
   leadType?: string | null;
 };
 
+export type STACKScore = {
+  spread: number;    // 0-5: profit potential (equity proxy)
+  temperature: number; // 0-5: seller motivation urgency
+  ability: number;   // 0-5: deal certainty / likelihood to transact
+  clock: number;     // 0-5: speed-to-close urgency
+  kick: number;      // 0-5: ease of effort (5 = low effort required)
+  total: number;     // 0-25
+  label: string;
+};
+
+export function computeSTACKScore(lead: LeadForScoring): STACKScore {
+  const yrs = lead.ownershipYears ?? 0;
+
+  // S — Spread: equity buildup proxies for profit potential
+  let spread = 0;
+  if (yrs >= 20) spread += 3;
+  else if (yrs >= 10) spread += 2;
+  else if (yrs >= 5) spread += 1;
+  if (lead.isMultifamilyLandlord) spread += 1; // complex / discounted
+  if (lead.isProbate) spread += 1;             // below-market exit
+  spread = Math.min(5, spread);
+
+  // T — Temperature: urgency of seller motivation
+  let temperature = 0;
+  if (lead.isPreForeclosure) temperature += 3;
+  if (lead.hasTaxDelinquency) temperature += 2;
+  if (lead.isProbate) temperature += 1;
+  if (lead.hasVisibleDistress) temperature += 1;
+  if (lead.isExpiredListing) temperature += 1;
+  temperature = Math.min(5, temperature);
+
+  // A — Ability: deal certainty (owner can and will transact)
+  let ability = 0;
+  if (lead.isAbsentee) ability += 2;
+  if (lead.isOutOfState) ability += 2;
+  if (lead.hasTaxDelinquency) ability += 1;
+  if (lead.hasCodeViolations) ability += 1;
+  if (lead.isProbate) ability += 1; // executor obligated to sell
+  ability = Math.min(5, ability);
+
+  // C — Clock: time pressure forcing a quick decision
+  let clock = 0;
+  if (lead.isPreForeclosure) clock += 3;
+  if (lead.hasTaxDelinquency) clock += 2;
+  if (lead.hasCodeViolations) clock += 1;
+  if (lead.isVacant) clock += 1;      // carrying costs
+  if (lead.isExpiredListing) clock += 1;
+  clock = Math.min(5, clock);
+
+  // K — Kick: ease of closing (5 = minimal effort required)
+  let kick = 2; // baseline
+  if (lead.isAbsentee) kick += 1;
+  if (lead.isOutOfState) kick += 1;
+  if (lead.hasVisibleDistress) kick += 1;
+  if (lead.isFsbo) kick -= 1;           // overestimates value
+  if (lead.isMultifamilyLandlord) kick -= 1; // sophisticated seller
+  if (lead.isProbate) kick -= 1;        // multiple decision makers
+  kick = Math.min(5, Math.max(0, kick));
+
+  const total = spread + temperature + ability + clock + kick;
+
+  let label: string;
+  if (total >= 20) label = "Elite Deal";
+  else if (total >= 15) label = "Strong Deal";
+  else if (total >= 10) label = "Average Deal";
+  else if (total >= 5) label = "Weak Deal";
+  else label = "Pass";
+
+  return { spread, temperature, ability, clock, kick, total, label };
+}
+
+function stackBar(score: number, max = 5): string {
+  const filled = Math.round(score);
+  return "█".repeat(filled) + "░".repeat(max - filled);
+}
+
+export function formatSTACKBreakdown(stack: STACKScore): string {
+  let msg = `📊 <b>STACK Score: ${stack.total}/25 — ${stack.label}</b>\n`;
+  msg += `${"─".repeat(24)}\n`;
+  msg += `S Spread      ${stackBar(stack.spread)} ${stack.spread}/5\n`;
+  msg += `T Temperature ${stackBar(stack.temperature)} ${stack.temperature}/5\n`;
+  msg += `A Ability     ${stackBar(stack.ability)} ${stack.ability}/5\n`;
+  msg += `C Clock       ${stackBar(stack.clock)} ${stack.clock}/5\n`;
+  msg += `K Kick        ${stackBar(stack.kick)} ${stack.kick}/5\n`;
+  return msg;
+}
+
 export function computeLeadScore(lead: LeadForScoring): number {
   let score = 0;
   if (lead.hasTaxDelinquency) score += 20;
