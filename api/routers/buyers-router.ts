@@ -3,6 +3,7 @@ import { eq, desc, and, lte, gte, like, or } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { buyers, buyerCriteria, leads } from "../../db/schema";
+import { matchBuyersToLead } from "../lib/buyer-matcher";
 
 export const buyersRouter = createRouter({
   list: publicQuery
@@ -134,46 +135,13 @@ export const buyersRouter = createRouter({
       const db = getDb();
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, input.leadId) });
       if (!lead) throw new Error("Lead not found");
-      const allCriteria = await db.query.buyerCriteria.findMany();
-      const activeBuyers = await db.query.buyers.findMany({ where: eq(buyers.status, "active") });
-      const buyerMap = new Map(activeBuyers.map((b) => [b.id, b]));
-
-      const matches: Array<{ buyer: typeof activeBuyers[0]; score: number; reasons: string[] }> = [];
-
-      for (const criteria of allCriteria) {
-        const buyer = buyerMap.get(Number(criteria.buyerId));
-        if (!buyer) continue;
-
-        let score = 0;
-        const reasons: string[] = [];
-
-        // Price check (use askingPrice or MAO)
-        const price = Number(lead.askingPrice ?? lead.mao ?? 0);
-        const minP = Number(criteria.minPrice ?? 0);
-        const maxP = Number(criteria.maxPrice ?? Infinity);
-        if (price >= minP && price <= maxP) { score += 2; reasons.push("price fits"); }
-
-        // Beds
-        if (lead.beds && criteria.minBeds && lead.beds >= criteria.minBeds) { score += 1; reasons.push("beds ok"); }
-        if (lead.beds && criteria.maxBeds && lead.beds <= criteria.maxBeds) { score += 1; }
-
-        // Sqft
-        const sqft = lead.squareFootage ?? 0;
-        if (sqft && criteria.minSqft && sqft >= criteria.minSqft) { score += 1; }
-        if (sqft && criteria.maxSqft && sqft <= criteria.maxSqft) { score += 1; }
-
-        // Zip codes
-        const zips = (criteria.zipCodes ?? "").split(",").map((z) => z.trim()).filter(Boolean);
-        if (zips.length && lead.zipCode && zips.includes(lead.zipCode)) { score += 3; reasons.push("zip match"); }
-
-        // Vacancy preference
-        if (criteria.prefersVacant && lead.isVacant) { score += 1; reasons.push("vacant preferred"); }
-        if (criteria.prefersOffMarket) { score += 1; reasons.push("off-market preferred"); }
-
-        if (score > 0) matches.push({ buyer, score, reasons });
-      }
-
-      matches.sort((a, b) => b.score - a.score);
-      return { matches: matches.slice(0, 10) };
+      const matches = await matchBuyersToLead(input.leadId, db);
+      return {
+        matches: matches.map((m) => ({
+          buyer: { id: m.buyerId, name: m.buyerName, company: m.company, phone: m.phone },
+          score: m.score,
+          reasons: m.reasons,
+        })),
+      };
     }),
 });
