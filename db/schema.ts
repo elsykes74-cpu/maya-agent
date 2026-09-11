@@ -77,6 +77,35 @@ export const leadTypeEnum = pgEnum("lead_type", [
 
 export const confidenceLevelEnum = pgEnum("confidence_level", ["high", "medium", "low"]);
 
+// ── CRM enums ────────────────────────────────────────────────────────────────
+
+export const taskTypeEnum = pgEnum("task_type", [
+  "call_back", "send_sms", "send_email", "follow_up", "visit", "contract", "other",
+]);
+export const taskStatusEnum = pgEnum("task_status", [
+  "pending", "in_progress", "completed", "cancelled", "snoozed",
+]);
+export const activityTypeEnum = pgEnum("activity_type", [
+  "call", "sms", "email", "note", "visit", "offer", "appointment", "status_change", "system",
+]);
+export const offerStatusEnum = pgEnum("offer_status", [
+  "draft", "submitted", "countered", "accepted", "rejected", "expired", "withdrawn",
+]);
+export const buyerStatusEnum = pgEnum("buyer_status", ["active", "inactive", "closed"]);
+export const analysisTypeEnum = pgEnum("analysis_type", [
+  "stack_score", "comps", "flip", "brrrr", "buy_hold", "rental", "custom",
+]);
+export const followUpEnrollmentStatusEnum = pgEnum("follow_up_enrollment_status", [
+  "active", "paused", "completed", "cancelled",
+]);
+export const duplicateFlagStatusEnum = pgEnum("duplicate_flag_status", [
+  "pending", "confirmed", "dismissed",
+]);
+export const attributionChannelEnum = pgEnum("attribution_channel", [
+  "direct_mail", "cold_call", "sms", "facebook", "google", "referral",
+  "list_import", "driving_for_dollars", "other",
+]);
+
 // ── Tables ───────────────────────────────────────────────────────────────────
 
 export const users = pgTable("users", {
@@ -490,3 +519,174 @@ export const callQueue = pgTable("call_queue", {
 });
 
 export type CallQueue = typeof callQueue.$inferSelect;
+
+// ── CRM tables ────────────────────────────────────────────────────────────────
+
+export const tasks = pgTable("tasks", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  type: taskTypeEnum("type").default("other").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  notes: text("notes"),
+  dueAt: timestamp("due_at"),
+  status: taskStatusEnum("status").default("pending").notNull(),
+  snoozedUntil: timestamp("snoozed_until"),
+  completedAt: timestamp("completed_at"),
+  createdBy: bigint("created_by", { mode: "number" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Task = typeof tasks.$inferSelect;
+export type InsertTask = typeof tasks.$inferInsert;
+
+export const activities = pgTable("activities", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  type: activityTypeEnum("type").default("note").notNull(),
+  body: text("body").notNull(),
+  linkedTable: varchar("linked_table", { length: 50 }),
+  linkedId: bigint("linked_id", { mode: "number" }),
+  metadata: text("metadata"),
+  createdBy: bigint("created_by", { mode: "number" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type Activity = typeof activities.$inferSelect;
+export type InsertActivity = typeof activities.$inferInsert;
+
+export const offers = pgTable("offers", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  offerAmount: numeric("offer_amount", { precision: 12, scale: 2 }).notNull(),
+  status: offerStatusEnum("status").default("draft").notNull(),
+  counterAmount: numeric("counter_amount", { precision: 12, scale: 2 }),
+  assignmentFee: numeric("assignment_fee", { precision: 12, scale: 2 }),
+  arvUsed: numeric("arv_used", { precision: 12, scale: 2 }),
+  repairEstimate: numeric("repair_estimate", { precision: 12, scale: 2 }),
+  notes: text("notes"),
+  submittedAt: timestamp("submitted_at"),
+  respondedAt: timestamp("responded_at"),
+  expiresAt: timestamp("expires_at"),
+  createdBy: bigint("created_by", { mode: "number" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Offer = typeof offers.$inferSelect;
+export type InsertOffer = typeof offers.$inferInsert;
+
+export const propertyAnalyses = pgTable("property_analyses", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  analysisType: analysisTypeEnum("analysis_type").default("custom").notNull(),
+  title: varchar("title", { length: 255 }),
+  content: text("content").notNull(),
+  createdBy: varchar("created_by", { length: 50 }).default("quickkick"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type PropertyAnalysis = typeof propertyAnalyses.$inferSelect;
+export type InsertPropertyAnalysis = typeof propertyAnalyses.$inferInsert;
+
+export const buyers = pgTable("buyers", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  company: varchar("company", { length: 255 }),
+  phone: varchar("phone", { length: 20 }),
+  email: varchar("email", { length: 320 }),
+  status: buyerStatusEnum("status").default("active").notNull(),
+  notes: text("notes"),
+  lastPurchaseDate: timestamp("last_purchase_date"),
+  totalPurchases: integer("total_purchases").default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type Buyer = typeof buyers.$inferSelect;
+export type InsertBuyer = typeof buyers.$inferInsert;
+
+export const buyerCriteria = pgTable("buyer_criteria", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  buyerId: bigint("buyer_id", { mode: "number" }).notNull(),
+  zipCodes: text("zip_codes"),
+  cities: text("cities"),
+  minPrice: numeric("min_price", { precision: 12, scale: 2 }),
+  maxPrice: numeric("max_price", { precision: 12, scale: 2 }),
+  minBeds: integer("min_beds"),
+  maxBeds: integer("max_beds"),
+  minBaths: numeric("min_baths", { precision: 3, scale: 1 }),
+  maxBaths: numeric("max_baths", { precision: 3, scale: 1 }),
+  minSqft: integer("min_sqft"),
+  maxSqft: integer("max_sqft"),
+  propertyTypes: text("property_types"),
+  minArv: numeric("min_arv", { precision: 12, scale: 2 }),
+  maxArv: numeric("max_arv", { precision: 12, scale: 2 }),
+  prefersVacant: boolean("prefers_vacant").default(false),
+  prefersOffMarket: boolean("prefers_off_market").default(true),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type BuyerCriteria = typeof buyerCriteria.$inferSelect;
+export type InsertBuyerCriteria = typeof buyerCriteria.$inferInsert;
+
+export const followUpSequences = pgTable("follow_up_sequences", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  steps: text("steps").notNull(),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
+});
+
+export type FollowUpSequence = typeof followUpSequences.$inferSelect;
+export type InsertFollowUpSequence = typeof followUpSequences.$inferInsert;
+
+export const followUpEnrollments = pgTable("follow_up_enrollments", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  sequenceId: bigint("sequence_id", { mode: "number" }).notNull(),
+  currentStep: integer("current_step").default(0),
+  status: followUpEnrollmentStatusEnum("status").default("active").notNull(),
+  nextRunAt: timestamp("next_run_at"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type FollowUpEnrollment = typeof followUpEnrollments.$inferSelect;
+export type InsertFollowUpEnrollment = typeof followUpEnrollments.$inferInsert;
+
+export const leadAttributions = pgTable("lead_attributions", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  sourceId: bigint("source_id", { mode: "number" }),
+  channel: attributionChannelEnum("channel").default("other"),
+  campaign: varchar("campaign", { length: 255 }),
+  listName: varchar("list_name", { length: 255 }),
+  importDate: timestamp("import_date"),
+  estimatedCost: numeric("estimated_cost", { precision: 10, scale: 2 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type LeadAttribution = typeof leadAttributions.$inferSelect;
+export type InsertLeadAttribution = typeof leadAttributions.$inferInsert;
+
+export const duplicateFlags = pgTable("duplicate_flags", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  leadId: bigint("lead_id", { mode: "number" }).notNull(),
+  duplicateLeadId: bigint("duplicate_lead_id", { mode: "number" }).notNull(),
+  matchScore: integer("match_score").default(0),
+  matchFields: text("match_fields"),
+  status: duplicateFlagStatusEnum("status").default("pending").notNull(),
+  resolvedBy: bigint("resolved_by", { mode: "number" }),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export type DuplicateFlag = typeof duplicateFlags.$inferSelect;
+export type InsertDuplicateFlag = typeof duplicateFlags.$inferInsert;
