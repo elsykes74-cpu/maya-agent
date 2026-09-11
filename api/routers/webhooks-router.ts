@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities } from "../../db/schema";
+import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities, tasks } from "../../db/schema";
 import { sendAlert } from "../lib/telegram";
 
 export const webhooksRouter = createRouter({
@@ -184,6 +184,26 @@ async function handleVapiWebhook(payload: any, db: any) {
         externalCallId,
       }),
     } as any);
+
+    // Auto-create follow-up task when call ends without appointment
+    if (!appointmentSet && outcome !== "dnc" && outcome !== "not_interested") {
+      const followUpHours = outcome === "voicemail" ? 48 : outcome === "no_answer" ? 24 : 72;
+      const dueAt = new Date(Date.now() + followUpHours * 60 * 60 * 1000);
+      const taskTitles: Record<string, string> = {
+        voicemail: "Follow-up call — voicemail left",
+        no_answer: "Follow-up call — no answer",
+        busy: "Follow-up call — line busy",
+        answered: "Follow-up call — conversation, no appointment",
+      };
+      await db.insert(tasks).values({
+        leadId: queueEntry.leadId,
+        type: "call_back",
+        title: taskTitles[outcome] ?? "Follow-up call",
+        notes: painSignals ? `Pain signals: ${painSignals}` : undefined,
+        dueAt,
+        status: "pending",
+      } as any);
+    }
 
     // Notify via Telegram when appointment is set
     if (appointmentSet) {

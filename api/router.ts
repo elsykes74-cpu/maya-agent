@@ -12,6 +12,10 @@ import { dncRouter } from "./routers/dnc-router";
 import { webhooksRouter } from "./routers/webhooks-router";
 import { mayaRouter } from "./routers/maya-router";
 import { leadFinderRouter } from "./routers/lead-finder-router";
+import { activitiesRouter } from "./routers/activities-router";
+import { tasksRouter } from "./routers/tasks-router";
+import { offersRouter } from "./routers/offers-router";
+import { buyersRouter } from "./routers/buyers-router";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
@@ -28,6 +32,10 @@ export const appRouter = createRouter({
   dnc: dncRouter,
   webhooks: webhooksRouter,
   maya: mayaRouter,
+  activities: activitiesRouter,
+  tasks: tasksRouter,
+  offers: offersRouter,
+  buyers: buyersRouter,
 });
 
 export type AppRouter = typeof appRouter;
