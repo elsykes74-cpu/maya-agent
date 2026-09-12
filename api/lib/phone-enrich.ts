@@ -166,9 +166,10 @@ export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult>
         console.error(`[enrich] lead ${row.id} failed:`, msg);
         lastError = msg;
         // Throw = we didn't actually check (rate limit, quota, network), so
-        // it never counts as a strike. But 3+ 429s in one run means the well
-        // is dry — stop the run instead of burning through it.
-        if (/429/.test(msg) && ++quotaErrors >= 3) break;
+        // it never counts as a strike. But 3+ quota-type errors (429 rate
+        // limit, 432 plan/monthly limit, 433 paygo limit) in one run means
+        // the well is dry — stop the run instead of burning through it.
+        if (/\b(429|432|433)\b/.test(msg) && ++quotaErrors >= 3) break;
       }
       // Gentle pacing between searches.
       await new Promise((r) => setTimeout(r, 1200));
