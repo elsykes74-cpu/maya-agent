@@ -517,29 +517,43 @@ app.get("/api/cron/diag", async (c) => {
   const { proxiedFetch } = await import("./lib/proxy-fetch");
   const UA =
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
-  const targets = [
-    "https://example.com/",
-    "https://www.craigslist.org/",
-    "https://westernmass.craigslist.org/search/rea?format=rss&sort=date",
+  const BROWSER_HEADERS = {
+    "User-Agent": UA,
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+  };
+  const targets: { url: string; headers: Record<string, string> }[] = [
+    {
+      url: "https://westernmass.craigslist.org/search/rea?format=rss&sort=date",
+      headers: BROWSER_HEADERS,
+    },
+    {
+      url: "https://westernmass.craigslist.org/search/rea?sort=date",
+      headers: BROWSER_HEADERS,
+    },
   ];
   const out: any[] = [];
-  for (const url of targets) {
+  for (const t of targets) {
     try {
       const res = await proxiedFetch(
-        url,
-        { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(15000) },
+        t.url,
+        { headers: t.headers, signal: AbortSignal.timeout(15000) },
         process.env.CL_PROXY_URL,
       );
       const text = await res.text();
       out.push({
-        url,
+        url: t.url,
         status: res.status,
         server: res.headers.get("server"),
         via: res.headers.get("via"),
         snippet: text.slice(0, 220).replace(/\s+/g, " "),
       });
     } catch (e: any) {
-      out.push({ url, error: String(e?.message ?? e) });
+      out.push({ url: t.url, error: String(e?.message ?? e) });
     }
   }
   return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
