@@ -3,12 +3,15 @@
 // challenge that blocks Vercel's serverless fetch, then POSTs the rendered
 // ALIS results HTML to /api/cron/registry-ingest for parsing + lead insert.
 //
-// Env: REGISTRY_INGEST_URL (full URL incl ?secret=...), LOOKBACK_DAYS (default 9)
+// Env: REGISTRY_INGEST_URL (plain URL, no query string), CRON_SECRET
+// (sent as Authorization: Bearer — query-string ?secret= is not accepted),
+// LOOKBACK_DAYS (default 9)
 
 import { chromium } from "playwright";
 
 const ALIS_BASE = "https://search.hampdendeeds.com/ALIS/WW400R.HTM";
 const INGEST_URL = process.env.REGISTRY_INGEST_URL;
+const CRON_SECRET = process.env.CRON_SECRET;
 const PROXY_URL = process.env.PROXY_URL; // optional http://user:pass@host:port
 const LOOKBACK_DAYS = parseInt(process.env.LOOKBACK_DAYS || "9", 10);
 
@@ -96,7 +99,7 @@ if (html.length < 1000) {
 // POST rendered HTML to Vercel for parsing + insert.
 const res = await fetch(INGEST_URL, {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers: { "Content-Type": "application/json", "Authorization": `Bearer ${CRON_SECRET}` },
   body: JSON.stringify({ html }),
 });
 const data = await res.json().catch(() => ({}));

@@ -29,7 +29,7 @@ import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { startCallWorker } from "./lib/call-worker";
-import { runCraigslistScrape, formatScrapeAlert, recordScrapeRun, startScrapeScheduler } from "./lib/craigslist-scraper";
+import { runCraigslistScrape, formatScrapeAlert, recordScrapeRun, startScrapeScheduler, getLatestScrapeRun } from "./lib/craigslist-scraper";
 import {
   runRegistryScrape,
   formatRegistryAlert,
@@ -459,15 +459,22 @@ app.post("/api/twilio/status", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Scheduled cron endpoints (Vercel cron -> GET with ?secret=CRON_SECRET)
+// Scheduled cron endpoints (secret-gated).
+// Auth: Authorization: Bearer <CRON_SECRET>. Query-string ?secret= is NOT
+// accepted — secrets in URLs leak into logs, history, and referers.
 // ---------------------------------------------------------------------------
+// Shared cron auth — Bearer token only.
+const checkCronAuth = (c: any): boolean => {
+  if (!env.cronSecret) return false;
+  return c.req.header("authorization") === `Bearer ${env.cronSecret}`;
+};
+
 // Craigslist lead scan, every 30 min (see vercel.json "crons").
 // Runs OUTSIDE the bot webhook flow because a full scrape (20 detail pages)
 // exceeds Vercel's 30s serverless limit. Results are recorded in scrape_runs;
 // /findleads reports the latest cached run instead of scraping live.
 app.get("/api/cron/scrape", async (c) => {
-  const secret = c.req.query("secret");
-  if (!env.cronSecret || secret !== env.cronSecret) {
+  if (!checkCronAuth(c)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
   const db = getDb();
@@ -515,63 +522,9 @@ app.get("/api/cron/scrape", async (c) => {
 // Hampden County Registry of Deeds — distressed-filing scan, weekly.
 // Same secret-gated cron pattern as /api/cron/scrape. Registry filings carry
 // no phone numbers, so results land in the unrouted lead pool for skip tracing.
-// Temporary proxy diagnostic (secret-gated): fetches a neutral page, the CL
-// homepage, and the CL RSS feed through CL_PROXY_URL and reports what each
-// returns. Used to determine whether a 403 comes from the proxy or from CL.
-app.get("/api/cron/diag", async (c) => {
-  const secret = c.req.query("secret");
-  if (!env.cronSecret || secret !== env.cronSecret) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  const { proxiedFetch } = await import("./lib/proxy-fetch");
-  const UA =
-    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
-  const BROWSER_HEADERS = {
-    "User-Agent": UA,
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-  };
-  const RSS_HEADERS = {
-    ...BROWSER_HEADERS,
-    Accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
-    "Sec-Fetch-Dest": "empty",
-    "Sec-Fetch-Mode": "no-cors",
-  };
-  const px = process.env.CL_PROXY_URL;
-  const out: any[] = [];
-  // Fetch the CL search frontend bundle and hunt for the results API endpoint.
-  try {
-    const res = await proxiedFetch(
-      "https://www.craigslist.org/static/www/bd500f231d36fff2c9dbf45b21a239c2c10a0e82.js",
-      { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) },
-      px,
-    );
-    const js = await res.text();
-    const hits: string[] = [];
-    const seen = new Set<string>();
-    for (const m of js.matchAll(/["'`](https?:\/\/[a-zA-Z0-9.\-_/]{4,120}|[/][a-zA-Z0-9.\-_/]{3,100})["'`]/g)) {
-      const s = m[1];
-      if (/api|graphql|gateway|search[/.]json|json[/.]search/i.test(s) && !seen.has(s)) {
-        seen.add(s);
-        hits.push(s.slice(0, 160));
-        if (hits.length >= 25) break;
-      }
-    }
-    out.push({ label: "bundle-api-hunt", status: res.status, js_len: js.length, hits });
-  } catch (e: any) {
-    out.push({ label: "bundle-api-hunt", error: String(e?.message ?? e) });
-  }
-  return c.json({ proxy_configured: !!px, out });
-  return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
-});
 
 app.get("/api/cron/registry", async (c) => {
-  const secret = c.req.query("secret");
-  if (!env.cronSecret || secret !== env.cronSecret) {
+  if (!checkCronAuth(c)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
   const db = getDb();
@@ -604,8 +557,7 @@ app.get("/api/cron/registry", async (c) => {
 // fetch), then POSTs the rendered results HTML here. Secret-gated like the
 // other cron endpoints. Body: { html: string }.
 app.post("/api/cron/registry-ingest", async (c) => {
-  const secret = c.req.query("secret");
-  if (!env.cronSecret || secret !== env.cronSecret) {
+  if (!checkCronAuth(c)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
   let body: any;
@@ -639,15 +591,8 @@ app.post("/api/cron/registry-ingest", async (c) => {
 // ---------------------------------------------------------------------------
 // RentCast registry source — licensed property data (no Imperva block).
 // Replaces the hard-blocked Hampden portal scrape as the automated distressed
-// lead source. Same secret-gated cron pattern as the other endpoints:
-// accepts ?secret=CRON_SECRET or Authorization: Bearer.
+// lead source. Same Bearer-gated cron pattern as the other endpoints.
 // ---------------------------------------------------------------------------
-const checkCronAuth = (c: any): boolean => {
-  if (!env.cronSecret) return false;
-  if (c.req.query("secret") === env.cronSecret) return true;
-  return c.req.header("authorization") === `Bearer ${env.cronSecret}`;
-};
-
 const handleCronRentcast = async (c: any) => {
   if (!checkCronAuth(c)) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -707,6 +652,33 @@ app.post("/api/cron/enrich", async (c: any) => {
   const { enrichPhones } = await import("./lib/phone-enrich");
   const result = await enrichPhones(db, limit);
   return c.json(result);
+});
+
+// ---------------------------------------------------------------------------
+// Craigslist health — Bearer-gated status for monitors/dashboards.
+// Reports proxy config and the latest scrape run (no lead PII).
+// ---------------------------------------------------------------------------
+app.get("/api/health/craigslist", async (c) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const db = getDb();
+  const latest = await getLatestScrapeRun(db).catch(() => null);
+  return c.json({
+    ok: latest?.status === "ok",
+    proxy_configured: !!process.env.CL_PROXY_URL,
+    latest_run: latest
+      ? {
+          id: latest.id,
+          status: latest.status,
+          started_at: latest.startedAt,
+          finished_at: latest.finishedAt,
+          found: latest.found,
+          added: latest.added,
+          error: latest.error,
+        }
+      : null,
+  });
 });
 
 // ---------------------------------------------------------------------------

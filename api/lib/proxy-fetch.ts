@@ -27,5 +27,10 @@ export function proxiedFetch(
 ): Promise<Response> {
   const agent = getProxyAgent(proxyUrl);
   if (!agent) return fetch(url, init);
-  return undiciFetch(url, { ...init, dispatcher: agent } as any) as Promise<Response>;
+  // undici's Response is structurally compatible with the DOM Response for
+  // everything this codebase uses (ok, status, text(), json()).
+  return undiciFetch(
+    url,
+    { ...init, dispatcher: agent } as Parameters<typeof undiciFetch>[1],
+  ) as unknown as Promise<Response>;
 }

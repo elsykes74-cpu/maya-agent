@@ -1,6 +1,7 @@
-import { desc } from "drizzle-orm";
+import { desc, like } from "drizzle-orm";
 import { proxiedFetch } from "./proxy-fetch";
 import { leads, scrapeRuns } from "../../db/schema";
+import { decodeEntities, extractPhone } from "./text-utils";
 import { escapeHtml, sendAlert } from "./telegram";
 import { getDb } from "../queries/connection";
 import { routeLead } from "./pipeline-engine";
@@ -34,7 +35,10 @@ async function clFetch(url: string, timeoutMs: number): Promise<Response> {
 // HTTP statuses that mean "Craigslist blocked this IP" rather than a bug.
 const BLOCKED_STATUSES = new Set([403, 429, 503]);
 
-// Max detail pages per run. Keeps scheduled runs fast and polite to CL.
+// Max detail-page fetches per run. Detail pages are only fetched for listings
+// not already in the DB, so every scan evaluates ALL search results and this
+// cap can never permanently omit a listing: overflow beyond the cap stays
+// "unknown" and is picked up on a later run. Keeps runs fast and polite to CL.
 const DEFAULT_MAX_ITEMS = 20;
 // Delay between detail-page fetches — be polite to Craigslist.
 const FETCH_DELAY_MS = 600;
@@ -64,7 +68,7 @@ interface SearchItem {
 }
 
 function cleanText(s: string): string {
-  return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  return decodeEntities(s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
 }
 
 function parseSearchHtml(html: string): SearchItem[] {
@@ -91,42 +95,29 @@ function parseSearchHtml(html: string): SearchItem[] {
 }
 
 // ── Detail page ──────────────────────────────────────────────────────────────
-async function fetchDetail(url: string): Promise<{ description: string; phone: string | null; location: string | null; postedAt: string | null }> {
+async function fetchDetail(url: string): Promise<{ description: string; phone: string | null; location: string | null }> {
   try {
     const res = await clFetch(url, 10000);
-    if (!res.ok) return { description: "", phone: null, location: null, postedAt: null };
+    if (!res.ok) return { description: "", phone: null, location: null };
     const html = await res.text();
-    if (html.includes("blockID")) return { description: "", phone: null, location: null, postedAt: null };
+    if (html.includes("blockID")) return { description: "", phone: null, location: null };
 
     // Posting body (new /view/d/ layout). Strip <script> first so the gallery
     // JS and numeric posting IDs can't pollute the description or phone match.
     const bodyMatch = html.match(/<section class="userbody">([\s\S]*?)<\/section>/);
     const rawBody = (bodyMatch?.[1] ?? "").replace(/<script[\s\S]*?<\/script>/g, " ");
-    const description = rawBody
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 1200);
+    const description = cleanText(rawBody).slice(0, 1200);
 
-    // Phone — search the posting body only (not raw HTML/JS), and require the
-    // match to not be embedded in a longer digit string (avoids grabbing
-    // timestamps, IDs, or script constants as the seller's phone).
-    const phoneMatch = description.match(/(?<!\d)(\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4})(?!\d)/);
-    const phone = phoneMatch
-      ? phoneMatch[1].replace(/\D/g, "").replace(/(\d{3})(\d{3})(\d{4})/, "($1) $2-$3")
-      : null;
-
-    // Posted date (CL embeds it)
-    const dateMatch = html.match(/datetime="([^"]+)"/);
-    const postedAt = dateMatch?.[1] ?? null;
+    // Phone — search the posting body only (not raw HTML/JS); see text-utils.
+    const phone = extractPhone(description);
 
     // Map data-accuracy / data-latitude for location (CL embeds it)
     const cityMatch = html.match(/<meta content="([^"]+(?:Springfield|Holyoke|Chicopee|Westfield|Agawam|Northampton|Pittsfield|Ludlow|Palmer|Ware|Easthampton)[^"]*)" /i);
     const location = cityMatch?.[1]?.trim() ?? null;
 
-    return { description, phone, location, postedAt };
+    return { description, phone, location };
   } catch {
-    return { description: "", phone: null, location: null, postedAt: null };
+    return { description: "", phone: null, location: null };
   }
 }
 
@@ -192,12 +183,24 @@ export async function runCraigslistScrape(
   const newLeads: CraigslistLead[] = [];
   let added = 0;
 
-  for (const item of items.slice(0, maxItems)) {
+  // Skip detail fetches for listings already in the DB — the ON CONFLICT
+  // guard made re-fetching them pure waste, and skipping keeps every run
+  // inside the serverless time budget no matter how many results CL shows.
+  const knownRows = await db
+    .select({ externalId: leads.externalId })
+    .from(leads)
+    .where(like(leads.externalId, "cl:%"));
+  const knownIds = new Set(
+    knownRows.map(r => r.externalId).filter((x): x is string => !!x),
+  );
+  const freshItems = items.filter(item => !knownIds.has(`cl:${item.id}`));
+
+  for (const item of freshItems.slice(0, maxItems)) {
     const externalId = `cl:${item.id}`;
 
     // Rate limit — be polite to CL
     await new Promise(r => setTimeout(r, FETCH_DELAY_MS));
-    const { description, phone, location, postedAt } = await fetchDetail(item.url);
+    const { description, phone, location } = await fetchDetail(item.url);
 
     const combinedText = `${item.title} ${description}`;
     // Prefer the search-card price: CL titles rarely include one (~all owner

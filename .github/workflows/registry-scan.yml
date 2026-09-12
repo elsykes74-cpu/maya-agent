@@ -3,8 +3,9 @@
 # Vercel's serverless fetch), then POSTs the rendered HTML to the Vercel
 # /api/cron/registry-ingest endpoint for parsing + lead insertion.
 #
-# Required repo secret: REGISTRY_INGEST_URL
-#   Full URL: https://maya-agent-rho.vercel.app/api/cron/registry-ingest?secret=<CRON_SECRET>
+# Required repo secrets: REGISTRY_INGEST_URL, CRON_SECRET
+#   REGISTRY_INGEST_URL: https://maya-agent-rho.vercel.app/api/cron/registry-ingest
+#   CRON_SECRET: sent as Authorization: Bearer (query-string ?secret= is not accepted)
 
 name: Registry Scan
 
@@ -38,6 +39,7 @@ jobs:
       - name: Run registry browser scrape
         env:
           REGISTRY_INGEST_URL: ${{ secrets.REGISTRY_INGEST_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || '9' }}
         run: node scripts/registry-browser-scrape.mjs
