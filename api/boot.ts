@@ -467,6 +467,15 @@ app.get("/api/cron/scrape", async (c) => {
   const db = getDb();
   try {
     const result = await runCraigslistScrape(db);
+    if (result.blocked) {
+      await recordScrapeRun(db, {
+        status: "blocked",
+        found: 0,
+        added: 0,
+        error: "Craigslist blocked the request (HTTP 403/429/503) via proxy.",
+      }).catch(() => {});
+      return c.json({ ok: false, blocked: true, found: 0, added: 0 });
+    }
     await recordScrapeRun(db, {
       status: "ok",
       found: result.found,
