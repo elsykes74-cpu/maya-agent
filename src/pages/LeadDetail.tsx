@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
-  ArrowLeft, Phone, PhoneCall, PhoneMissed, PhoneOff,
+  ArrowLeft, Phone, PhoneCall, PhoneMissed, PhoneOff, Trash2,
   MessageSquare, Mail, MapPin, FileText, Calendar, DollarSign,
   AlertCircle, CheckCircle2, Clock, Sparkles, Send,
 } from 'lucide-react';
-import { C, NeoTile, NeoTileSm } from '@/components/Neo';
+import { C, NeoTile, NeoTileSm, ConfirmSheet } from '@/components/Neo';
 import { trpc } from '@/providers/trpc';
 
 const ACTIVITY_ICON: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
@@ -57,6 +57,11 @@ export default function LeadDetail() {
   const navigate = useNavigate();
   const leadId = parseInt(id ?? '', 10);
   const [noteText, setNoteText] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const deleteLead = trpc.leads.delete.useMutation({
+    onSuccess: () => navigate('/leads'),
+  });
 
   const leadQ = trpc.leads.getById.useQuery(
     { id: leadId },
@@ -304,6 +309,26 @@ export default function LeadDetail() {
           );
         })}
       </section>
+
+      {/* Danger zone */}
+      <section style={{ marginTop: 28 }}>
+        <button
+          onClick={() => setConfirmDelete(true)}
+          className="press-sm"
+          style={{ width: '100%', padding: '14px', borderRadius: 16, border: 'none', background: C.redS, color: C.red, fontSize: 15, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+        >
+          <Trash2 size={16} strokeWidth={2.5} /> Delete Lead
+        </button>
+      </section>
+
+      <ConfirmSheet
+        open={confirmDelete}
+        title="Delete Lead"
+        desc={`Remove ${lead.sellerName} from your leads? This cannot be undone.`}
+        danger
+        onConfirm={() => deleteLead.mutate({ id: leadId })}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }
