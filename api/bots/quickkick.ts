@@ -8,6 +8,7 @@ import { formatScoreBreakdown, getMotivationFlags } from "../lib/telegram";
 import { saveResearchToLead } from "../lib/crm-saver";
 import { callClaudeConversation } from "../lib/message-generator";
 import { createVapiCall, scrubPhone, getCallingConfig } from "../lib/vapi";
+import { runCraigslistScrape, formatScrapeAlert } from "../lib/craigslist-scraper";
 
 function getTelegramFlags(lead: any): string[] {
   return getMotivationFlags(lead);
@@ -17,6 +18,7 @@ function quickKickHelp(): string {
   return (
     `🔍 <b>QuickKickBot — Lead Research & Intelligence</b>\n\n` +
     `<b>Research & Scoring</b>\n` +
+    `/findleads — Scrape Craigslist Western MA for new motivated sellers\n` +
     `/researchlead [address or name] — Brave Search + distress signals\n` +
     `/scorelead [id] — STACK score + traditional score breakdown\n` +
     `/callbrief [id] — 30-sec call briefing + opening line\n` +
@@ -345,6 +347,14 @@ async function handleRunLeads(chatId: string, token: string): Promise<void> {
   await runLeadsAutomation(chatId, token);
 }
 
+async function handleFindLeads(chatId: string, token: string): Promise<void> {
+  await sendMessage(chatId, "🔍 Scanning Craigslist Western MA for motivated sellers…", { token } as any);
+  const db = getDb();
+  const result = await runCraigslistScrape(db);
+  const msg = formatScrapeAlert(result);
+  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+}
+
 async function handleResearchLead(chatId: string, parts: string[], token: string): Promise<void> {
   const query = parts.slice(1).join(" ").trim();
   if (!query) {
@@ -579,6 +589,9 @@ export async function handleQuickKickCommand(
         break;
       case "/runleads":
         await handleRunLeads(chatId, token);
+        break;
+      case "/findleads":
+        await handleFindLeads(chatId, token);
         break;
       case "/tasks":
         await handleTasks(chatId, parts, token);
