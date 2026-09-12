@@ -652,11 +652,13 @@ const handleCronRentcast = async (c: any) => {
   const db = getDb();
   const result = await runRentcastScrape(db);
   // Best-effort phone enrichment on the fresh batch (and backlog) — free
-  // Tavily tier; never fails the scan if the key/quota is missing.
+  // Tavily tier; never fails the scan if the key/quota is missing. Capped at
+  // 8 searches so the pass fits inside the 30s serverless limit (~3.5s per
+  // lead); deeper backfill goes through /api/cron/enrich.
   let enriched: { checked: number; found: number } | null = null;
   try {
     const { enrichPhones } = await import("./lib/phone-enrich");
-    const r = await enrichPhones(db, 40);
+    const r = await enrichPhones(db, 8);
     if (r.ok) enriched = { checked: r.checked, found: r.found };
   } catch (err) {
     console.error("[cron/registry-rentcast] enrich failed:", err);
