@@ -4,6 +4,7 @@ import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities, tasks } from "../../db/schema";
 import { sendAlert } from "../lib/telegram";
+import { matchBuyersToLead, formatBuyerMatchAlert } from "../lib/buyer-matcher";
 
 export const webhooksRouter = createRouter({
   receive: publicQuery
@@ -208,13 +209,26 @@ async function handleVapiWebhook(payload: any, db: any) {
     // Notify via Telegram when appointment is set
     if (appointmentSet) {
       const apptLead = await db.query.leads.findFirst({ where: eq(leads.id, queueEntry.leadId) });
-      const msg =
+      const apptMsg =
         `🔥 <b>Appointment Set!</b>\n\n` +
         `<b>${apptLead?.sellerName ?? "Unknown"}</b>\n` +
         `📍 ${apptLead?.propertyAddress ?? ""}\n` +
         `📞 ${apptLead?.phone ?? ""}\n\n` +
         `Call outcome logged. Follow up to confirm time.`;
-      await sendAlert(msg, "quickkick");
+      await sendAlert(apptMsg, "quickkick");
+      await sendAlert(apptMsg, "ladyjaye");
+
+      // Auto-match buyers and send match alert to both bots
+      const matches = await matchBuyersToLead(queueEntry.leadId, db);
+      const matchMsg = formatBuyerMatchAlert(
+        queueEntry.leadId,
+        apptLead?.sellerName ?? "Unknown",
+        apptLead?.propertyAddress ?? "",
+        apptLead?.askingPrice ?? null,
+        matches,
+      );
+      await sendAlert(matchMsg, "quickkick");
+      await sendAlert(matchMsg, "ladyjaye");
     }
 
     // Handle DNC request
