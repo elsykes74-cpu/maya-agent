@@ -506,6 +506,45 @@ app.get("/api/cron/scrape", async (c) => {
 // Hampden County Registry of Deeds — distressed-filing scan, weekly.
 // Same secret-gated cron pattern as /api/cron/scrape. Registry filings carry
 // no phone numbers, so results land in the unrouted lead pool for skip tracing.
+// Temporary proxy diagnostic (secret-gated): fetches a neutral page, the CL
+// homepage, and the CL RSS feed through CL_PROXY_URL and reports what each
+// returns. Used to determine whether a 403 comes from the proxy or from CL.
+app.get("/api/cron/diag", async (c) => {
+  const secret = c.req.query("secret");
+  if (!env.cronSecret || secret !== env.cronSecret) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const { proxiedFetch } = await import("./lib/proxy-fetch");
+  const UA =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+  const targets = [
+    "https://example.com/",
+    "https://www.craigslist.org/",
+    "https://westernmass.craigslist.org/search/rea?format=rss&sort=date",
+  ];
+  const out: any[] = [];
+  for (const url of targets) {
+    try {
+      const res = await proxiedFetch(
+        url,
+        { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(15000) },
+        process.env.CL_PROXY_URL,
+      );
+      const text = await res.text();
+      out.push({
+        url,
+        status: res.status,
+        server: res.headers.get("server"),
+        via: res.headers.get("via"),
+        snippet: text.slice(0, 220).replace(/\s+/g, " "),
+      });
+    } catch (e: any) {
+      out.push({ url, error: String(e?.message ?? e) });
+    }
+  }
+  return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
+});
+
 app.get("/api/cron/registry", async (c) => {
   const secret = c.req.query("secret");
   if (!env.cronSecret || secret !== env.cronSecret) {
