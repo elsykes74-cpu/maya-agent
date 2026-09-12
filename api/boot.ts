@@ -534,53 +534,32 @@ app.get("/api/cron/diag", async (c) => {
   };
   const px = process.env.CL_PROXY_URL;
   const out: any[] = [];
-  const get = async (
-    label: string,
-    url: string,
-    headers: Record<string, string>,
-    cookie?: string,
-  ) => {
-    try {
-      const res = await proxiedFetch(
-        url,
-        {
-          headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) },
-          redirect: "manual",
-          signal: AbortSignal.timeout(15000),
-        },
-        px,
-      );
-      const setCookies: string[] =
-        typeof (res.headers as any).getSetCookie === "function"
-          ? (res.headers as any).getSetCookie()
-          : [];
-      const text = await res.text();
-      const entry: any = {
-        label,
-        status: res.status,
-        location: res.headers.get("location"),
-        set_cookies: setCookies.map((s) => s.split(";")[0]).slice(0, 4),
-        snippet: text.slice(0, 160).replace(/\s+/g, " "),
-      };
-      out.push(entry);
-      return setCookies.map((s) => s.split(";")[0]).join("; ");
-    } catch (e: any) {
-      out.push({ label, error: String(e?.message ?? e) });
-      return "";
+  // Map the search frontend: dump every script src + hunt for API-ish strings
+  // in the www canonical search page (the real JS app shell).
+  try {
+    const res = await proxiedFetch(
+      "https://www.craigslist.org/search/area/westernmass?cat=rea",
+      { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(15000) },
+      px,
+    );
+    const text = await res.text();
+    const srcs: string[] = [];
+    for (const m of text.matchAll(/<script[^>]+src="([^"]+)"/g)) srcs.push(m[1].slice(0, 200));
+    const apiHints: string[] = [];
+    for (const m of text.matchAll(/["'](https?:\/\/[^"']*?api[^"']*?|[/][^"']*?api[/][^"']*?)["']/gi)) {
+      const h = m[1].slice(0, 160);
+      if (!apiHints.includes(h)) apiHints.push(h);
+      if (apiHints.length >= 10) break;
     }
-  };
-  // 1. Cookie dance: HTML search first (200), then RSS with its cookies.
-  const htmlUrl = "https://westernmass.craigslist.org/search/rea?sort=date";
-  const rssUrl = "https://westernmass.craigslist.org/search/rea?format=rss&sort=date";
-  const jar = await get("html-search", htmlUrl, BROWSER_HEADERS);
-  await get("rss-with-cookies", rssUrl, RSS_HEADERS, jar || undefined);
-  // 2. RSS variants without the cookie jar.
-  await get("rss-no-sort", "https://westernmass.craigslist.org/search/rea?format=rss", RSS_HEADERS);
-  await get(
-    "rss-www-canonical",
-    "https://www.craigslist.org/search/area/westernmass?cat=rea&format=rss",
-    RSS_HEADERS,
-  );
+    const cfgHints: string[] = [];
+    for (const m of text.matchAll(/"(searchApi|searchURL|searchUrl|resultsUrl|endpoint|graphql)[^"]*"\s*:\s*"([^"]+)"/gi)) {
+      cfgHints.push(`${m[1]}=${m[2].slice(0, 120)}`);
+      if (cfgHints.length >= 10) break;
+    }
+    out.push({ label: "frontend-map", status: res.status, page_len: text.length, srcs: srcs.slice(0, 12), apiHints, cfgHints });
+  } catch (e: any) {
+    out.push({ label: "frontend-map", error: String(e?.message ?? e) });
+  }
   return c.json({ proxy_configured: !!px, out });
   return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
 });
