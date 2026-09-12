@@ -67,18 +67,29 @@ export interface EnrichResult {
   ok: boolean;
   checked: number;
   found: number;
+  remaining: number;
   error?: string;
 }
+
+// Marker appended to notes for leads whose seller name can never be used for
+// a name search (LLC, institution, junk). The candidate query excludes marked
+// leads so they stop blocking the queue head for future runs.
+const SKIP_MARKER = "[skip:unusable-name]";
 
 // Batch-enrich phoneless leads. Hot first, then warm, newest first; skips
 // entity/junk names. maxLeads caps Tavily spend per invocation (free tier is
 // 1,000 searches/mo — a weekly scan adding ~40 leads plus backfill fits).
 export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult> {
   if (!env.tavilyApiKey) {
-    return { ok: false, checked: 0, found: 0, error: "TAVILY_API_KEY not configured" };
+    return { ok: false, checked: 0, found: 0, remaining: 0, error: "TAVILY_API_KEY not configured" };
   }
   let checked = 0;
   let found = 0;
+  const unmarked = () =>
+    and(
+      or(eq(leads.phone, ""), isNull(leads.phone)),
+      sql`coalesce(${leads.notes}, '') NOT LIKE ${"%" + SKIP_MARKER + "%"}`
+    );
   try {
     const rows = await db
       .select({
@@ -88,7 +99,7 @@ export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult>
         state: leads.state,
       })
       .from(leads)
-      .where(or(eq(leads.phone, ""), isNull(leads.phone)))
+      .where(unmarked())
       .orderBy(
         sql`case when ${leads.motivationLevel} = 'hot' then 0 when ${leads.motivationLevel} = 'warm' then 1 else 2 end`,
         desc(leads.id)
@@ -98,7 +109,17 @@ export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult>
     for (const row of rows) {
       if (checked >= maxLeads) break;
       const name = usableName(row.sellerName);
-      if (!name) continue;
+      if (!name) {
+        // Permanently unusable for name search — mark so it stops occupying
+        // the head of the queue on every future run.
+        await db
+          .update(leads)
+          .set({
+            notes: sql`left(coalesce(${leads.notes}, '') || ${"\n" + SKIP_MARKER}, 2000)`,
+          })
+          .where(eq(leads.id, row.id));
+        continue;
+      }
       checked++;
       try {
         const loc = [row.city, row.state].filter(Boolean).join(", ");
@@ -122,7 +143,12 @@ export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult>
       await new Promise((r) => setTimeout(r, 1200));
     }
   } catch (err: any) {
-    return { ok: false, checked, found, error: err?.message ?? String(err) };
+    return { ok: false, checked, found, remaining: 0, error: err?.message ?? String(err) };
   }
-  return { ok: true, checked, found };
+  const remainingRows = await db
+    .select({ n: sql`count(*)` })
+    .from(leads)
+    .where(unmarked());
+  const remaining = Number((remainingRows[0] as any)?.n ?? 0);
+  return { ok: true, checked, found, remaining };
 }
