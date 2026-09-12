@@ -7,8 +7,11 @@ import { routeLead } from "./pipeline-engine";
 
 type Db = ReturnType<typeof import("../queries/connection").getDb>;
 
-const CL_BASE = "https://westernmass.craigslist.org";
-const CL_RSS = `${CL_BASE}/search/rea?format=rss&sort=date`;
+const CL_BASE = "https://www.craigslist.org";
+// HTML search (server-rendered result links). The old ?format=rss feed is
+// hard-blocked for automated clients (HTTP 403); the HTML search page
+// returns 200 with <li class="cl-static-search-result"> anchors.
+const CL_SEARCH = `${CL_BASE}/search/area/westernmass?cat=rea`;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
 // ── Egress proxy ─────────────────────────────────────────────────────────────
@@ -45,37 +48,58 @@ const MED_FLAGS = [
   "relocating", "moving", "vacant", "tired landlord", "absentee", "out of state",
 ];
 
-// ── RSS parsing (CL uses CDATA) ────────────────────────────────────────────────
+// ── Search-page parsing (server-rendered HTML, no RSS) ────────────────────────
+// Each result: <li class="cl-static-search-result"><a href=".../view/d/{slug}/{id}">
+//   <div class="title">…</div><div class="details"><div class="price">$…</div>
+//   <div class="location">…</div></div></a></li>
 
-function extractCdata(xml: string, tag: string): string {
-  const re = new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?</${tag}>`, "i");
-  return xml.match(re)?.[1]?.trim() ?? "";
+interface SearchItem {
+  id: string; // hash from the /view/d/ URL — stable external_id for dedup
+  title: string;
+  url: string;
+  price: string | null;
+  location: string;
 }
 
-function parseRssItems(xml: string) {
-  const items: Array<{ id: string; title: string; url: string; blurb: string; pubDate: string }> = [];
-  for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+function cleanText(s: string): string {
+  return s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function parseSearchHtml(html: string): SearchItem[] {
+  const items: SearchItem[] = [];
+  const liRe = /<li[^>]*class="[^"]*cl-static-search-result[^"]*"[^>]*>([\s\S]*?)<\/li>/g;
+  for (const m of html.matchAll(liRe)) {
     const chunk = m[1];
-    const title = extractCdata(chunk, "title");
-    const url = extractCdata(chunk, "link") || extractCdata(chunk, "guid");
-    const blurb = extractCdata(chunk, "description");
-    const pubDate = extractCdata(chunk, "pubDate");
-    const id = url.match(/\/(\d{10,})\./)?.[1] ?? "";
-    if (id && title) items.push({ id, title, url, blurb, pubDate });
+    const href = chunk.match(/<a[^>]*href="([^"]+\/view\/d\/[^"]+)"/)?.[1] ?? "";
+    if (!href) continue;
+    const id = href.match(/\/view\/d\/[^/]+\/([A-Za-z0-9_-]+)/)?.[1] ?? "";
+    const title = cleanText(chunk.match(/<div class="title">([\s\S]*?)<\/div>/)?.[1] ?? "");
+    const priceRaw = cleanText(chunk.match(/<div class="price">([\s\S]*?)<\/div>/)?.[1] ?? "");
+    const location = cleanText(chunk.match(/<div class="location">([\s\S]*?)<\/div>/)?.[1] ?? "");
+    if (!id || !title) continue;
+    items.push({
+      id,
+      title,
+      url: href,
+      price: priceRaw && priceRaw !== "$0" ? priceRaw : null,
+      location,
+    });
   }
   return items;
 }
 
 // ── Detail page ──────────────────────────────────────────────────────────────
-async function fetchDetail(url: string): Promise<{ description: string; phone: string | null; location: string | null }> {
+async function fetchDetail(url: string): Promise<{ description: string; phone: string | null; location: string | null; postedAt: string | null }> {
   try {
     const res = await clFetch(url, 10000);
-    if (!res.ok) return { description: "", phone: null, location: null };
+    if (!res.ok) return { description: "", phone: null, location: null, postedAt: null };
     const html = await res.text();
+    if (html.includes("blockID")) return { description: "", phone: null, location: null, postedAt: null };
 
-    // Posting body
-    const bodyMatch = html.match(/<section[^>]+id="postingbody"[^>]*>([\s\S]*?)<\/section>/);
-    const rawBody = bodyMatch?.[1] ?? "";
+    // Posting body (new /view/d/ layout). Strip <script> first so the gallery
+    // JS and numeric posting IDs can't pollute the description or phone match.
+    const bodyMatch = html.match(/<section class="userbody">([\s\S]*?)<\/section>/);
+    const rawBody = (bodyMatch?.[1] ?? "").replace(/<script[\s\S]*?<\/script>/g, " ");
     const description = rawBody
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ")
@@ -90,13 +114,17 @@ async function fetchDetail(url: string): Promise<{ description: string; phone: s
       ? phoneMatch[1].replace(/\D/g, "").replace(/(\d{3})(\d{3})(\d{4})/, "($1) $2-$3")
       : null;
 
+    // Posted date (CL embeds it)
+    const dateMatch = html.match(/datetime="([^"]+)"/);
+    const postedAt = dateMatch?.[1] ?? null;
+
     // Map data-accuracy / data-latitude for location (CL embeds it)
     const cityMatch = html.match(/<meta content="([^"]+(?:Springfield|Holyoke|Chicopee|Westfield|Agawam|Northampton|Pittsfield|Ludlow|Palmer|Ware|Easthampton)[^"]*)" /i);
     const location = cityMatch?.[1]?.trim() ?? null;
 
-    return { description, phone, location };
+    return { description, phone, location, postedAt };
   } catch {
-    return { description: "", phone: null, location: null };
+    return { description: "", phone: null, location: null, postedAt: null };
   }
 }
 
@@ -145,7 +173,7 @@ export async function runCraigslistScrape(
   opts: { maxItems?: number } = {},
 ): Promise<ScrapeResult> {
   const maxItems = opts.maxItems ?? DEFAULT_MAX_ITEMS;
-  const res = await clFetch(CL_RSS, 15000);
+  const res = await clFetch(CL_SEARCH, 15000);
   // A block is an expected condition, not a crash: return a clean
   // "blocked" result so callers record it instead of throwing a 500.
   if (!res.ok && BLOCKED_STATUSES.has(res.status)) {
@@ -156,9 +184,9 @@ export async function runCraigslistScrape(
     return { found: 0, added: 0, newLeads: [], blocked: true };
   }
   if (!res.ok) throw new Error(`Craigslist fetch failed: ${res.status}`);
-  const xml = await res.text();
+  const html = await res.text();
 
-  const items = parseRssItems(xml);
+  const items = parseSearchHtml(html);
   const newLeads: CraigslistLead[] = [];
   let added = 0;
 
@@ -167,15 +195,13 @@ export async function runCraigslistScrape(
 
     // Rate limit — be polite to CL
     await new Promise(r => setTimeout(r, FETCH_DELAY_MS));
-    const { description, phone, location } = await fetchDetail(item.url);
+    const { description, phone, location, postedAt } = await fetchDetail(item.url);
 
-    const combinedText = `${item.title} ${item.blurb} ${description}`;
+    const combinedText = `${item.title} ${description}`;
     const price = parsePrice(item.title) ?? parsePrice(description);
     const { level, flags } = scoreText(combinedText);
 
-    // Try to extract a readable address from blurb
-    const blurbText = item.blurb.replace(/<[^>]+>/g, " ").trim();
-    const propertyAddress = location ?? (blurbText.slice(0, 80) || item.title.slice(0, 80));
+    const propertyAddress = location ?? item.location ?? item.title.slice(0, 80);
 
     const lead: CraigslistLead = {
       clId: item.id,
@@ -183,7 +209,7 @@ export async function runCraigslistScrape(
       url: item.url,
       price,
       location: propertyAddress,
-      description: description || blurbText.slice(0, 500),
+      description: description || item.title,
       phone,
       motivationLevel: level,
       motivationFlags: flags,
