@@ -2,6 +2,7 @@ import { desc } from "drizzle-orm";
 import { leads, scrapeRuns } from "../../db/schema";
 import { escapeHtml, sendAlert } from "./telegram";
 import { getDb } from "../queries/connection";
+import { routeLead } from "./pipeline-engine";
 
 type Db = ReturnType<typeof import("../queries/connection").getDb>;
 
@@ -189,6 +190,13 @@ export async function runCraigslistScrape(
     if (inserted) {
       added++;
       newLeads.push(lead);
+      // Pipeline: score + route immediately so hot leads flow to Maya
+      // and warm/cold leads enroll in LadyJaye nurture tracks.
+      try {
+        await routeLead(inserted.id);
+      } catch (err) {
+        console.error("[scraper] routeLead error:", err);
+      }
     }
   }
 

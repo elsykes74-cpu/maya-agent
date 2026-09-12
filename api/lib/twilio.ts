@@ -12,6 +12,69 @@ export interface TwilioCallResult {
   error?: string;
 }
 
+export interface TwilioSmsResult {
+  sid: string;
+  status: string;
+  error?: string;
+}
+
+export async function sendTwilioSms(
+  to: string,
+  body: string,
+  opts?: { accountSid?: string; authToken?: string; fromNumber?: string },
+): Promise<TwilioSmsResult> {
+  const env = getTwilioEnv();
+  const accountSid = opts?.accountSid || env.accountSid;
+  const secret = opts?.authToken || env.credentials[0]?.secret || "";
+  const user = env.credentials[0]?.user || accountSid;
+  const fromNumber = opts?.fromNumber || env.fromNumber;
+
+  if (!accountSid || !secret || !fromNumber) {
+    return { sid: "", status: "failed", error: "Twilio not configured — add credentials in AI Config." };
+  }
+
+  const params = new URLSearchParams({
+    To: normalizePhoneNumber(to),
+    From: normalizePhoneNumber(fromNumber),
+    Body: body,
+  });
+
+  try {
+    const res = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${user}:${secret}`).toString("base64")}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: params.toString(),
+      },
+    );
+    if (res.ok) {
+      const data: any = await res.json();
+      return { sid: data.sid, status: data.status };
+    }
+
+    const errText = await res.text();
+    console.error("[twilio] sms error:", res.status, errText);
+
+    let friendlyError = `Twilio error ${res.status}`;
+    try {
+      const errJson = JSON.parse(errText);
+      if (errJson.message) friendlyError = errJson.message;
+      if (errJson.code === 20003) friendlyError = "Twilio authentication failed. Check Account SID and Auth Token in AI Config.";
+      if (errJson.code === 21211) friendlyError = "Invalid 'To' phone number format. Use E.164 format like +14135551234.";
+      if (errJson.code === 21608) friendlyError = "The 'From' number is not SMS-capable. Use a Twilio number with SMS enabled.";
+    } catch { /* errText not JSON */ }
+
+    return { sid: "", status: "failed", error: friendlyError };
+  } catch (err: any) {
+    console.error("[twilio] sms exception:", err);
+    return { sid: "", status: "failed", error: err?.message ?? "Network error reaching Twilio." };
+  }
+}
+
 type TwilioCredential = {
   label: string;
   user: string;

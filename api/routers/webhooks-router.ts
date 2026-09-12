@@ -5,6 +5,7 @@ import { getDb } from "../queries/connection";
 import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities, tasks } from "../../db/schema";
 import { sendAlert } from "../lib/telegram";
 import { matchBuyersToLead, formatBuyerMatchAlert } from "../lib/buyer-matcher";
+import { cancelNurtureTasks, enrollInTrack } from "../lib/pipeline-engine";
 
 export const webhooksRouter = createRouter({
   receive: publicQuery
@@ -143,11 +144,21 @@ async function handleVapiWebhook(payload: any, db: any) {
       callRecordingUrl: recordingUrl,
     } as any).returning({ id: calls.id });
 
-    // Update lead
+    // Update lead — pipeline stage progression: preserve hot_routing for
+    // no-contact outcomes so the pipeline keeps dialing; answered but no
+    // appointment moves to warm nurture; appointment/DNC/not-interested
+    // stop all outreach.
+    const prevLeadStage = (await db.query.leads.findFirst({ where: eq(leads.id, queueEntry.leadId) }) as any)?.pipelineStage;
     const leadUpdate: any = {
       callCount: sql`${leads.callCount} + 1`,
       lastContactDate: new Date(),
-      pipelineStage: appointmentSet ? "appointment" : outcome === "not_interested" ? "cold_drip" : "outreach",
+      pipelineStage: appointmentSet
+        ? "appointment"
+        : outcome === "answered"
+          ? "warm_nurture"
+          : prevLeadStage === "hot_routing"
+            ? "hot_routing"
+            : "outreach",
       keyPainPoints: painSignals || undefined,
     };
     if (appointmentSet) {
@@ -204,6 +215,22 @@ async function handleVapiWebhook(payload: any, db: any) {
         dueAt,
         status: "pending",
       } as any);
+    }
+
+    // Pipeline: stop all outreach on terminal outcomes; enroll answered
+    // (no appointment) leads into the LadyJaye warm nurture track.
+    if (appointmentSet || outcome === "dnc" || outcome === "not_interested") {
+      try {
+        await cancelNurtureTasks(queueEntry.leadId);
+      } catch (err) {
+        console.error("[webhooks] cancelNurtureTasks error:", err);
+      }
+    } else if (outcome === "answered") {
+      try {
+        await enrollInTrack(queueEntry.leadId, "warm_nurture");
+      } catch (err) {
+        console.error("[webhooks] enrollInTrack error:", err);
+      }
     }
 
     // Notify via Telegram when appointment is set

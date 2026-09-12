@@ -5,6 +5,7 @@ import { sendAlert, formatDailyDigest } from "./telegram";
 import { env } from "./env";
 import { runLeadsAutomation } from "../bots/quickkick";
 import { createVapiCall, scrubPhone, getCallingConfig } from "./vapi";
+import { runPipelineTick } from "./pipeline-engine";
 
 let lastDigestDate = "";
 
@@ -23,6 +24,7 @@ function isLeadRunTime(): boolean {
 }
 
 let lastLeadRunDate = "";
+let lastPipelineTick = 0;
 
 export async function sendDailyDigestNow(): Promise<void> {
   const db = getDb();
@@ -168,6 +170,18 @@ export function startDailyDigestScheduler(): void {
         console.log("[telegram-scheduler] Scheduled lead run complete");
       } catch (err) {
         console.error("[telegram-scheduler] lead run error:", err);
+      }
+    }
+
+    // Pipeline tick every 15 min — route new leads, dial hot via Maya,
+    // send due LadyJaye nurture SMS
+    if (Date.now() - lastPipelineTick > 15 * 60 * 1000) {
+      lastPipelineTick = Date.now();
+      try {
+        const summary = await runPipelineTick();
+        console.log(`[pipeline] tick: ${summary}`);
+      } catch (err) {
+        console.error("[pipeline] tick error:", err);
       }
     }
 
