@@ -545,15 +545,46 @@ app.get("/api/cron/diag", async (c) => {
         process.env.CL_PROXY_URL,
       );
       const text = await res.text();
-      // For the HTML search page, return the markup around the first result
-      // element so the real listing HTML can be inspected for the parser.
+      // For the HTML search page, map out where the result data lives:
+      // marker presence, script URLs, and the full JSON-LD results blob.
       let snippet: string;
       if (t.url.includes("search/rea?sort=date")) {
-        const i = text.indexOf("cl-search-result");
-        snippet =
-          i >= 0
-            ? text.slice(Math.max(0, i - 400), i + 2600).replace(/\s+/g, " ")
-            : "NO cl-search-result FOUND; first 1500: " + text.slice(0, 1500).replace(/\s+/g, " ");
+        const markers = [
+          "__NEXT_DATA__",
+          "data-pid",
+          "posting-title",
+          "cl-search-result",
+          "gallery-card",
+          "search-results-page",
+          "/api/",
+        ];
+        const found: Record<string, boolean> = {};
+        for (const m of markers) found[m] = text.includes(m);
+        const scripts: string[] = [];
+        for (const m of text.matchAll(/<script[^>]+src="([^"]+)"/g)) {
+          if (/search|results|gallery/i.test(m[1])) scripts.push(m[1].slice(0, 160));
+        }
+        let ld: any = null;
+        const ldm = text.match(/<script[^>]+id="ld_searchpage_results"[^>]*>([\s\S]*?)<\/script>/);
+        if (ldm) {
+          try {
+            const parsed = JSON.parse(ldm[1]);
+            const els = parsed.itemListElement ?? [];
+            ld = {
+              count: els.length,
+              first: JSON.stringify(els[0]).slice(0, 900),
+              keys: els[0]?.item ? Object.keys(els[0].item) : [],
+            };
+          } catch {
+            ld = { parse_error: true, raw_start: ldm[1].slice(0, 300) };
+          }
+        }
+        snippet = JSON.stringify({
+          page_len: text.length,
+          markers: found,
+          scripts: scripts.slice(0, 8),
+          ld,
+        }).slice(0, 4000);
       } else {
         snippet = text.slice(0, 220).replace(/\s+/g, " ");
       }
