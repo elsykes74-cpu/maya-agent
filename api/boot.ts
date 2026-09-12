@@ -545,12 +545,15 @@ app.get("/api/cron/diag", async (c) => {
         process.env.CL_PROXY_URL,
       );
       const text = await res.text();
+      // For the HTML search page, return a larger slice so the real result
+      // markup can be inspected for writing the parser.
+      const sliceLen = t.url.includes("search/rea?sort=date") ? 6000 : 220;
       out.push({
         url: t.url,
         status: res.status,
         server: res.headers.get("server"),
         via: res.headers.get("via"),
-        snippet: text.slice(0, 220).replace(/\s+/g, " "),
+        snippet: text.slice(0, sliceLen).replace(/\s+/g, " "),
       });
     } catch (e: any) {
       out.push({ url: t.url, error: String(e?.message ?? e) });
