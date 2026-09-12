@@ -1,4 +1,5 @@
 import { desc } from "drizzle-orm";
+import { ProxyAgent } from "undici";
 import { leads, scrapeRuns } from "../../db/schema";
 import { escapeHtml, sendAlert } from "./telegram";
 import { getDb } from "../queries/connection";
@@ -9,6 +10,30 @@ type Db = ReturnType<typeof import("../queries/connection").getDb>;
 const CL_BASE = "https://westernmass.craigslist.org";
 const CL_RSS = `${CL_BASE}/search/rea?format=rss&sort=date`;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+// ── Egress proxy ─────────────────────────────────────────────────────────────
+// Craigslist 403-blocks datacenter IPs (Vercel/AWS). Set CL_PROXY_URL to a
+// residential proxy (http://user:pass@host:port) and all CL traffic routes
+// through it. When unset, fetches go direct (and will likely be blocked).
+let proxyAgent: ProxyAgent | undefined;
+function getProxyAgent(): ProxyAgent | undefined {
+  const url = process.env.CL_PROXY_URL;
+  if (!url) return undefined;
+  if (!proxyAgent) proxyAgent = new ProxyAgent(url);
+  return proxyAgent;
+}
+
+async function clFetch(url: string, timeoutMs: number): Promise<Response> {
+  const agent = getProxyAgent();
+  return fetch(url, {
+    headers: { "User-Agent": UA },
+    signal: AbortSignal.timeout(timeoutMs),
+    ...(agent ? { dispatcher: agent } : {}),
+  } as any);
+}
+
+// HTTP statuses that mean "Craigslist blocked this IP" rather than a bug.
+const BLOCKED_STATUSES = new Set([403, 429, 503]);
 
 // Max detail pages per run. Keeps scheduled runs fast and polite to CL.
 const DEFAULT_MAX_ITEMS = 20;
@@ -50,10 +75,7 @@ function parseRssItems(xml: string) {
 // ── Detail page ──────────────────────────────────────────────────────────────
 async function fetchDetail(url: string): Promise<{ description: string; phone: string | null; location: string | null }> {
   try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": UA },
-      signal: AbortSignal.timeout(10000),
-    });
+    const res = await clFetch(url, 10000);
     if (!res.ok) return { description: "", phone: null, location: null };
     const html = await res.text();
 
@@ -120,6 +142,8 @@ export interface ScrapeResult {
   found: number;
   added: number;
   newLeads: CraigslistLead[];
+  /** True when Craigslist blocked the request (IP block) — not a code bug. */
+  blocked?: boolean;
 }
 
 export async function runCraigslistScrape(
@@ -127,10 +151,16 @@ export async function runCraigslistScrape(
   opts: { maxItems?: number } = {},
 ): Promise<ScrapeResult> {
   const maxItems = opts.maxItems ?? DEFAULT_MAX_ITEMS;
-  const res = await fetch(CL_RSS, {
-    headers: { "User-Agent": UA },
-    signal: AbortSignal.timeout(15000),
-  });
+  const res = await clFetch(CL_RSS, 15000);
+  // A block is an expected condition, not a crash: return a clean
+  // "blocked" result so callers record it instead of throwing a 500.
+  if (!res.ok && BLOCKED_STATUSES.has(res.status)) {
+    console.warn(
+      `[scraper] Craigslist blocked the request (HTTP ${res.status}). ` +
+        "Set CL_PROXY_URL to a residential proxy to restore scanning.",
+    );
+    return { found: 0, added: 0, newLeads: [], blocked: true };
+  }
   if (!res.ok) throw new Error(`Craigslist fetch failed: ${res.status}`);
   const xml = await res.text();
 
@@ -209,7 +239,7 @@ export async function runCraigslistScrape(
 
 export async function recordScrapeRun(
   db: Db,
-  run: { status: "ok" | "error"; found: number; added: number; newLeads?: CraigslistLead[]; error?: string },
+  run: { status: "ok" | "error" | "blocked"; found: number; added: number; newLeads?: CraigslistLead[]; error?: string },
 ): Promise<void> {
   await db.insert(scrapeRuns).values({
     source: "craigslist",
@@ -266,6 +296,16 @@ export async function runScheduledScrape(): Promise<void> {
   const db = getDb();
   try {
     const result = await runCraigslistScrape(db);
+    if (result.blocked) {
+      await recordScrapeRun(db, {
+        status: "blocked",
+        found: 0,
+        added: 0,
+        error: "Craigslist blocked the server IP (HTTP 403/429/503). Set CL_PROXY_URL to a residential proxy to restore scanning.",
+      });
+      console.log("[scrape-scheduler] run blocked by Craigslist — recorded, no alert sent");
+      return;
+    }
     await recordScrapeRun(db, {
       status: "ok",
       found: result.found,

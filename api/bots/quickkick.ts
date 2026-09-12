@@ -367,6 +367,15 @@ async function handleFindLeads(chatId: string, token: string): Promise<void> {
     }
     const when = run.finishedAt ?? run.startedAt;
     const header = `<i>Last scan: ${when.toLocaleString()}</i>\n\n`;
+    if (run.status === "blocked") {
+      await sendMessage(
+        chatId,
+        `${header}⛔ Craigslist is blocking the server's IP address, so the scan returned nothing. ` +
+          `Set a residential proxy (<code>CL_PROXY_URL</code>) on the server to restore scanning — the next scheduled run will pick it up automatically.`,
+        { parse_mode: "HTML", token } as any,
+      );
+      return;
+    }
     if (run.status === "error") {
       await sendMessage(
         chatId,

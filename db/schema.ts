@@ -249,7 +249,7 @@ export type InsertLead = typeof leads.$inferInsert;
 export const scrapeRuns = pgTable("scrape_runs", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   source: varchar("source", { length: 32 }).notNull().default("craigslist"),
-  status: varchar("status", { length: 16 }).notNull().default("ok"), // ok | error
+  status: varchar("status", { length: 16 }).notNull().default("ok"), // ok | error | blocked
   found: integer("found").notNull().default(0),
   added: integer("added").notNull().default(0),
   // JSON summary of new leads [{title, price, phone, motivationLevel, motivationFlags, url}]

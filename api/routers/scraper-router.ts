@@ -18,6 +18,15 @@ export const scraperRouter = createRouter({
       const db = getDb();
       try {
         const result = await runCraigslistScrape(db);
+        if (result.blocked) {
+          await recordScrapeRun(db, {
+            status: "blocked",
+            found: 0,
+            added: 0,
+            error: "Craigslist blocked the server IP (HTTP 403/429/503). Set CL_PROXY_URL to a residential proxy to restore scanning.",
+          });
+          return { found: 0, added: 0, blocked: true };
+        }
         await recordScrapeRun(db, {
           status: "ok",
           found: result.found,
