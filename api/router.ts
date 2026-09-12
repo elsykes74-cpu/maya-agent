@@ -16,6 +16,7 @@ import { activitiesRouter } from "./routers/activities-router";
 import { tasksRouter } from "./routers/tasks-router";
 import { offersRouter } from "./routers/offers-router";
 import { buyersRouter } from "./routers/buyers-router";
+import { scraperRouter } from "./routers/scraper-router";
 
 export const appRouter = createRouter({
   ping: publicQuery.query(() => ({ ok: true, ts: Date.now() })),
@@ -36,6 +37,7 @@ export const appRouter = createRouter({
   tasks: tasksRouter,
   offers: offersRouter,
   buyers: buyersRouter,
+  scraper: scraperRouter,
 });
 
 export type AppRouter = typeof appRouter;
