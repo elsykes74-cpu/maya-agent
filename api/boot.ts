@@ -534,31 +534,27 @@ app.get("/api/cron/diag", async (c) => {
   };
   const px = process.env.CL_PROXY_URL;
   const out: any[] = [];
-  // Map the search frontend: dump every script src + hunt for API-ish strings
-  // in the www canonical search page (the real JS app shell).
+  // Fetch the CL search frontend bundle and hunt for the results API endpoint.
   try {
     const res = await proxiedFetch(
-      "https://www.craigslist.org/search/area/westernmass?cat=rea",
-      { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(15000) },
+      "https://www.craigslist.org/static/www/bd500f231d36fff2c9dbf45b21a239c2c10a0e82.js",
+      { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(30000) },
       px,
     );
-    const text = await res.text();
-    const srcs: string[] = [];
-    for (const m of text.matchAll(/<script[^>]+src="([^"]+)"/g)) srcs.push(m[1].slice(0, 200));
-    const apiHints: string[] = [];
-    for (const m of text.matchAll(/["'](https?:\/\/[^"']*?api[^"']*?|[/][^"']*?api[/][^"']*?)["']/gi)) {
-      const h = m[1].slice(0, 160);
-      if (!apiHints.includes(h)) apiHints.push(h);
-      if (apiHints.length >= 10) break;
+    const js = await res.text();
+    const hits: string[] = [];
+    const seen = new Set<string>();
+    for (const m of js.matchAll(/["'`](https?:\/\/[a-zA-Z0-9.\-_/]{4,120}|[/][a-zA-Z0-9.\-_/]{3,100})["'`]/g)) {
+      const s = m[1];
+      if (/api|graphql|gateway|search[/.]json|json[/.]search/i.test(s) && !seen.has(s)) {
+        seen.add(s);
+        hits.push(s.slice(0, 160));
+        if (hits.length >= 25) break;
+      }
     }
-    const cfgHints: string[] = [];
-    for (const m of text.matchAll(/"(searchApi|searchURL|searchUrl|resultsUrl|endpoint|graphql)[^"]*"\s*:\s*"([^"]+)"/gi)) {
-      cfgHints.push(`${m[1]}=${m[2].slice(0, 120)}`);
-      if (cfgHints.length >= 10) break;
-    }
-    out.push({ label: "frontend-map", status: res.status, page_len: text.length, srcs: srcs.slice(0, 12), apiHints, cfgHints });
+    out.push({ label: "bundle-api-hunt", status: res.status, js_len: js.length, hits });
   } catch (e: any) {
-    out.push({ label: "frontend-map", error: String(e?.message ?? e) });
+    out.push({ label: "bundle-api-hunt", error: String(e?.message ?? e) });
   }
   return c.json({ proxy_configured: !!px, out });
   return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
