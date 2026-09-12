@@ -263,7 +263,7 @@ export async function runCraigslistScrape(
 
 export async function recordScrapeRun(
   db: Db,
-  run: { status: "ok" | "error" | "blocked"; found: number; added: number; newLeads?: CraigslistLead[]; error?: string },
+  run: { status: "ok" | "error" | "blocked"; found: number; added: number; newLeads?: CraigslistLead[]; error?: string; startedAt?: Date },
 ): Promise<void> {
   await db.insert(scrapeRuns).values({
     source: "craigslist",
@@ -283,6 +283,7 @@ export async function recordScrapeRun(
         )
       : null,
     error: run.error ?? null,
+    startedAt: run.startedAt ?? new Date(),
     finishedAt: new Date(),
   });
 }

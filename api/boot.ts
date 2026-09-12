@@ -471,6 +471,7 @@ app.get("/api/cron/scrape", async (c) => {
     return c.json({ error: "Unauthorized" }, 401);
   }
   const db = getDb();
+  const t0 = new Date();
   try {
     const result = await runCraigslistScrape(db);
     if (result.blocked) {
@@ -479,6 +480,7 @@ app.get("/api/cron/scrape", async (c) => {
         found: 0,
         added: 0,
         error: "Craigslist blocked the request (HTTP 403/429/503) via proxy.",
+        startedAt: t0,
       }).catch(() => {});
       return c.json({ ok: false, blocked: true, found: 0, added: 0 });
     }
@@ -487,6 +489,7 @@ app.get("/api/cron/scrape", async (c) => {
       found: result.found,
       added: result.added,
       newLeads: result.newLeads,
+      startedAt: t0,
     });
     if (result.added > 0) {
       const msg = formatScrapeAlert(result);
@@ -503,7 +506,7 @@ app.get("/api/cron/scrape", async (c) => {
       cause = cause?.cause;
     }
     const detail = causes.length ? `${message} | cause: ${causes.join(" <- ")}` : message;
-    await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: detail }).catch(() => {});
+    await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: detail, startedAt: t0 }).catch(() => {});
     console.error("[cron/scrape] failed:", detail);
     return c.json({ ok: false, error: detail }, 500);
   }
