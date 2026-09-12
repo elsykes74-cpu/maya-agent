@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
-  ArrowLeft, Phone, Bot, PhoneCall, PhoneMissed, PhoneOff,
+  ArrowLeft, Phone, PhoneCall, PhoneMissed, PhoneOff,
   MessageSquare, Mail, MapPin, FileText, Calendar, DollarSign,
-  AlertCircle, CheckCircle2, Clock, Sparkles, Plus, Send,
+  AlertCircle, CheckCircle2, Clock, Sparkles, Send,
 } from 'lucide-react';
 import { C, NeoTile, NeoTileSm } from '@/components/Neo';
 import { trpc } from '@/providers/trpc';

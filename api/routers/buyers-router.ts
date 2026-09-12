@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, desc, and, lte, gte, like, or } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { buyers, buyerCriteria, leads } from "../../db/schema";

@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
-import { leads, buyers, buyerCriteria } from "../../db/schema";
+import { leads, buyers } from "../../db/schema";
+import { escapeHtml } from "./telegram";
 
 type Db = ReturnType<typeof import("../queries/connection").getDb>;
 
@@ -74,8 +75,8 @@ export function formatBuyerMatchAlert(
   const priceStr = askingPrice ? ` · Asking $${Number(askingPrice).toLocaleString()}` : "";
 
   let msg = `🏠 <b>Buyer Match Alert</b>\n\n`;
-  msg += `Lead: <b>#${leadId} ${sellerName}</b>\n`;
-  msg += `📍 ${propertyAddress}${priceStr}\n\n`;
+  msg += `Lead: <b>#${leadId} ${escapeHtml(sellerName)}</b>\n`;
+  msg += `📍 ${escapeHtml(propertyAddress)}${priceStr}\n\n`;
 
   if (!top.length) {
     msg += `<i>No buyer matches found. Add buyers with /addbuyer or set buy box criteria in the web app.</i>`;
@@ -87,7 +88,7 @@ export function formatBuyerMatchAlert(
     const m = top[i];
     const label = m.company ? `${m.buyerName} (${m.company})` : m.buyerName;
     const phone = m.phone ? ` · ${m.phone}` : "";
-    msg += `\n<b>${i + 1}. ${label}</b>${phone} — ${m.score}pts\n`;
+    msg += `\n<b>${i + 1}. ${escapeHtml(label)}</b>${escapeHtml(phone)} — ${m.score}pts\n`;
     if (m.reasons.length) msg += `   ✓ ${m.reasons.join(" · ")}\n`;
   }
 

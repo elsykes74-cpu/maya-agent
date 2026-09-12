@@ -129,23 +129,28 @@ export const leadsRouter = createRouter({
       const db = getDb();
       const score = computeLeadScore(input);
       const motivation = score > 0 ? scoreToMotivation(score) : input.motivationLevel;
-      const result = await db.insert(leads).values({
-        ...input,
-        estimatedRepairs: input.estimatedRepairs ? String(input.estimatedRepairs) : "0",
-        askingPrice: input.askingPrice ? String(input.askingPrice) : null,
-        arv: input.arv ? String(input.arv) : null,
-        mao: input.mao ? String(input.mao) : null,
-        assignmentFee: input.assignmentFee ? String(input.assignmentFee) : "5000",
-        assessedValue: input.assessedValue ? String(input.assessedValue) : null,
-        estimatedValue: input.estimatedValue ? String(input.estimatedValue) : null,
-        estimatedEquity: input.estimatedEquity ? String(input.estimatedEquity) : null,
-        lastSalePrice: input.lastSalePrice ? String(input.lastSalePrice) : null,
-        leadScore: score,
-        motivationLevel: motivation,
-        callCount: 0,
-        smsCount: 0,
-      });
-      const newId = Number((result as any)[0]?.insertId ?? 0);
+      const [created] = await db
+        .insert(leads)
+        .values({
+          ...input,
+          estimatedRepairs: input.estimatedRepairs ? String(input.estimatedRepairs) : "0",
+          askingPrice: input.askingPrice ? String(input.askingPrice) : null,
+          arv: input.arv ? String(input.arv) : null,
+          mao: input.mao ? String(input.mao) : null,
+          assignmentFee: input.assignmentFee ? String(input.assignmentFee) : "5000",
+          assessedValue: input.assessedValue ? String(input.assessedValue) : null,
+          estimatedValue: input.estimatedValue ? String(input.estimatedValue) : null,
+          estimatedEquity: input.estimatedEquity ? String(input.estimatedEquity) : null,
+          lastSalePrice: input.lastSalePrice ? String(input.lastSalePrice) : null,
+          leadScore: score,
+          motivationLevel: motivation,
+          callCount: 0,
+          smsCount: 0,
+        })
+        .returning({ id: leads.id });
+      // Postgres has no insertId — the id must come from RETURNING.
+      const newId = Number(created?.id ?? 0);
+      if (!newId) throw new Error("Lead insert did not return an id");
 
       if (score >= 80) {
         const preview = {

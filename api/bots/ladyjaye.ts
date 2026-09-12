@@ -1,7 +1,7 @@
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { leads, tasks, activities, offers, buyers } from "../../db/schema";
-import { sendMessage } from "../lib/telegram";
+import { sendMessage, escapeHtml } from "../lib/telegram";
 import { generateFollowUpMessage, rewriteMessage, callClaudeConversation } from "../lib/message-generator";
 import { saveFollowUpMessage, getFollowUpHistory } from "../lib/crm-saver";
 import type { MessageTone, MessageType } from "../lib/message-generator";
@@ -59,9 +59,9 @@ async function handleGenerateMessage(
   await saveFollowUpMessage(id, type, content, tone);
 
   let msg = `${TYPE_LABELS[type]}\n`;
-  msg += `<b>#${id} — ${lead.sellerName}</b>\n`;
-  msg += `📍 ${lead.propertyAddress}\n\n`;
-  msg += `<code>${content}</code>\n\n`;
+  msg += `<b>#${id} — ${escapeHtml(lead.sellerName)}</b>\n`;
+  msg += `📍 ${escapeHtml(lead.propertyAddress)}\n\n`;
+  msg += `<code>${escapeHtml(content)}</code>\n\n`;
   msg += `<i>💾 Saved to CRM</i>`;
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
@@ -91,8 +91,8 @@ async function handleRewrite(chatId: string, parts: string[], token: string): Pr
   const rewritten = await rewriteMessage(originalText, rawTone);
 
   let msg = `✏️ <b>Rewritten (${rawTone})</b>\n\n`;
-  msg += `<b>Original:</b>\n<i>${originalText}</i>\n\n`;
-  msg += `<b>Rewritten:</b>\n<code>${rewritten}</code>`;
+  msg += `<b>Original:</b>\n<i>${escapeHtml(originalText)}</i>\n\n`;
+  msg += `<b>Rewritten:</b>\n<code>${escapeHtml(rewritten)}</code>`;
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
 }
@@ -118,13 +118,13 @@ async function handleHistory(chatId: string, parts: string[], token: string): Pr
     return;
   }
 
-  let msg = `📋 <b>Follow-Up History — #${id} ${lead.sellerName}</b>\n${"─".repeat(22)}\n\n`;
+  let msg = `📋 <b>Follow-Up History — #${id} ${escapeHtml(lead.sellerName)}</b>\n${"─".repeat(22)}\n\n`;
   for (const item of history) {
     const date = new Date(item.createdAt).toLocaleDateString("en-US", {
       month: "short", day: "numeric",
     });
-    msg += `<b>${item.messageType.toUpperCase()}</b> · ${item.tone} · ${date}\n`;
-    msg += `<i>${item.content.slice(0, 120)}${item.content.length > 120 ? "…" : ""}</i>\n\n`;
+    msg += `<b>${escapeHtml(item.messageType.toUpperCase())}</b> · ${escapeHtml(item.tone)} · ${date}\n`;
+    msg += `<i>${escapeHtml(item.content.slice(0, 120))}${item.content.length > 120 ? "…" : ""}</i>\n\n`;
   }
 
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
@@ -142,13 +142,14 @@ async function handleTasks(chatId: string, parts: string[], token: string): Prom
     await sendMessage(chatId, `❌ Lead #${id} not found.`, { token } as any);
     return;
   }
+  // Ascending: overdue / most-due-first on top, undated tasks last (Postgres sorts NULLs last for ASC).
   const pendingTasks = await db.query.tasks.findMany({
     where: and(eq(tasks.leadId, id), eq(tasks.status, "pending")),
-    orderBy: [desc(tasks.dueAt)],
+    orderBy: [asc(tasks.dueAt)],
     limit: 10,
   });
 
-  let msg = `📋 <b>Tasks — #${id} ${lead.sellerName}</b>\n`;
+  let msg = `📋 <b>Tasks — #${id} ${escapeHtml(lead.sellerName)}</b>\n`;
   if (!pendingTasks.length) {
     msg += `\n✅ No pending tasks.`;
   } else {
@@ -158,8 +159,8 @@ async function handleTasks(chatId: string, parts: string[], token: string): Prom
         : "no due date";
       const typeLabel = t.type === "call_back" ? "📞" : t.type === "send_sms" ? "💬" : t.type === "send_email" ? "📧" : "📌";
       const overdue = t.dueAt && new Date(t.dueAt) <= new Date() ? " ⚠️" : "";
-      msg += `\n${typeLabel} <b>${t.title}</b>${overdue}\n   Due: ${dueStr}\n`;
-      if (t.notes) msg += `   <i>${t.notes}</i>\n`;
+      msg += `\n${typeLabel} <b>${escapeHtml(t.title)}</b>${overdue}\n   Due: ${dueStr}\n`;
+      if (t.notes) msg += `   <i>${escapeHtml(t.notes)}</i>\n`;
     }
   }
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
@@ -183,13 +184,16 @@ async function handleTimeline(chatId: string, parts: string[], token: string): P
     limit: 8,
   });
 
-  let msg = `📅 <b>Timeline — #${id} ${lead.sellerName}</b>\n`;
+  let msg = `📅 <b>Timeline — #${id} ${escapeHtml(lead.sellerName)}</b>\n`;
   if (!recentActivities.length) {
     msg += `\n<i>No activity yet.</i>`;
   } else {
     for (const a of recentActivities) {
-      const dateStr = new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      msg += `\n<b>${dateStr}</b> ${a.body.slice(0, 120)}`;
+      const d = a.createdAt ? new Date(a.createdAt) : null;
+      const dateStr = d && !isNaN(d.getTime())
+        ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "—";
+      msg += `\n<b>${dateStr}</b> ${escapeHtml(a.body.slice(0, 120))}`;
     }
   }
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
@@ -225,8 +229,8 @@ async function handleOffer(chatId: string, parts: string[], token: string): Prom
 
   const msg =
     `💰 <b>Offer Created</b>\n\n` +
-    `Lead: #${id} ${lead.sellerName}\n` +
-    `📍 ${lead.propertyAddress}\n` +
+    `Lead: #${id} ${escapeHtml(lead.sellerName)}\n` +
+    `📍 ${escapeHtml(lead.propertyAddress)}\n` +
     `Offer Amount: <b>$${amount.toLocaleString()}</b>\n` +
     `Status: Draft\n\n` +
     `Use the web app to submit or update this offer.`;
@@ -243,7 +247,7 @@ async function handleAddBuyer(chatId: string, parts: string[], token: string): P
   const [created] = await db.insert(buyers).values({ name, status: "active" } as any).returning({ id: buyers.id });
   const msg =
     `✅ <b>Buyer Added</b>\n\n` +
-    `Name: <b>${name}</b>\n` +
+    `Name: <b>${escapeHtml(name)}</b>\n` +
     `Buyer ID: #${created.id}\n\n` +
     `Open the web app to add phone, email, and buy box criteria (zip codes, price range, etc.).`;
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);

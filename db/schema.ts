@@ -234,10 +234,31 @@ export const leads = pgTable("leads", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().notNull().$onUpdate(() => new Date()),
   createdBy: bigint("created_by", { mode: "number" }),
+
+  // ── External dedup id (e.g. "cl:1234567890" for Craigslist posts) ──────────
+  // Indexed + unique so concurrent scrape runs can't double-insert the same lead.
+  externalId: varchar("external_id", { length: 64 }).unique(),
 });
 
 export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
+
+// ── Scrape run log ────────────────────────────────────────────────────────────
+// Each scheduled Craigslist run records here so the /findleads bot command can
+// report the latest cached results without scraping live (serverless timeouts).
+export const scrapeRuns = pgTable("scrape_runs", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  source: varchar("source", { length: 32 }).notNull().default("craigslist"),
+  status: varchar("status", { length: 16 }).notNull().default("ok"), // ok | error
+  found: integer("found").notNull().default(0),
+  added: integer("added").notNull().default(0),
+  // JSON summary of new leads [{title, price, phone, motivationLevel, motivationFlags, url}]
+  newLeadsJson: text("new_leads_json"),
+  error: text("error"),
+  startedAt: timestamp("started_at").notNull().defaultNow(),
+  finishedAt: timestamp("finished_at"),
+});
+export type ScrapeRun = typeof scrapeRuns.$inferSelect;
 
 export const followUpMessages = pgTable("follow_up_messages", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

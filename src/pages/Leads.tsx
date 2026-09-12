@@ -201,6 +201,7 @@ function AddLeadSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (lead: L
   });
 
   const save = () => {
+    if (createLead.isPending) return; // double-submit guard: ignore clicks while a save is in flight
     if (!name.trim() || !phone.trim()) return;
     setErr(null);
     createLead.mutate({

@@ -67,6 +67,19 @@ export async function getWebhookInfo(token: string): Promise<any> {
   }
 }
 
+// Escape user-controlled text before interpolating into parse_mode:"HTML" messages.
+// Telegram HTML mode treats <tag> specially; unescaped titles/names break
+// formatting or allow tag injection. Quotes are escaped too so values are
+// safe inside attribute contexts (e.g. <a href="...">).
+export function escapeHtml(s: string | null | undefined): string {
+  return (s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function scoreEmoji(score: number): string {
   if (score >= 80) return "🔥";
   if (score >= 60) return "⚡";

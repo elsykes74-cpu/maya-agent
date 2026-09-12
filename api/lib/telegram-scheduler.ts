@@ -116,6 +116,11 @@ async function processFollowUpTasks(): Promise<void> {
       } as any).returning({ id: callQueue.id });
 
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName);
+      if (!vapiCall) {
+        console.error(`[follow-up-processor] VAPI call failed for lead #${lead.id} — re-queueing task`);
+        await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
+        continue;
+      }
 
       if (queueRow?.id) {
         await db.update(callQueue)

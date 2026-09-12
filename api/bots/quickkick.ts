@@ -1,14 +1,14 @@
-import { eq, and, isNull, lt, desc, lte } from "drizzle-orm";
+import { eq, and, isNull, lt, desc, lte, asc } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { leads, callQueue, tasks, activities, offers, buyers } from "../../db/schema";
-import { sendMessage } from "../lib/telegram";
+import { sendMessage, escapeHtml } from "../lib/telegram";
 import { computeLeadScore, generateCallOpening, generateOutreachAngle, scoreToMotivation, scoreToPriorityLabel, computeSTACKScore, formatSTACKBreakdown } from "../lib/lead-scorer";
 import { braveSearch, researchLead } from "../lib/brave-search";
 import { formatScoreBreakdown, getMotivationFlags } from "../lib/telegram";
 import { saveResearchToLead } from "../lib/crm-saver";
 import { callClaudeConversation } from "../lib/message-generator";
 import { createVapiCall, scrubPhone, getCallingConfig } from "../lib/vapi";
-import { runCraigslistScrape, formatScrapeAlert } from "../lib/craigslist-scraper";
+import { formatScrapeAlert, getLatestScrapeRun, type CachedLead } from "../lib/craigslist-scraper";
 
 function getTelegramFlags(lead: any): string[] {
   return getMotivationFlags(lead);
@@ -18,7 +18,7 @@ function quickKickHelp(): string {
   return (
     `🔍 <b>QuickKickBot — Lead Research & Intelligence</b>\n\n` +
     `<b>Research & Scoring</b>\n` +
-    `/findleads — Scrape Craigslist Western MA for new motivated sellers\n` +
+    `/findleads — Latest Craigslist scan results (auto-scanned every 30 min)\n` +
     `/researchlead [address or name] — Brave Search + distress signals\n` +
     `/scorelead [id] — STACK score + traditional score breakdown\n` +
     `/callbrief [id] — 30-sec call briefing + opening line\n` +
@@ -51,11 +51,11 @@ async function handleTasks(chatId: string, parts: string[], token: string): Prom
   }
   const pendingTasks = await db.query.tasks.findMany({
     where: and(eq(tasks.leadId, id), eq(tasks.status, "pending")),
-    orderBy: [desc(tasks.dueAt)],
+    orderBy: [asc(tasks.dueAt)],
     limit: 10,
   });
 
-  let msg = `📋 <b>Tasks — #${id} ${lead.sellerName}</b>\n`;
+  let msg = `📋 <b>Tasks — #${id} ${escapeHtml(lead.sellerName)}</b>\n`;
   if (!pendingTasks.length) {
     msg += `\n✅ No pending tasks.`;
   } else {
@@ -64,8 +64,9 @@ async function handleTasks(chatId: string, parts: string[], token: string): Prom
         ? new Date(t.dueAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
         : "no due date";
       const typeLabel = t.type === "call_back" ? "📞" : t.type === "send_sms" ? "💬" : t.type === "send_email" ? "📧" : "📌";
-      msg += `\n${typeLabel} <b>${t.title}</b>\n   Due: ${dueStr}\n`;
-      if (t.notes) msg += `   <i>${t.notes}</i>\n`;
+      const overdue = t.dueAt && new Date(t.dueAt) <= new Date() ? " ⚠️" : "";
+      msg += `\n${typeLabel} <b>${escapeHtml(t.title)}</b>${overdue}\n   Due: ${dueStr}\n`;
+      if (t.notes) msg += `   <i>${escapeHtml(t.notes)}</i>\n`;
     }
   }
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
@@ -89,13 +90,16 @@ async function handleTimeline(chatId: string, parts: string[], token: string): P
     limit: 8,
   });
 
-  let msg = `📅 <b>Timeline — #${id} ${lead.sellerName}</b>\n`;
+  let msg = `📅 <b>Timeline — #${id} ${escapeHtml(lead.sellerName)}</b>\n`;
   if (!recentActivities.length) {
     msg += `\n<i>No activity yet.</i>`;
   } else {
     for (const a of recentActivities) {
-      const dateStr = new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      msg += `\n<b>${dateStr}</b> ${a.body.slice(0, 120)}`;
+      const d = a.createdAt ? new Date(a.createdAt) : null;
+      const dateStr = d && !isNaN(d.getTime())
+        ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+        : "—";
+      msg += `\n<b>${dateStr}</b> ${escapeHtml(a.body.slice(0, 120))}`;
     }
   }
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
@@ -185,7 +189,7 @@ async function handleCallNow(chatId: string, parts: string[], token: string): Pr
     return;
   }
 
-  await sendMessage(chatId, `📞 Dialing <b>${lead.sellerName}</b> (${lead.phone}) with AI agent…`, { parse_mode: "HTML", token } as any);
+  await sendMessage(chatId, `📞 Dialing <b>${escapeHtml(lead.sellerName)}</b> (${escapeHtml(lead.phone)}) with AI agent…`, { parse_mode: "HTML", token } as any);
 
   // Insert a callQueue row so the VAPI webhook can record the outcome
   const [queueRow] = await db.insert(callQueue).values({
@@ -210,10 +214,10 @@ async function handleCallNow(chatId: string, parts: string[], token: string): Pr
   }
 
   let msg = `✅ <b>AI Agent Dialing</b>\n`;
-  msg += `Lead: #${id} ${lead.sellerName}\n`;
-  msg += `Phone: ${lead.phone}\n`;
-  msg += `VAPI Call ID: <code>${vapiCall.id}</code>\n`;
-  msg += `Status: ${vapiCall.status}`;
+  msg += `Lead: #${id} ${escapeHtml(lead.sellerName)}\n`;
+  msg += `Phone: ${escapeHtml(lead.phone)}\n`;
+  msg += `VAPI Call ID: <code>${escapeHtml(vapiCall.id)}</code>\n`;
+  msg += `Status: ${escapeHtml(vapiCall.status)}`;
   await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
 }
 
@@ -224,7 +228,7 @@ async function handleComps(chatId: string, parts: string[], token: string): Prom
     return;
   }
 
-  await sendMessage(chatId, `🏠 Running Comp Analyzer for <b>${address}</b>…`, { parse_mode: "HTML", token } as any);
+  await sendMessage(chatId, `🏠 Running Comp Analyzer for <b>${escapeHtml(address)}</b>…`, { parse_mode: "HTML", token } as any);
 
   const searchQuery = `${address} Western Massachusetts sold homes comparable sales site:zillow.com OR site:redfin.com OR site:realtor.com`;
   const results = await braveSearch(searchQuery, 8);
@@ -256,7 +260,7 @@ async function handleComps(chatId: string, parts: string[], token: string): Prom
     compPrompt
   );
 
-  let msg = `🏠 <b>Comp Analyzer — ${address}</b>\n`;
+  let msg = `🏠 <b>Comp Analyzer — ${escapeHtml(address)}</b>\n`;
   msg += `${"─".repeat(22)}\n\n`;
   msg += analysis;
 
@@ -348,11 +352,39 @@ async function handleRunLeads(chatId: string, token: string): Promise<void> {
 }
 
 async function handleFindLeads(chatId: string, token: string): Promise<void> {
-  await sendMessage(chatId, "🔍 Scanning Craigslist Western MA for motivated sellers…", { token } as any);
+  // /findleads reports the latest SCHEDULED scan results — it never scrapes
+  // live, because a full scrape exceeds serverless function timeouts.
   const db = getDb();
-  const result = await runCraigslistScrape(db);
-  const msg = formatScrapeAlert(result);
-  await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+  try {
+    const run = await getLatestScrapeRun(db);
+    if (!run) {
+      await sendMessage(
+        chatId,
+        "🔍 The Craigslist scanner hasn't completed a run yet — it scans every 30 minutes. Check back shortly.",
+        { token } as any,
+      );
+      return;
+    }
+    const when = run.finishedAt ?? run.startedAt;
+    const header = `<i>Last scan: ${when.toLocaleString()}</i>\n\n`;
+    if (run.status === "error") {
+      await sendMessage(
+        chatId,
+        `${header}⚠️ The last Craigslist scan failed (${escapeHtml(run.error ?? "unknown error")}). The next scheduled scan will retry automatically.`,
+        { parse_mode: "HTML", token } as any,
+      );
+      return;
+    }
+    const newLeads: CachedLead[] = run.newLeadsJson ? JSON.parse(run.newLeadsJson) : [];
+    const msg = header + formatScrapeAlert({ found: run.found, added: run.added, newLeads });
+    await sendMessage(chatId, msg, { parse_mode: "HTML", token } as any);
+  } catch (err: any) {
+    await sendMessage(
+      chatId,
+      `⚠️ Couldn't load the latest scan results: ${escapeHtml(err?.message ?? String(err))}`,
+      { token } as any,
+    );
+  }
 }
 
 async function handleResearchLead(chatId: string, parts: string[], token: string): Promise<void> {
@@ -362,7 +394,7 @@ async function handleResearchLead(chatId: string, parts: string[], token: string
     return;
   }
 
-  await sendMessage(chatId, `🔍 Researching: <b>${query}</b>…`, { parse_mode: "HTML", token } as any);
+  await sendMessage(chatId, `🔍 Researching: <b>${escapeHtml(query)}</b>…`, { parse_mode: "HTML", token } as any);
 
   const db = getDb();
 
@@ -392,29 +424,29 @@ async function handleResearchLead(chatId: string, parts: string[], token: string
 
   let msg = `🔍 <b>Research Results</b>\n`;
   if (matchedLead) {
-    msg += `<b>Lead #${matchedLead.id} — ${matchedLead.sellerName}</b>\n`;
-    msg += `📍 ${matchedLead.propertyAddress}\n`;
+    msg += `<b>Lead #${matchedLead.id} — ${escapeHtml(matchedLead.sellerName)}</b>\n`;
+    msg += `📍 ${escapeHtml(matchedLead.propertyAddress)}\n`;
   } else {
-    msg += `<i>No matching lead found in DB for "${query}"</i>\n`;
+    msg += `<i>No matching lead found in DB for "${escapeHtml(query)}"</i>\n`;
   }
   msg += `\n`;
 
   if (distressSignals.length > 0) {
     msg += `⚠️ <b>Distress Signals:</b>\n`;
     for (const signal of distressSignals) {
-      msg += `  • ${signal}\n`;
+      msg += `  • ${escapeHtml(signal)}\n`;
     }
     msg += `\n`;
   } else {
     msg += `✅ No distress signals detected.\n\n`;
   }
 
-  msg += `📋 <b>Summary:</b>\n<i>${summary}</i>\n`;
+  msg += `📋 <b>Summary:</b>\n<i>${escapeHtml(summary)}</i>\n`;
 
   if (results.length > 0) {
     msg += `\n🌐 <b>Top Sources (${results.length}):</b>\n`;
     for (const r of results.slice(0, 3)) {
-      msg += `• <a href="${r.url}">${r.title.slice(0, 60)}</a>\n`;
+      msg += `• <a href="${escapeHtml(r.url)}">${escapeHtml(r.title.slice(0, 60))}</a>\n`;
     }
   }
 
@@ -439,8 +471,8 @@ async function handleScoreLead(chatId: string, parts: string[], token: string): 
   const priority = scoreToPriorityLabel(score);
   const stack = computeSTACKScore(lead);
 
-  let msg = `🎯 <b>Lead Score — #${id} ${lead.sellerName}</b>\n`;
-  msg += `📍 ${lead.propertyAddress}\n\n`;
+  let msg = `🎯 <b>Lead Score — #${id} ${escapeHtml(lead.sellerName)}</b>\n`;
+  msg += `📍 ${escapeHtml(lead.propertyAddress)}\n\n`;
   msg += formatSTACKBreakdown(stack);
   msg += `\n`;
   msg += formatScoreBreakdown({ ...lead, leadScore: score });
@@ -470,9 +502,9 @@ async function handleCallBrief(chatId: string, parts: string[], token: string): 
   const angle = lead.outreachAngle ?? generateOutreachAngle(lead.leadType);
   const opening = lead.callOpening ?? generateCallOpening(lead.propertyAddress);
 
-  let briefing = `📞 <b>Call Briefing — #${id} ${lead.sellerName}</b>\n`;
-  briefing += `📍 ${lead.propertyAddress}`;
-  if (lead.city) briefing += `, ${lead.city} MA`;
+  let briefing = `📞 <b>Call Briefing — #${id} ${escapeHtml(lead.sellerName)}</b>\n`;
+  briefing += `📍 ${escapeHtml(lead.propertyAddress)}`;
+  if (lead.city) briefing += `, ${escapeHtml(lead.city)} MA`;
   briefing += `\n\n`;
   briefing += formatSTACKBreakdown(stack);
   briefing += `\n`;
@@ -484,11 +516,11 @@ async function handleCallBrief(chatId: string, parts: string[], token: string): 
   }
 
   if (lead.keyPainPoints) {
-    briefing += `😟 <b>Pain Points:</b> ${lead.keyPainPoints}\n`;
+    briefing += `😟 <b>Pain Points:</b> ${escapeHtml(lead.keyPainPoints)}\n`;
   }
 
-  briefing += `\n🔑 <b>Outreach Angle:</b>\n<i>${angle}</i>\n`;
-  briefing += `\n💬 <b>Suggested Opening Line:</b>\n"${opening}"`;
+  briefing += `\n🔑 <b>Outreach Angle:</b>\n<i>${escapeHtml(angle)}</i>\n`;
+  briefing += `\n💬 <b>Suggested Opening Line:</b>\n"${escapeHtml(opening)}"`;
 
   // Save to DB
   await saveResearchToLead(id, { callBriefing: briefing.replace(/<[^>]+>/g, "") });
@@ -517,9 +549,9 @@ async function handleLeadStatus(chatId: string, parts: string[], token: string):
     d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
 
   let msg = `📋 <b>Lead Status — #${id}</b>\n`;
-  msg += `<b>${lead.sellerName}</b>\n`;
-  msg += `📍 ${lead.propertyAddress}`;
-  if (lead.city) msg += `, ${lead.city} MA`;
+  msg += `<b>${escapeHtml(lead.sellerName)}</b>\n`;
+  msg += `📍 ${escapeHtml(lead.propertyAddress)}`;
+  if (lead.city) msg += `, ${escapeHtml(lead.city)} MA`;
   msg += `\n\n`;
   msg += `🎯 <b>Score:</b> ${score}/100 — ${priority}\n`;
   msg += `💡 <b>Motivation:</b> ${lead.motivationLevel ?? "—"}\n`;

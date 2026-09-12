@@ -23,12 +23,13 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
 import { leads } from "../db/schema";
-import { notify } from "./lib/telegram";
+import { notify, sendAlert } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { startCallWorker } from "./lib/call-worker";
+import { runCraigslistScrape, formatScrapeAlert, recordScrapeRun, startScrapeScheduler } from "./lib/craigslist-scraper";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
@@ -446,6 +447,41 @@ app.post("/api/twilio/status", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Scheduled cron endpoints (Vercel cron -> GET with ?secret=CRON_SECRET)
+// ---------------------------------------------------------------------------
+// Craigslist lead scan, every 30 min (see vercel.json "crons").
+// Runs OUTSIDE the bot webhook flow because a full scrape (20 detail pages)
+// exceeds Vercel's 30s serverless limit. Results are recorded in scrape_runs;
+// /findleads reports the latest cached run instead of scraping live.
+app.get("/api/cron/scrape", async (c) => {
+  const secret = c.req.query("secret");
+  if (!env.cronSecret || secret !== env.cronSecret) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const db = getDb();
+  try {
+    const result = await runCraigslistScrape(db);
+    await recordScrapeRun(db, {
+      status: "ok",
+      found: result.found,
+      added: result.added,
+      newLeads: result.newLeads,
+    });
+    if (result.added > 0) {
+      const msg = formatScrapeAlert(result);
+      await sendAlert(msg, "quickkick");
+      await sendAlert(msg, "ladyjaye");
+    }
+    return c.json({ ok: true, found: result.found, added: result.added });
+  } catch (err: any) {
+    const message = String(err?.message ?? err);
+    await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: message }).catch(() => {});
+    console.error("[cron/scrape] failed:", message);
+    return c.json({ ok: false, error: "scrape failed" }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Telegram multi-bot webhook
 // ---------------------------------------------------------------------------
 app.route("/api/telegram", telegramApp);
@@ -619,6 +655,8 @@ if (env.isProduction && !process.env.VERCEL) {
       startDailyDigestScheduler();
       // Background call worker — drains queued campaign calls off the request path.
       startCallWorker();
+      // Craigslist lead scan every 30 min (results cached in scrape_runs for /findleads).
+      startScrapeScheduler();
       // Auto-register Telegram webhooks so bots don't go silent after redeploys
       if (env.appUrl && !env.appUrl.includes("localhost")) {
         registerAllWebhooks(env.appUrl).catch((err) =>

@@ -97,4 +97,6 @@ export const env = {
   // LadyJaye — second bot
   telegramBotTokenLadyJaye: soft("TELEGRAM_BOT_TOKEN_LADYJAYE"),
   telegramChatIdLadyJaye: soft("TELEGRAM_CHAT_ID_LADYJAYE"),
+  // Shared secret for scheduled cron endpoints (Vercel cron -> /api/cron/scrape)
+  cronSecret: soft("CRON_SECRET"),
 };
