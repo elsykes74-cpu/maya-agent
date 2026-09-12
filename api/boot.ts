@@ -30,6 +30,12 @@ import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { startCallWorker } from "./lib/call-worker";
 import { runCraigslistScrape, formatScrapeAlert, recordScrapeRun, startScrapeScheduler } from "./lib/craigslist-scraper";
+import {
+  runRegistryScrape,
+  formatRegistryAlert,
+  recordRegistryRun,
+  startRegistryScheduler,
+} from "./lib/registry-scraper";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
@@ -481,6 +487,39 @@ app.get("/api/cron/scrape", async (c) => {
   }
 });
 
+// Hampden County Registry of Deeds — distressed-filing scan, weekly.
+// Same secret-gated cron pattern as /api/cron/scrape. Registry filings carry
+// no phone numbers, so results land in the unrouted lead pool for skip tracing.
+app.get("/api/cron/registry", async (c) => {
+  const secret = c.req.query("secret");
+  if (!env.cronSecret || secret !== env.cronSecret) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const db = getDb();
+  try {
+    const result = await runRegistryScrape(db);
+    if (result.blocked) {
+      await recordRegistryRun(db, {
+        status: "blocked",
+        found: 0,
+        added: 0,
+        error: "Registry bot challenge fired (Imperva). Set REGISTRY_PROXY_URL (or CL_PROXY_URL) to a residential proxy.",
+      });
+      return c.json({ ok: true, blocked: true, found: 0, added: 0 });
+    }
+    await recordRegistryRun(db, { status: "ok", found: result.found, added: result.added });
+    if (result.added > 0) {
+      await sendAlert(formatRegistryAlert(result), "quickkick");
+    }
+    return c.json({ ok: true, found: result.found, added: result.added });
+  } catch (err: any) {
+    const message = String(err?.message ?? err);
+    await recordRegistryRun(db, { status: "error", found: 0, added: 0, error: message }).catch(() => {});
+    console.error("[cron/registry] failed:", message);
+    return c.json({ ok: false, error: "registry scrape failed" }, 500);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Telegram multi-bot webhook
 // ---------------------------------------------------------------------------
@@ -657,6 +696,8 @@ if (env.isProduction && !process.env.VERCEL) {
       startCallWorker();
       // Craigslist lead scan every 30 min (results cached in scrape_runs for /findleads).
       startScrapeScheduler();
+      // Hampden County registry distressed-filing scan, weekly.
+      startRegistryScheduler();
       // Auto-register Telegram webhooks so bots don't go silent after redeploys
       if (env.appUrl && !env.appUrl.includes("localhost")) {
         registerAllWebhooks(env.appUrl).catch((err) =>
