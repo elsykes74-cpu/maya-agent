@@ -491,10 +491,10 @@ app.get("/api/cron/scrape", async (c) => {
   } catch (err: any) {
     const message = String(err?.message ?? err);
     const causes: string[] = [];
-    let c: any = err?.cause;
-    for (let i = 0; i < 5 && c; i++) {
-      causes.push(`${c?.code ?? "?"}: ${c?.message ?? String(c)}`);
-      c = c?.cause;
+    let cause: any = err?.cause;
+    for (let i = 0; i < 5 && cause; i++) {
+      causes.push(`${cause?.code ?? "?"}: ${cause?.message ?? String(cause)}`);
+      cause = cause?.cause;
     }
     const detail = causes.length ? `${message} | cause: ${causes.join(" <- ")}` : message;
     await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: detail }).catch(() => {});
