@@ -1,0 +1,42 @@
+# Hampden County Registry of Deeds — distressed-filing scan.
+# Runs a real Playwright Chromium (solves the Imperva JS challenge that blocks
+# Vercel's serverless fetch), then POSTs the rendered HTML to the Vercel
+# /api/cron/registry-ingest endpoint for parsing + lead insertion.
+#
+# Required repo secret: REGISTRY_INGEST_URL
+#   Full URL: https://maya-agent-rho.vercel.app/api/cron/registry-ingest?secret=<CRON_SECRET>
+
+name: Registry Scan
+
+on:
+  schedule:
+    # Mondays 7:00 AM Eastern = 11:00 UTC (12:00 UTC during EDT)
+    - cron: "0 11 * * 1"
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "How many days back to scan"
+        required: false
+        default: "9"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Run registry browser scrape
+        env:
+          REGISTRY_INGEST_URL: ${{ secrets.REGISTRY_INGEST_URL }}
+          LOOKBACK_DAYS: ${{ inputs.lookback_days || '9' }}
+        run: node scripts/registry-browser-scrape.mjs

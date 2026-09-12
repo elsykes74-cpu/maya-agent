@@ -215,7 +215,23 @@ export async function runRegistryScrape(
     return { found: 0, added: 0, filings: [] };
   }
 
-  const filings = parseAlisRows(fetched.html);
+  return ingestRegistryHtml(db, fetched.html);
+}
+
+// ── Browser-fed ingest ───────────────────────────────────────────────────────
+// GitHub Actions runs a real Playwright browser (which solves the Imperva JS
+// challenge), then POSTs the rendered HTML here via /api/cron/registry-ingest.
+// Same parse + insert path as runRegistryScrape, minus the direct fetch.
+
+export async function ingestRegistryHtml(db: Db, html: string): Promise<RegistryScrapeResult> {
+  if (/no \(more\) matching names found/i.test(html)) {
+    return { found: 0, added: 0, filings: [] };
+  }
+  const filings = parseAlisRows(html);
+  return insertRegistryFilings(db, filings);
+}
+
+async function insertRegistryFilings(db: Db, filings: RegistryFiling[]): Promise<RegistryScrapeResult> {
   let added = 0;
   const newFilings: RegistryFiling[] = [];
 

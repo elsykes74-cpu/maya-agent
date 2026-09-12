@@ -590,6 +590,43 @@ app.get("/api/cron/registry", async (c) => {
   }
 });
 
+// Hampden Registry — browser-fed ingest. GitHub Actions runs a real Playwright
+// browser (which solves the Imperva JS challenge that blocks Vercel's direct
+// fetch), then POSTs the rendered results HTML here. Secret-gated like the
+// other cron endpoints. Body: { html: string }.
+app.post("/api/cron/registry-ingest", async (c) => {
+  const secret = c.req.query("secret");
+  if (!env.cronSecret || secret !== env.cronSecret) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const html = typeof body?.html === "string" ? body.html : "";
+  if (html.length < 1000) {
+    return c.json({ error: "html too short — expected rendered ALIS results page" }, 400);
+  }
+  const db = getDb();
+  try {
+    const { ingestRegistryHtml, recordRegistryRun, formatRegistryAlert } = await import("./lib/registry-scraper");
+    const result = await ingestRegistryHtml(db, html);
+    await recordRegistryRun(db, { status: "ok", found: result.found, added: result.added });
+    if (result.added > 0) {
+      await sendAlert(formatRegistryAlert(result), "quickkick");
+    }
+    return c.json({ ok: true, found: result.found, added: result.added });
+  } catch (err: any) {
+    const message = String(err?.message ?? err);
+    const { recordRegistryRun } = await import("./lib/registry-scraper");
+    await recordRegistryRun(db, { status: "error", found: 0, added: 0, error: message }).catch(() => {});
+    console.error("[cron/registry-ingest] failed:", message);
+    return c.json({ ok: false, error: "registry ingest failed" }, 500);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Telegram multi-bot webhook
 // ---------------------------------------------------------------------------
