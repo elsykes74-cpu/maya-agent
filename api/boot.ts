@@ -490,9 +490,16 @@ app.get("/api/cron/scrape", async (c) => {
     return c.json({ ok: true, found: result.found, added: result.added });
   } catch (err: any) {
     const message = String(err?.message ?? err);
-    await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: message }).catch(() => {});
-    console.error("[cron/scrape] failed:", message);
-    return c.json({ ok: false, error: message }, 500);
+    const causes: string[] = [];
+    let c: any = err?.cause;
+    for (let i = 0; i < 5 && c; i++) {
+      causes.push(`${c?.code ?? "?"}: ${c?.message ?? String(c)}`);
+      c = c?.cause;
+    }
+    const detail = causes.length ? `${message} | cause: ${causes.join(" <- ")}` : message;
+    await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: detail }).catch(() => {});
+    console.error("[cron/scrape] failed:", detail);
+    return c.json({ ok: false, error: detail }, 500);
   }
 });
 
