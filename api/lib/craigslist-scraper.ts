@@ -18,7 +18,7 @@ const MED_FLAGS = [
   "relocating", "moving", "vacant", "tired landlord", "absentee", "out of state",
 ];
 
-// ── RSS parsing (CL uses CDATA) ──────────────────────────────────────────────
+// ── RSS parsing (CL uses CDATA) ────────────────────────────────────────────────
 
 function extractCdata(xml: string, tag: string): string {
   const re = new RegExp(`<${tag}>(?:<!\\[CDATA\\[)?([\\s\\S]*?)(?:\\]\\]>)?<\/${tag}>`, "i");
@@ -40,7 +40,6 @@ function parseRssItems(xml: string) {
 }
 
 // ── Detail page ──────────────────────────────────────────────────────────────
-
 async function fetchDetail(url: string): Promise<{ description: string; phone: string | null; location: string | null }> {
   try {
     const res = await fetch(url, {
@@ -122,7 +121,7 @@ export async function runCraigslistScrape(db: Db): Promise<{ found: number; adde
   for (const item of items.slice(0, 20)) {
     // Dedup by CL post ID stored in notes
     const existing = await db.query.leads.findFirst({
-      where: sql`${leads.notes} LIKE ${"%%" + `[cl:${item.id}]` + "%%"}`,
+      where: sql`${leads.notes} LIKE ${"%" + `[cl:${item.id}]` + "%"}`,
     });
     if (existing) continue;
 
@@ -136,7 +135,7 @@ export async function runCraigslistScrape(db: Db): Promise<{ found: number; adde
 
     // Try to extract a readable address from blurb
     const blurbText = item.blurb.replace(/<[^>]+>/g, " ").trim();
-    const propertyAddress = location ?? blurbText.slice(0, 80) || item.title.slice(0, 80);
+    const propertyAddress = location ?? (blurbText.slice(0, 80) || item.title.slice(0, 80));
 
     const lead: CraigslistLead = {
       clId: item.id,
