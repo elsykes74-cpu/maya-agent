@@ -1,5 +1,5 @@
 import { desc } from "drizzle-orm";
-import { ProxyAgent } from "undici";
+import { proxiedFetch } from "./proxy-fetch";
 import { leads, scrapeRuns } from "../../db/schema";
 import { escapeHtml, sendAlert } from "./telegram";
 import { getDb } from "../queries/connection";
@@ -15,21 +15,15 @@ const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/6
 // Craigslist 403-blocks datacenter IPs (Vercel/AWS). Set CL_PROXY_URL to a
 // residential proxy (http://user:pass@host:port) and all CL traffic routes
 // through it. When unset, fetches go direct (and will likely be blocked).
-let proxyAgent: ProxyAgent | undefined;
-function getProxyAgent(): ProxyAgent | undefined {
-  const url = process.env.CL_PROXY_URL;
-  if (!url) return undefined;
-  if (!proxyAgent) proxyAgent = new ProxyAgent(url);
-  return proxyAgent;
-}
-
 async function clFetch(url: string, timeoutMs: number): Promise<Response> {
-  const agent = getProxyAgent();
-  return fetch(url, {
-    headers: { "User-Agent": UA },
-    signal: AbortSignal.timeout(timeoutMs),
-    ...(agent ? { dispatcher: agent } : {}),
-  } as any);
+  return proxiedFetch(
+    url,
+    {
+      headers: { "User-Agent": UA },
+      signal: AbortSignal.timeout(timeoutMs),
+    },
+    process.env.CL_PROXY_URL,
+  );
 }
 
 // HTTP statuses that mean "Craigslist blocked this IP" rather than a bug.

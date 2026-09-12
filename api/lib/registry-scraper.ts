@@ -14,7 +14,7 @@
 //     the pipeline already refuses to call/text phoneless leads, so nothing
 //     misfires. routeLead is deliberately NOT called here.
 
-import { ProxyAgent } from "undici";
+import { proxiedFetch } from "./proxy-fetch";
 import { leads, scrapeRuns, activities } from "../../db/schema";
 import { escapeHtml, sendAlert } from "./telegram";
 import { getDb } from "../queries/connection";
@@ -60,14 +60,6 @@ export interface RegistryScrapeResult {
 
 // ── Egress ───────────────────────────────────────────────────────────────────
 
-let proxyAgent: ProxyAgent | undefined;
-function getProxyAgent(): ProxyAgent | undefined {
-  const url = process.env.REGISTRY_PROXY_URL || process.env.CL_PROXY_URL;
-  if (!url) return undefined;
-  if (!proxyAgent) proxyAgent = new ProxyAgent(url);
-  return proxyAgent;
-}
-
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 function alisDate(d: Date): string {
@@ -92,19 +84,21 @@ function buildAlisUrl(from: Date, to: Date): string {
 }
 
 async function alisFetch(url: string, cookieHeader?: string): Promise<{ res: Response; setCookies: string[] }> {
-  const agent = getProxyAgent();
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": UA,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "en-US,en;q=0.9",
-      "Upgrade-Insecure-Requests": "1",
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+  const res = await proxiedFetch(
+    url,
+    {
+      headers: {
+        "User-Agent": UA,
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Upgrade-Insecure-Requests": "1",
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      },
+      redirect: "manual",
+      signal: AbortSignal.timeout(30000),
     },
-    redirect: "manual",
-    signal: AbortSignal.timeout(30000),
-    ...(agent ? { dispatcher: agent } : {}),
-  } as any);
+    process.env.REGISTRY_PROXY_URL || process.env.CL_PROXY_URL,
+  );
   const setCookies: string[] =
     typeof (res.headers as any).getSetCookie === "function"
       ? (res.headers as any).getSetCookie()
