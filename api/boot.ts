@@ -492,7 +492,7 @@ app.get("/api/cron/scrape", async (c) => {
     const message = String(err?.message ?? err);
     await recordScrapeRun(db, { status: "error", found: 0, added: 0, error: message }).catch(() => {});
     console.error("[cron/scrape] failed:", message);
-    return c.json({ ok: false, error: "scrape failed" }, 500);
+    return c.json({ ok: false, error: message }, 500);
   }
 });
 
