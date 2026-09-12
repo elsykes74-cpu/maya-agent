@@ -545,15 +545,24 @@ app.get("/api/cron/diag", async (c) => {
         process.env.CL_PROXY_URL,
       );
       const text = await res.text();
-      // For the HTML search page, return a larger slice so the real result
-      // markup can be inspected for writing the parser.
-      const sliceLen = t.url.includes("search/rea?sort=date") ? 6000 : 220;
+      // For the HTML search page, return the markup around the first result
+      // element so the real listing HTML can be inspected for the parser.
+      let snippet: string;
+      if (t.url.includes("search/rea?sort=date")) {
+        const i = text.indexOf("cl-search-result");
+        snippet =
+          i >= 0
+            ? text.slice(Math.max(0, i - 400), i + 2600).replace(/\s+/g, " ")
+            : "NO cl-search-result FOUND; first 1500: " + text.slice(0, 1500).replace(/\s+/g, " ");
+      } else {
+        snippet = text.slice(0, 220).replace(/\s+/g, " ");
+      }
       out.push({
         url: t.url,
         status: res.status,
         server: res.headers.get("server"),
         via: res.headers.get("via"),
-        snippet: text.slice(0, sliceLen).replace(/\s+/g, " "),
+        snippet,
       });
     } catch (e: any) {
       out.push({ url: t.url, error: String(e?.message ?? e) });
