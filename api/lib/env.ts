@@ -94,6 +94,8 @@ export const env = {
   registryZips: soft("REGISTRY_ZIPS"),
   // Max property records to request per ZIP (RentCast bills per request/record).
   registryLimitPerZip: soft("REGISTRY_LIMIT_PER_ZIP"),
+  // Free web-search phone enrichment (Tavily, 1,000 searches/mo free).
+  tavilyApiKey: soft("TAVILY_API_KEY"),
   ownerUnionId: soft("OWNER_UNION_ID"),
   appUrl: soft("APP_URL") || "http://localhost:3000",
   googleClientId: soft("GOOGLE_CLIENT_ID"),

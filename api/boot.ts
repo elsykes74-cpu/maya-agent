@@ -651,6 +651,16 @@ const handleCronRentcast = async (c: any) => {
   }
   const db = getDb();
   const result = await runRentcastScrape(db);
+  // Best-effort phone enrichment on the fresh batch (and backlog) — free
+  // Tavily tier; never fails the scan if the key/quota is missing.
+  let enriched: { checked: number; found: number } | null = null;
+  try {
+    const { enrichPhones } = await import("./lib/phone-enrich");
+    const r = await enrichPhones(db, 40);
+    if (r.ok) enriched = { checked: r.checked, found: r.found };
+  } catch (err) {
+    console.error("[cron/registry-rentcast] enrich failed:", err);
+  }
   if (result.added > 0 || !result.ok) {
     await sendAlert(formatRentcastAlert(result), "quickkick").catch((err) =>
       console.error("[cron/registry-rentcast] alert failed:", err)
@@ -660,12 +670,39 @@ const handleCronRentcast = async (c: any) => {
     ok: result.ok,
     found: result.found,
     added: result.added,
+    enriched,
     error: result.error ?? null,
   });
 };
 
 app.get("/api/cron/registry-rentcast", handleCronRentcast);
 app.post("/api/cron/registry-rentcast", handleCronRentcast);
+
+// ---------------------------------------------------------------------------
+// Phone enrichment backfill — secret-gated. Runs the free Tavily web-search
+// phone finder over phoneless leads (hot first). ?limit=N caps searches per
+// invocation (default 40) to stay inside the 1,000/mo free tier.
+// ---------------------------------------------------------------------------
+app.get("/api/cron/enrich", async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const limit = Math.max(1, Math.min(200, parseInt(c.req.query("limit") || "40", 10) || 40));
+  const db = getDb();
+  const { enrichPhones } = await import("./lib/phone-enrich");
+  const result = await enrichPhones(db, limit);
+  return c.json(result);
+});
+app.post("/api/cron/enrich", async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const limit = Math.max(1, Math.min(200, parseInt(c.req.query("limit") || "40", 10) || 40));
+  const db = getDb();
+  const { enrichPhones } = await import("./lib/phone-enrich");
+  const result = await enrichPhones(db, limit);
+  return c.json(result);
+});
 
 // ---------------------------------------------------------------------------
 // Telegram multi-bot webhook
