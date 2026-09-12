@@ -11,7 +11,9 @@ const CL_BASE = "https://www.craigslist.org";
 // HTML search (server-rendered result links). The old ?format=rss feed is
 // hard-blocked for automated clients (HTTP 403); the HTML search page
 // returns 200 with <li class="cl-static-search-result"> anchors.
-const CL_SEARCH = `${CL_BASE}/search/area/westernmass?cat=rea`;
+// purveyor=owner restricts to FSBO listings so leadType/isFsbo are accurate
+// (the unfiltered category mixes in ~1/3 broker listings).
+const CL_SEARCH = `${CL_BASE}/search/area/westernmass?cat=rea&purveyor=owner`;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
 // ── Egress proxy ─────────────────────────────────────────────────────────────
@@ -198,7 +200,9 @@ export async function runCraigslistScrape(
     const { description, phone, location, postedAt } = await fetchDetail(item.url);
 
     const combinedText = `${item.title} ${description}`;
-    const price = parsePrice(item.title) ?? parsePrice(description);
+    // Prefer the search-card price: CL titles rarely include one (~all owner
+    // listings carry the price only on the card). Fall back to title/body.
+    const price = parsePrice(item.price ?? "") ?? parsePrice(item.title) ?? parsePrice(description);
     const { level, flags } = scoreText(combinedText);
 
     const propertyAddress = location ?? item.location ?? item.title.slice(0, 80);
