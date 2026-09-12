@@ -526,79 +526,62 @@ app.get("/api/cron/diag", async (c) => {
     "Sec-Fetch-Mode": "navigate",
     "Sec-Fetch-Site": "none",
   };
-  const targets: { url: string; headers: Record<string, string> }[] = [
-    {
-      url: "https://westernmass.craigslist.org/search/rea?format=rss&sort=date",
-      headers: BROWSER_HEADERS,
-    },
-    {
-      url: "https://westernmass.craigslist.org/search/rea?sort=date",
-      headers: BROWSER_HEADERS,
-    },
-  ];
+  const RSS_HEADERS = {
+    ...BROWSER_HEADERS,
+    Accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "no-cors",
+  };
+  const px = process.env.CL_PROXY_URL;
   const out: any[] = [];
-  for (const t of targets) {
+  const get = async (
+    label: string,
+    url: string,
+    headers: Record<string, string>,
+    cookie?: string,
+  ) => {
     try {
       const res = await proxiedFetch(
-        t.url,
-        { headers: t.headers, signal: AbortSignal.timeout(15000) },
-        process.env.CL_PROXY_URL,
+        url,
+        {
+          headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) },
+          redirect: "manual",
+          signal: AbortSignal.timeout(15000),
+        },
+        px,
       );
+      const setCookies: string[] =
+        typeof (res.headers as any).getSetCookie === "function"
+          ? (res.headers as any).getSetCookie()
+          : [];
       const text = await res.text();
-      // For the HTML search page, map out where the result data lives:
-      // marker presence, script URLs, and the full JSON-LD results blob.
-      let snippet: string;
-      if (t.url.includes("search/rea?sort=date")) {
-        const markers = [
-          "__NEXT_DATA__",
-          "data-pid",
-          "posting-title",
-          "cl-search-result",
-          "gallery-card",
-          "search-results-page",
-          "/api/",
-        ];
-        const found: Record<string, boolean> = {};
-        for (const m of markers) found[m] = text.includes(m);
-        const scripts: string[] = [];
-        for (const m of text.matchAll(/<script[^>]+src="([^"]+)"/g)) {
-          if (/search|results|gallery/i.test(m[1])) scripts.push(m[1].slice(0, 160));
-        }
-        let ld: any = null;
-        const ldm = text.match(/<script[^>]+id="ld_searchpage_results"[^>]*>([\s\S]*?)<\/script>/);
-        if (ldm) {
-          try {
-            const parsed = JSON.parse(ldm[1]);
-            const els = parsed.itemListElement ?? [];
-            ld = {
-              count: els.length,
-              first: JSON.stringify(els[0]).slice(0, 900),
-              keys: els[0]?.item ? Object.keys(els[0].item) : [],
-            };
-          } catch {
-            ld = { parse_error: true, raw_start: ldm[1].slice(0, 300) };
-          }
-        }
-        snippet = JSON.stringify({
-          page_len: text.length,
-          markers: found,
-          scripts: scripts.slice(0, 8),
-          ld,
-        }).slice(0, 4000);
-      } else {
-        snippet = text.slice(0, 220).replace(/\s+/g, " ");
-      }
-      out.push({
-        url: t.url,
+      const entry: any = {
+        label,
         status: res.status,
-        server: res.headers.get("server"),
-        via: res.headers.get("via"),
-        snippet,
-      });
+        location: res.headers.get("location"),
+        set_cookies: setCookies.map((s) => s.split(";")[0]).slice(0, 4),
+        snippet: text.slice(0, 160).replace(/\s+/g, " "),
+      };
+      out.push(entry);
+      return setCookies.map((s) => s.split(";")[0]).join("; ");
     } catch (e: any) {
-      out.push({ url: t.url, error: String(e?.message ?? e) });
+      out.push({ label, error: String(e?.message ?? e) });
+      return "";
     }
-  }
+  };
+  // 1. Cookie dance: HTML search first (200), then RSS with its cookies.
+  const htmlUrl = "https://westernmass.craigslist.org/search/rea?sort=date";
+  const rssUrl = "https://westernmass.craigslist.org/search/rea?format=rss&sort=date";
+  const jar = await get("html-search", htmlUrl, BROWSER_HEADERS);
+  await get("rss-with-cookies", rssUrl, RSS_HEADERS, jar || undefined);
+  // 2. RSS variants without the cookie jar.
+  await get("rss-no-sort", "https://westernmass.craigslist.org/search/rea?format=rss", RSS_HEADERS);
+  await get(
+    "rss-www-canonical",
+    "https://www.craigslist.org/search/area/westernmass?cat=rea&format=rss",
+    RSS_HEADERS,
+  );
+  return c.json({ proxy_configured: !!px, out });
   return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
 });
 
