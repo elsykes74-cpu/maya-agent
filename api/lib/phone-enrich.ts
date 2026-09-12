@@ -68,6 +68,8 @@ export interface EnrichResult {
   checked: number;
   found: number;
   remaining: number;
+  quotaSuspected: boolean;
+  lastError: string | null;
   error?: string;
 }
 
@@ -75,20 +77,30 @@ export interface EnrichResult {
 // a name search (LLC, institution, junk). The candidate query excludes marked
 // leads so they stop blocking the queue head for future runs.
 const SKIP_MARKER = "[skip:unusable-name]";
+// A completed search (no throw) that finds no number is a strike. The query is
+// identical every attempt, so retrying a numberless lead is pure waste — after
+// MAX_FAILS strikes the lead is marked and never searched again. Throws (rate
+// limit, quota, network) never count as strikes; the lead is retried later.
+const FAIL_MARKER = "[enrich:fail]";
+const SKIP_NO_NUMBER = "[skip:no-number]";
+const MAX_FAILS = 2;
 
 // Batch-enrich phoneless leads. Hot first, then warm, newest first; skips
 // entity/junk names. maxLeads caps Tavily spend per invocation (free tier is
 // 1,000 searches/mo — a weekly scan adding ~40 leads plus backfill fits).
 export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult> {
   if (!env.tavilyApiKey) {
-    return { ok: false, checked: 0, found: 0, remaining: 0, error: "TAVILY_API_KEY not configured" };
+    return { ok: false, checked: 0, found: 0, remaining: 0, quotaSuspected: false, lastError: null, error: "TAVILY_API_KEY not configured" };
   }
   let checked = 0;
   let found = 0;
+  let quotaErrors = 0;
+  let lastError: string | null = null;
   const unmarked = () =>
     and(
       or(eq(leads.phone, ""), isNull(leads.phone)),
-      sql`coalesce(${leads.notes}, '') NOT LIKE ${"%" + SKIP_MARKER + "%"}`
+      sql`coalesce(${leads.notes}, '') NOT LIKE ${"%" + SKIP_MARKER + "%"}`,
+      sql`coalesce(${leads.notes}, '') NOT LIKE ${"%" + SKIP_NO_NUMBER + "%"}`
     );
   try {
     const rows = await db
@@ -97,6 +109,7 @@ export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult>
         sellerName: leads.sellerName,
         city: leads.city,
         state: leads.state,
+        notes: leads.notes,
       })
       .from(leads)
       .where(unmarked())
@@ -135,20 +148,38 @@ export async function enrichPhones(db: Db, maxLeads = 40): Promise<EnrichResult>
             })
             .where(eq(leads.id, row.id));
           found++;
+        } else {
+          // Search completed but the public web has no number for this name.
+          // Same query would return the same results, so count a strike and
+          // stop searching this lead after MAX_FAILS.
+          const fails = (row.notes?.match(/\[enrich:fail\]/g) || []).length + 1;
+          const marker = fails >= MAX_FAILS ? SKIP_NO_NUMBER : FAIL_MARKER;
+          await db
+            .update(leads)
+            .set({
+              notes: sql`left(coalesce(${leads.notes}, '') || ${"\n" + marker}, 2000)`,
+            })
+            .where(eq(leads.id, row.id));
         }
       } catch (e) {
-        console.error(`[enrich] lead ${row.id} failed:`, (e as Error)?.message);
+        const msg = (e as Error)?.message ?? String(e);
+        console.error(`[enrich] lead ${row.id} failed:`, msg);
+        lastError = msg;
+        // Throw = we didn't actually check (rate limit, quota, network), so
+        // it never counts as a strike. But 3+ 429s in one run means the well
+        // is dry — stop the run instead of burning through it.
+        if (/429/.test(msg) && ++quotaErrors >= 3) break;
       }
       // Gentle pacing between searches.
       await new Promise((r) => setTimeout(r, 1200));
     }
   } catch (err: any) {
-    return { ok: false, checked, found, remaining: 0, error: err?.message ?? String(err) };
+    return { ok: false, checked, found, remaining: 0, quotaSuspected: quotaErrors >= 3, lastError, error: err?.message ?? String(err) };
   }
   const remainingRows = await db
     .select({ n: sql`count(*)` })
     .from(leads)
     .where(unmarked());
   const remaining = Number((remainingRows[0] as any)?.n ?? 0);
-  return { ok: true, checked, found, remaining };
+  return { ok: true, checked, found, remaining, quotaSuspected: quotaErrors >= 3, lastError };
 }
