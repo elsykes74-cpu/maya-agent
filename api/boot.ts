@@ -36,6 +36,12 @@ import {
   recordRegistryRun,
   startRegistryScheduler,
 } from "./lib/registry-scraper";
+// RentCast registry source (licensed property data — no Imperva block).
+// Aliased: registry-scraper.ts owns the un-aliased Hampden-portal names.
+import {
+  runRegistryScrape as runRentcastScrape,
+  formatRegistryAlert as formatRentcastAlert,
+} from "./lib/registry-source";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
 import { Session, Paths } from "../contracts/constants";
@@ -626,6 +632,40 @@ app.post("/api/cron/registry-ingest", async (c) => {
     return c.json({ ok: false, error: "registry ingest failed" }, 500);
   }
 });
+
+// ---------------------------------------------------------------------------
+// RentCast registry source — licensed property data (no Imperva block).
+// Replaces the hard-blocked Hampden portal scrape as the automated distressed
+// lead source. Same secret-gated cron pattern as the other endpoints:
+// accepts ?secret=CRON_SECRET or Authorization: Bearer.
+// ---------------------------------------------------------------------------
+const checkCronAuth = (c: any): boolean => {
+  if (!env.cronSecret) return false;
+  if (c.req.query("secret") === env.cronSecret) return true;
+  return c.req.header("authorization") === `Bearer ${env.cronSecret}`;
+};
+
+const handleCronRentcast = async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const db = getDb();
+  const result = await runRentcastScrape(db);
+  if (result.added > 0 || !result.ok) {
+    await sendAlert(formatRentcastAlert(result), "quickkick").catch((err) =>
+      console.error("[cron/registry-rentcast] alert failed:", err)
+    );
+  }
+  return c.json({
+    ok: result.ok,
+    found: result.found,
+    added: result.added,
+    error: result.error ?? null,
+  });
+};
+
+app.get("/api/cron/registry-rentcast", handleCronRentcast);
+app.post("/api/cron/registry-rentcast", handleCronRentcast);
 
 // ---------------------------------------------------------------------------
 // Telegram multi-bot webhook

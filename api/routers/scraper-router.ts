@@ -2,6 +2,10 @@ import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
 import { runCraigslistScrape, formatScrapeAlert, recordScrapeRun, getLatestScrapeRun } from "../lib/craigslist-scraper";
+import {
+  runRegistryScrape as runRentcastScrape,
+  formatRegistryAlert as formatRentcastAlert,
+} from "../lib/registry-source";
 import { sendAlert } from "../lib/telegram";
 import { env } from "../lib/env";
 
@@ -51,6 +55,24 @@ export const scraperRouter = createRouter({
         }).catch(() => {});
         throw err;
       }
+    }),
+
+  // Trigger a RentCast registry pull (licensed data — no anti-bot blocking).
+  // Secret-gated like the Craigslist trigger: each pull burns API quota.
+  runRegistry: publicQuery
+    .input(z.object({ secret: z.string().optional(), notify: z.boolean().default(true) }).optional())
+    .mutation(async ({ input }) => {
+      if (!env.cronSecret || input?.secret !== env.cronSecret) {
+        throw new Error("Unauthorized: valid CRON_SECRET required");
+      }
+      const db = getDb();
+      const result = await runRentcastScrape(db);
+
+      if (input?.notify !== false && (result.added > 0 || !result.ok)) {
+        await sendAlert(formatRentcastAlert(result), "quickkick");
+      }
+
+      return { ok: result.ok, found: result.found, added: result.added, error: result.error ?? null };
     }),
 
   // Latest cached scrape run (used by /findleads and dashboards).

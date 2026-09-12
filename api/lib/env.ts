@@ -88,6 +88,12 @@ export const env = {
   anthropicApiKey: soft("ANTHROPIC_API_KEY") || soft("ANTHROPIC_KEY"),
   braveApiKey: soft("BRAVE_API_KEY"),
   claudeEndpointSecret: soft("CLAUDE_ENDPOINT_SECRET"),
+  cronSecret: soft("CRON_SECRET"),
+  rentcastApiKey: soft("RENTCAST_API_KEY"),
+  // Comma-separated postal codes to pull registry leads for; falls back to Western MA.
+  registryZips: soft("REGISTRY_ZIPS"),
+  // Max property records to request per ZIP (RentCast bills per request/record).
+  registryLimitPerZip: soft("REGISTRY_LIMIT_PER_ZIP"),
   ownerUnionId: soft("OWNER_UNION_ID"),
   appUrl: soft("APP_URL") || "http://localhost:3000",
   googleClientId: soft("GOOGLE_CLIENT_ID"),
@@ -97,6 +103,4 @@ export const env = {
   // LadyJaye — second bot
   telegramBotTokenLadyJaye: soft("TELEGRAM_BOT_TOKEN_LADYJAYE"),
   telegramChatIdLadyJaye: soft("TELEGRAM_CHAT_ID_LADYJAYE"),
-  // Shared secret for scheduled cron endpoints (Vercel cron -> /api/cron/scrape)
-  cronSecret: soft("CRON_SECRET"),
 };
