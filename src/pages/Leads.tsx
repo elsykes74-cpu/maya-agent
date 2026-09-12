@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, Plus, PhoneCall, MapPin, Clock, Banknote, Wrench, Thermometer, Bot, Sparkles, LayoutList } from 'lucide-react';
 import { C, NeoTile, NeoIcon, MotTag, QTag, HomeDot, ConfirmSheet } from '@/components/Neo';
-import { loadLeads, saveLeads, addCallRecord, getNextId } from '@/lib/persistence';
+import { loadLeads, saveLeads, addCallRecord } from '@/lib/persistence';
 import type { Lead } from '@/lib/persistence';
+import { trpc } from '@/providers/trpc';
 
 export default function Leads() {
   const [filter, setFilter] = useState('all');
@@ -174,11 +175,44 @@ function AddLeadSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (lead: L
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [mot, setMot] = useState<'hot' | 'warm' | 'cold'>('hot');
+  const [err, setErr] = useState<string | null>(null);
+
+  const createLead = trpc.leads.create.useMutation({
+    onSuccess: (data: any) => {
+      const lead: Lead = {
+        id: data.id,
+        sellerName: name.trim(),
+        propertyAddress: address.trim() || 'Address not provided',
+        phone: phone.trim(),
+        email: null,
+        motivationLevel: mot,
+        timeline: 'Unknown',
+        askingPrice: '',
+        arv: '',
+        estimatedRepairs: '',
+        beds: 0,
+        baths: 0,
+        condition: '',
+        keyPainPoints: '',
+      };
+      onAdd(lead);
+    },
+    onError: (e: any) => setErr(e.message ?? 'Failed to save lead'),
+  });
 
   const save = () => {
     if (!name.trim() || !phone.trim()) return;
-    onAdd({ id: getNextId(), sellerName: name.trim(), propertyAddress: address.trim() || 'Address not provided', phone: phone.trim(), email: null, motivationLevel: mot, timeline: 'Unknown', askingPrice: '', arv: '', estimatedRepairs: '', beds: 0, baths: 0, condition: '', keyPainPoints: '' });
+    setErr(null);
+    createLead.mutate({
+      sellerName: name.trim(),
+      propertyAddress: address.trim() || 'Address not provided',
+      phone: phone.trim(),
+      motivationLevel: mot,
+    });
   };
+
+  const busy = createLead.isPending;
+  const canSave = !!name.trim() && !!phone.trim() && !busy;
 
   return <>
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(28,28,30,0.3)', zIndex: 40, backdropFilter: 'blur(4px)' }} onClick={onClose} />
@@ -205,8 +239,9 @@ function AddLeadSheet({ onClose, onAdd }: { onClose: () => void; onAdd: (lead: L
           ))}
         </div>
       </div>
-      <button onClick={save} disabled={!name.trim() || !phone.trim()} className="maya-tile press-sm" style={{ width: '100%', height: 52, borderRadius: 16, background: C.teal, color: '#fff', border: 'none', fontSize: 16, fontWeight: 700, cursor: 'pointer', padding: 0, opacity: name.trim() && phone.trim() ? 1 : 0.45 }}>
-        Save Lead
+      {err && <p style={{ fontSize: 13, color: C.red, fontWeight: 600, margin: '-8px 0 12px' }}>{err}</p>}
+      <button onClick={save} disabled={!canSave} className="maya-tile press-sm" style={{ width: '100%', height: 52, borderRadius: 16, background: C.teal, color: '#fff', border: 'none', fontSize: 16, fontWeight: 700, cursor: 'pointer', padding: 0, opacity: canSave ? 1 : 0.45 }}>
+        {busy ? 'Saving…' : 'Save Lead'}
       </button>
       <button onClick={onClose} style={{ width: '100%', marginTop: 10, height: 44, background: 'transparent', color: C.muted, border: 'none', fontSize: 16, fontWeight: 700, cursor: 'pointer', borderRadius: 16 }}>Cancel</button>
     </div>
