@@ -38,5 +38,6 @@ jobs:
       - name: Run registry browser scrape
         env:
           REGISTRY_INGEST_URL: ${{ secrets.REGISTRY_INGEST_URL }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || '9' }}
         run: node scripts/registry-browser-scrape.mjs

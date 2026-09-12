@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 
 const ALIS_BASE = "https://search.hampdendeeds.com/ALIS/WW400R.HTM";
 const INGEST_URL = process.env.REGISTRY_INGEST_URL;
+const PROXY_URL = process.env.PROXY_URL; // optional http://user:pass@host:port
 const LOOKBACK_DAYS = parseInt(process.env.LOOKBACK_DAYS || "9", 10);
 
 if (!INGEST_URL) {
@@ -38,7 +39,17 @@ function buildAlisUrl() {
   return `${ALIS_BASE}?${params.join("&")}`;
 }
 
-const browser = await chromium.launch({ headless: true });
+const launchOpts = { headless: true };
+if (PROXY_URL) {
+  const u = new URL(PROXY_URL);
+  launchOpts.proxy = {
+    server: `${u.protocol}//${u.host}`,
+    username: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+  };
+  console.log("using proxy:", `${u.protocol}//${u.host}`);
+}
+const browser = await chromium.launch(launchOpts);
 const context = await browser.newContext({
   userAgent:
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
