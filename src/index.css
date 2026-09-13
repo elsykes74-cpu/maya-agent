@@ -1115,6 +1115,10 @@ body {
 [data-theme="dark"] .maya-toggle-track,
 [data-theme="dark"] .neo-toggle-track { background: #3A3D4A; }
 
+[data-theme="dark"] .toggle-3d.active,
+[data-theme="dark"] .maya-toggle-track.active,
+[data-theme="dark"] .neo-toggle-track.active { background: var(--green); }
+
 [data-theme="dark"] .input-3d,
 [data-theme="dark"] .neo-input,
 [data-theme="dark"] .maya-input {
