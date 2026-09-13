@@ -42,13 +42,16 @@ function parseStreet(propertyAddress: string | null | undefined): string | null 
 /**
  * Hot leads (pipelineStage = hot_routing, the canonical Hot definition) whose
  * address has never been checked against the registry deed index.
+ * ?retry=1 includes already-checked leads (re-runs after scraper fixes).
  */
-export async function getDeedLookupQueue(db: Db, limit: number): Promise<DeedQueueEntry[]> {
+export async function getDeedLookupQueue(db: Db, limit: number, retry = false): Promise<DeedQueueEntry[]> {
   const rows = await db.query.leads.findMany({
-    where: and(
-      eq(leads.pipelineStage, "hot_routing" as any),
-      isNull(leads.registryDeedCheckedAt)
-    ),
+    where: retry
+      ? eq(leads.pipelineStage, "hot_routing" as any)
+      : and(
+          eq(leads.pipelineStage, "hot_routing" as any),
+          isNull(leads.registryDeedCheckedAt)
+        ),
     orderBy: [desc(leads.leadScore)],
     limit,
   });

@@ -213,11 +213,20 @@ for (const lead of leads) {
     await sleep(2500);
 
     let pages = 0;
+    let bounced = false;
     for (;;) {
       const { rows, nextHref, title, bodyStart } = await extractPage(page);
-      // Bounced back to the search form instead of results?
-      if (/address search/i.test(title) && rows.length === 0 && /property address/i.test(bodyStart)) {
-        console.log(`query "${q}": bounced to form`);
+      const t = title || "";
+      // Results page title is "Rec Land Address Search Results"; the bare
+      // search form is titled "Address Search". Don't confuse the two.
+      if (/^\s*address search\s*$/i.test(t)) {
+        console.log(`query "${q}": REALLY bounced to form (title="${t}")`);
+        bounced = true;
+        break;
+      }
+      if (!/rec land address search results/i.test(t)) {
+        console.log(`query "${q}": unexpected page (title="${t}") body=${JSON.stringify(bodyStart.slice(0, 160))}`);
+        bounced = true;
         break;
       }
       for (const r of rows) {
@@ -229,7 +238,7 @@ for (const lead of leads) {
         docs.push(d);
       }
       pages++;
-      if (!nextHref || pages >= 40) break;
+      if (bounced || !nextHref || pages >= 40) break;
       await page.goto(nextHref, { waitUntil: "domcontentloaded", timeout: 60000 });
       await sleep(2000);
     }

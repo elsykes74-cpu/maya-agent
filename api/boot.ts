@@ -702,10 +702,11 @@ app.get("/api/cron/deed-lookup-queue", async (c: any) => {
     return c.json({ error: "Unauthorized" }, 401);
   }
   const limit = Math.max(1, Math.min(100, parseInt(c.req.query("limit") || "25", 10) || 25));
+  const retry = c.req.query("retry") === "1";
   const db = getDb();
   try {
     const { getDeedLookupQueue } = await import("./lib/registry-deed");
-    const queue = await getDeedLookupQueue(db, limit);
+    const queue = await getDeedLookupQueue(db, limit, retry);
     return c.json({ ok: true, count: queue.length, leads: queue });
   } catch (err: any) {
     console.error("[cron/deed-lookup-queue] failed:", err?.message ?? err);
