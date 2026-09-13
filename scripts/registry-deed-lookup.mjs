@@ -99,7 +99,8 @@ async function authedPost(url, body) {
   return { status: res.status, data };
 }
 
-// Extract document rows + next-page href from a results page.
+// Extract document rows from the current results page. Row indexes align with
+// the "View Abstract" links in DOM order (used by readAbstract).
 async function extractPage(page) {
   return page.evaluate(() => {
     const rows = [];
@@ -113,15 +114,49 @@ async function extractPage(page) {
         if (/Bk-Pg:/i.test(text) && /Recorded:/i.test(text)) break;
         el = el.parentElement;
       }
-      rows.push({ text, href: a.getAttribute("href") || "" });
+      rows.push({ text });
     }
-    const next = anchors.find((a) => /^\s*next\s*$/i.test(a.textContent || ""));
-    return {
-      rows,
-      nextHref: next ? next.href : null, // DOM-resolved: carries WSGKEY/W9RRN state
-      title: document.title,
-    };
+    return { rows, title: document.title };
   });
+}
+
+// Pagination is a javascript: form post (doVarButton2), not a real link —
+// click it and wait for the reload instead of navigating to an href.
+async function clickNext(page) {
+  const clicked = await page.evaluate(() => {
+    const a = Array.from(document.querySelectorAll("a")).find((x) =>
+      /^\s*next\s*$/i.test(x.textContent || "")
+    );
+    if (!a) return false;
+    a.click();
+    return true;
+  });
+  if (!clicked) return false;
+  await page.waitForLoadState("domcontentloaded", { timeout: 60000 }).catch(() => {});
+  await sleep(2500);
+  return /rec land address search results/i.test(await page.title().catch(() => ""));
+}
+
+// Click the i-th "View Abstract" link (also a form post) and return the
+// abstract page's body text. Caller must goBack() to the results page after.
+async function readAbstract(page, idx) {
+  const clicked = await page.evaluate((i) => {
+    const links = Array.from(document.querySelectorAll("a")).filter((a) =>
+      /view abstract/i.test((a.textContent || "").trim())
+    );
+    if (!links[i]) return false;
+    links[i].click();
+    return true;
+  }, idx);
+  if (!clicked) return null;
+  await page.waitForLoadState("domcontentloaded", { timeout: 60000 }).catch(() => {});
+  await sleep(1500);
+  return (await page.evaluate(() => document.body?.innerText || "")).toUpperCase();
+}
+
+async function goBackToResults(page) {
+  await page.goBack({ waitUntil: "domcontentloaded", timeout: 60000 }).catch(() => {});
+  await sleep(2000);
 }
 
 function parseRow(text) {
@@ -144,14 +179,16 @@ function parseRow(text) {
 
 const isDeed = (d) => /deed/i.test(d.docType || "");
 
-// Walk all result pages for a query; returns parsed docs (deduped by book-page).
+// Walk all result pages for a query (clicking Next); returns parsed docs
+// deduped by book-page. Used for the number-keyed phase where the Addr line
+// on each row already proves the house number.
 async function searchAllPages(page, padr, town, fdta, tdta, maxPages, seenKeys) {
   const docs = [];
   await page.goto(resultsUrl(padr, town, fdta, tdta), { waitUntil: "domcontentloaded", timeout: 60000 });
   await sleep(2500);
   let pages = 0;
   for (;;) {
-    const { rows, nextHref, title } = await extractPage(page);
+    const { rows, title } = await extractPage(page);
     const t = title || "";
     if (/^\s*address search\s*$/i.test(t)) {
       console.log(`  query "${padr}": bounced to form`);
@@ -167,31 +204,69 @@ async function searchAllPages(page, padr, town, fdta, tdta, maxPages, seenKeys) 
       const key = `${d.book}-${d.page}`;
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
-      d.abstractHref = r.href;
       docs.push(d);
     }
     pages++;
-    if (!nextHref || pages >= maxPages) break;
-    await page.goto(nextHref, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await sleep(2000);
+    if (pages >= maxPages) break;
+    if (!(await clickNext(page))) break;
   }
   return { docs, pages };
 }
 
-// Open a deed candidate's abstract and verify the house number appears with
-// the street name (older docs are indexed street-name-only).
-async function abstractVerifies(page, doc, number, streetName) {
-  if (!doc.abstractHref) return false;
-  try {
-    const url = new URL(doc.abstractHref, page.url()).href;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+// Phase 2: street-wide query in newest-first 10-year windows. Older docs are
+// indexed without house numbers, so each deed candidate's abstract is opened
+// (click-through) and checked for the house number. Returns the most recent
+// verified deed, or null. Stays on an abstract page when one verifies.
+async function findDeedForNumber(page, streetQuery, town, number, streetName, seenKeys) {
+  const nowYear = new Date().getFullYear();
+  let abstractsUsed = 0;
+  for (let w = 0; w < 6; w++) {
+    const endY = nowYear - w * 10;
+    const startY = endY - 10;
+    const fdta = `0101${startY}`;
+    const tdta = `1231${endY}`;
+    await page.goto(resultsUrl(streetQuery, town, fdta, tdta), { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(2500);
+    let pages = 0;
+    let windowDocs = 0;
+    for (;;) {
+      const { rows, title } = await extractPage(page);
+      if (!/rec land address search results/i.test(title || "")) break;
+      const cands = [];
+      rows.forEach((r, idx) => {
+        const d = parseRow(r.text);
+        if (!d.book || !d.page || !d.recordedDate || !isDeed(d)) return;
+        const key = `${d.book}-${d.page}`;
+        if (seenKeys.has(key)) return;
+        seenKeys.add(key);
+        windowDocs++;
+        cands.push({ d, idx });
+      });
+      // Newest candidates first.
+      cands.sort((a, b) => b.d.recordedDate.localeCompare(a.d.recordedDate));
+      for (const { d, idx } of cands) {
+        if (abstractsUsed >= 30) break;
+        abstractsUsed++;
+        const text = await readAbstract(page, idx);
+        await goBackToResults(page);
+        if (
+          text &&
+          new RegExp(`\\b${number}\\b`).test(text) &&
+          text.includes(streetName)
+        ) {
+          console.log(`  verified via abstract: ${d.recordedDate} Bk ${d.book}-${d.page} (${d.docType})`);
+          return { deed: d, abstractsUsed, window: `${startY}-${endY}` };
+        }
+        await sleep(1000);
+      }
+      pages++;
+      if (pages >= 25 || abstractsUsed >= 30) break;
+      if (!(await clickNext(page))) break;
+    }
+    console.log(`  window ${startY}-${endY}: ${windowDocs} deed candidates checked over ${pages} page(s)`);
     await sleep(1500);
-    const text = (await page.evaluate(() => document.body?.innerText || "")).toUpperCase();
-    return new RegExp(`\\b${number}\\b`).test(text) && text.includes(streetName);
-  } catch (e) {
-    console.log(`  abstract check failed for ${doc.book}-${doc.page}: ${e.message}`);
-    return false;
   }
+  return { deed: null, abstractsUsed, window: null };
 }
 
 const launchOpts = {
@@ -253,7 +328,6 @@ const townMap = await page.evaluate(() => {
 });
 console.log(`town options mapped: ${Object.keys(townMap).length}`);
 
-const nowYear = new Date().getFullYear();
 let done = 0;
 let withDeeds = 0;
 
@@ -279,30 +353,13 @@ for (const lead of leads) {
   // Phase 2: street-wide fallback in newest-first 10-year windows.
   // Older docs are indexed without house numbers — verify via abstract.
   if (deeds.length === 0 && number && name) {
-    const streetQuery = streetPart; // e.g. "HANCOCK ST" (suffix kept, number dropped)
-    console.log(`phase 2 street-wide "${streetQuery}" with abstract verification`);
-    let abstractsUsed = 0;
-    for (let w = 0; w < 6 && deeds.length === 0; w++) {
-      const endY = nowYear - w * 10;
-      const startY = endY - 10;
-      const fdta = `0101${startY}`;
-      const tdta = `1231${endY}`;
-      const { docs, pages } = await searchAllPages(page, streetQuery, townCode, fdta, tdta, 25, seenKeys);
-      const candidates = docs.filter(isDeed).sort((a, b) => b.recordedDate.localeCompare(a.recordedDate));
-      console.log(`  window ${startY}-${endY}: ${docs.length} docs, ${pages} pages, ${candidates.length} deed candidates`);
-      for (const c of candidates) {
-        if (abstractsUsed >= 30) break;
-        abstractsUsed++;
-        if (await abstractVerifies(page, c, number, name)) {
-          console.log(`  verified via abstract: ${c.recordedDate} Bk ${c.book}-${c.page}`);
-          deeds.push(c);
-          break; // newest verified deed in this window wins; stop entirely
-        }
-        await sleep(1000);
-      }
-      if (deeds.length === 0) await sleep(1500);
-    }
-    console.log(`phase 2 verified deeds: ${deeds.length} (${abstractsUsed} abstracts checked)`);
+    console.log(`phase 2 street-wide "${streetPart}" with abstract verification`);
+    const found = await findDeedForNumber(page, streetPart, townCode, number, name, seenKeys);
+    console.log(
+      `phase 2: ${found.abstractsUsed} abstracts checked` +
+        (found.window ? `, deed verified in window ${found.window}` : ", no deed verified")
+    );
+    if (found.deed) deeds.push(found.deed);
   }
 
   deeds.sort((a, b) => b.recordedDate.localeCompare(a.recordedDate));
