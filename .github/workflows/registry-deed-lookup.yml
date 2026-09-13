@@ -57,7 +57,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
           DEED_LIMIT: ${{ inputs.limit || '10' }}
-          DEED_RETRY: ${{ inputs.retry || inputs.lead_ids && '1' || '0' }}
+          DEED_RETRY: ${{ (inputs.retry == '1' || inputs.lead_ids != '') && '1' || '0' }}
           DEED_ABSTRACT_CAP: ${{ inputs.abstract_cap || '30' }}
           DEED_LEAD_IDS: ${{ inputs.lead_ids || '' }}
         # Headed Chromium under xvfb + stealth plugin + residential proxy:
