@@ -9,6 +9,7 @@ import {
   boolean,
   bigserial,
   bigint,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 // ── Enums ────────────────────────────────────────────────────────────────────
