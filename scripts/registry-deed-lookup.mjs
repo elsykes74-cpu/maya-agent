@@ -148,9 +148,10 @@ function parseRow(text) {
   const rec = text.match(/Recorded:\s*(\d{2})-(\d{2})-(\d{4})/);
   const typeRaw = (text.match(/^\s*Type:\s*([^\n\r]+)/im) || [])[1];
   // The index sometimes renders "Type: Deed  Doc$: 67,100.00" on one line.
-  // Keep docType clean; capture the Doc$ figure separately. NOTE: on mortgage
-  // rows Doc$ is the LOAN amount; on deed rows its meaning (consideration?)
-  // is still being verified — never treat it as sale price yet.
+  // Keep docType clean; capture the Doc$ figure separately. Verified
+  // 2026-09-13: on deed-type rows Doc$ is the stated consideration (fees and
+  // excise are itemized separately on the abstract). On mortgage rows Doc$
+  // is the LOAN amount — the ingest only maps it to price for deeds.
   const cleanType = typeRaw ? typeRaw.replace(/\s*Doc\$:\s*[\d,]+\.\d{2}/i, "").trim() : null;
   const amt = text.match(/Doc\$:\s*([\d,]+\.\d{2})/i);
   const addr = text.match(/Addr:\s*([^\n\r]+)/i);
