@@ -54,6 +54,9 @@ const MED_FLAGS = [
   "relocating", "moving", "vacant", "tired landlord", "absentee", "out of state",
 ];
 
+// Rentals miscategorized by posters under "for sale by owner" — not sellers.
+const RENTAL_EXCLUDE = /for[\s-]*rent|rooms?\s+for\s+rent|per month|\/\s*month\b|month[\s-]*to[\s-]*month|security deposit|roommate/i;
+
 // ── Search-page parsing (server-rendered HTML, no RSS) ────────────────────────
 // Each result: <li class="cl-static-search-result"><a href=".../view/d/{slug}/{id}">
 //   <div class="title">…</div><div class="details"><div class="price">$…</div>
@@ -198,11 +201,17 @@ export async function runCraigslistScrape(
   for (const item of freshItems.slice(0, maxItems)) {
     const externalId = `cl:${item.id}`;
 
+    // Skip obvious rentals before paying for a detail fetch (posters
+    // miscategorize room-for-rent ads under "for sale by owner").
+    if (RENTAL_EXCLUDE.test(`${item.title} ${item.url}`)) continue;
+
     // Rate limit — be polite to CL
     await new Promise(r => setTimeout(r, FETCH_DELAY_MS));
     const { description, phone, location } = await fetchDetail(item.url);
 
     const combinedText = `${item.title} ${description}`;
+    // Skip rentals that slipped past the title check.
+    if (RENTAL_EXCLUDE.test(combinedText)) continue;
     // Prefer the search-card price: CL titles rarely include one (~all owner
     // listings carry the price only on the card). Fall back to title/body.
     const price = parsePrice(item.price ?? "") ?? parsePrice(item.title) ?? parsePrice(description);
