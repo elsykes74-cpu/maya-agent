@@ -1,6 +1,7 @@
 import { getDb } from "../queries/connection";
 import { callingConfig, leads, dncList } from "../../db/schema";
 import { eq } from "drizzle-orm";
+import { validatePhoneForDial } from "./phone-validate";
 
 const DEFAULT_VAPI_ASSISTANT_ID = "8f0c5749-74f5-4757-8377-10e10f47dd25";
 
@@ -232,7 +233,7 @@ export function isWithinCallWindow(start: string, end: string, timezone: string)
   return timeStr >= start && timeStr <= end;
 }
 
-export async function scrubPhone(phone: string, scrubDnc: boolean, _scrubLitigants: boolean) {
+export async function scrubPhone(phone: string, scrubDnc: boolean, _scrubLitigants: boolean, leadId?: number) {
   const db = getDb();
   const result = { pass: true, reason: "" as string };
 
@@ -245,6 +246,16 @@ export async function scrubPhone(phone: string, scrubDnc: boolean, _scrubLitigan
     const dnc = await db.query.dncList.findFirst({ where: eq(dncList.phone, cleanPhone) });
     if (dnc) {
       return { pass: false, reason: `DNC: ${dnc.reason}` };
+    }
+  }
+
+  // Line-type check (Numverify): invalid/disconnected numbers never dial.
+  // Fail-open: when the check can't run (no key / cap exhausted / API error)
+  // the dial proceeds without line-type info.
+  if (leadId != null) {
+    const check = await validatePhoneForDial(db, leadId, cleanPhone);
+    if (check.checked && !check.canVoice) {
+      return { pass: false, reason: `Line check: ${check.reason}` };
     }
   }
 

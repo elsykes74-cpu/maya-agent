@@ -183,7 +183,7 @@ async function handleCallNow(chatId: string, parts: string[], token: string): Pr
     return;
   }
 
-  const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+  const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
   if (!scrub.pass) {
     await sendMessage(chatId, `🚫 Call blocked: ${scrub.reason}`, { token } as any);
     return;
@@ -311,7 +311,7 @@ export async function runLeadsAutomation(notifyChatId?: string, notifyToken?: st
       continue;
     }
 
-    const scrub = await scrubPhone(lead.phone!, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+    const scrub = await scrubPhone(lead.phone!, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
     if (!scrub.pass) {
       blocked++;
       continue;

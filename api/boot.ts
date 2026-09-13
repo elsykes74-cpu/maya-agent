@@ -783,6 +783,14 @@ const MIGRATE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS "rentcast_usage_created_at_idx" ON "rentcast_usage" ("created_at" DESC)`,
   // 0006 — registry deed lookup: when a lead's address was checked for deeds.
   `ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "registry_deed_checked_at" timestamptz`,
+  // 0007 — Numverify line-type check: monthly usage ledger + phone_validation
+  // table (already in the drizzle schema but never migrated).
+  `DO $$ BEGIN CREATE TYPE "phone_status" AS ENUM ('valid','invalid','disconnected','voip','landline','mobile','unknown'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `DO $$ BEGIN CREATE TYPE "line_type" AS ENUM ('mobile','landline','voip','unknown'); EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+  `CREATE TABLE IF NOT EXISTS "phone_validation" ("id" bigserial PRIMARY KEY, "lead_id" bigint NOT NULL, "phone" varchar(20) NOT NULL, "status" "phone_status" NOT NULL DEFAULT 'unknown', "carrier" varchar(100), "line_type" "line_type" NOT NULL DEFAULT 'unknown', "validated_at" timestamp NOT NULL DEFAULT now())`,
+  `CREATE INDEX IF NOT EXISTS "phone_validation_phone_idx" ON "phone_validation" ("phone")`,
+  `CREATE TABLE IF NOT EXISTS "numverify_usage" ("id" bigserial PRIMARY KEY, "endpoint" varchar(120) NOT NULL, "created_at" timestamp NOT NULL DEFAULT now())`,
+  `CREATE INDEX IF NOT EXISTS "numverify_usage_created_at_idx" ON "numverify_usage" ("created_at" DESC)`,
 ];
 
 async function handleCronMigrate(c: any) {

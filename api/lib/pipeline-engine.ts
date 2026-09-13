@@ -20,6 +20,7 @@ import {
 import { computeLeadScore } from "./lead-scorer";
 import { sendTwilioSms } from "./twilio";
 import { createVapiCall, getCallingConfig, isWithinCallWindow, scrubPhone } from "./vapi";
+import { validatePhoneForDial } from "./phone-validate";
 import { sendAlert } from "./telegram";
 import { supabase } from "./supabase";
 
@@ -183,6 +184,20 @@ export async function processDueSmsTasks(): Promise<number> {
         continue;
       }
 
+      // Line-type gate: never text landlines, voip, or invalid numbers.
+      // Fail-open: when the check can't run (no key / cap exhausted / error),
+      // the SMS proceeds without line-type info.
+      const lineCheck = await validatePhoneForDial(db, lead.id, lead.phone);
+      if (lineCheck.checked && !lineCheck.canSms) {
+        await db.insert(activities).values({
+          leadId: lead.id,
+          type: "system",
+          body: `📵 Nurture SMS skipped: ${lineCheck.reason}`,
+        } as any);
+        await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
+        continue;
+      }
+
       const body = personalize(template.content, lead, tw.fromNumber);
       const result = await sendTwilioSms(lead.phone, body, tw);
       if (result.status === "failed") {
@@ -290,7 +305,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
       });
       if (recent) continue;
 
-      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
       if (!scrub.pass) {
         await db.insert(activities).values({
           leadId: lead.id,

@@ -280,6 +280,13 @@ export const rentcastUsage = pgTable("rentcast_usage", {
 });
 export type RentcastUsage = typeof rentcastUsage.$inferSelect;
 
+export const numverifyUsage = pgTable("numverify_usage", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  endpoint: varchar("endpoint", { length: 120 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type NumverifyUsage = typeof numverifyUsage.$inferSelect;
+
 export const followUpMessages = pgTable("follow_up_messages", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   leadId: bigint("lead_id", { mode: "number" }).notNull(),

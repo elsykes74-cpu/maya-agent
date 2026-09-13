@@ -199,7 +199,7 @@ export const campaignsRouter = createRouter({
         }
 
         // Scrub
-        const scrub = await scrubPhone(cl.lead.phone, config.scrubDncBeforeCall || true, config.scrubLitigants || true);
+        const scrub = await scrubPhone(cl.lead.phone, config.scrubDncBeforeCall || true, config.scrubLitigants || true, cl.lead.id);
         if (!scrub.pass) {
           await db.update(campaignLeads)
             .set({ status: "skipped_dnc", scrubStatus: "fail_dnc", scrubDetails: scrub.reason })

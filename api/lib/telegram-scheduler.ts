@@ -93,7 +93,7 @@ async function processFollowUpTasks(): Promise<void> {
         continue;
       }
 
-      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
       if (!scrub.pass) {
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
         await db.insert(activities).values({

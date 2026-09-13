@@ -119,7 +119,7 @@ export const callsRouter = createRouter({
       const config = await getCallingConfig();
       if (!config?.apiKey) throw new Error("VAPI not configured — add VAPI_API_KEY in calling config");
 
-      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true);
+      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
       if (!scrub.pass) throw new Error(`Call blocked: ${scrub.reason}`);
 
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName);

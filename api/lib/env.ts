@@ -97,6 +97,11 @@ export const env = {
   // Monthly RentCast API call budget shared by the registry scan and record
   // enrichment. Defaults to 45 (headroom under the 50-call free tier).
   rentcastMonthlyCap: soft("RENTCAST_MONTHLY_CAP"),
+  // Numverify line-type/validity check (free tier: 100 lookups/mo, HTTP).
+  // Unset/missing key or exhausted cap fails OPEN — dials/SMS proceed
+  // without line-type info rather than being blocked.
+  numverifyApiKey: soft("NUMVERIFY_API_KEY"),
+  numverifyMonthlyCap: soft("NUMVERIFY_MONTHLY_CAP"),
   // Free web-search phone enrichment (Tavily, 1,000 searches/mo free).
   tavilyApiKey: soft("TAVILY_API_KEY"),
   ownerUnionId: soft("OWNER_UNION_ID"),
