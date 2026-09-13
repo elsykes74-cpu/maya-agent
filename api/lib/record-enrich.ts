@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull, or, sql } from "drizzle-orm";
 import { leads } from "../../db/schema";
 import { rentcastFetch, rentcastBudgetRemaining } from "./rentcast";
 
