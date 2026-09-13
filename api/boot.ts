@@ -685,6 +685,59 @@ app.get("/api/cron/enrich-records", handleCronEnrichRecords);
 app.post("/api/cron/enrich-records", handleCronEnrichRecords);
 
 // ---------------------------------------------------------------------------
+// Registry deed lookup — secret-gated. RentCast property records have NO sale
+// history for Hampden County, so last-purchase dates come from the Hampden
+// County Registry of Deeds itself (the actual public record).
+//
+// GET  /api/cron/deed-lookup-queue?limit=N — hot leads (pipelineStage =
+//      hot_routing) whose address was never checked for recorded deeds.
+//      Consumed by the GitHub Actions Playwright automation.
+// POST /api/cron/registry-deed-ingest — body { leadId, deeds: [{recordedDate,
+//      book, page, docType, grantor, grantee}] }. Stores the deed chain and
+//      sets lastSaleDate from the most recent recording. The registry index
+//      carries no consideration, so lastSalePrice is never set from here.
+// ---------------------------------------------------------------------------
+app.get("/api/cron/deed-lookup-queue", async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const limit = Math.max(1, Math.min(100, parseInt(c.req.query("limit") || "25", 10) || 25));
+  const db = getDb();
+  try {
+    const { getDeedLookupQueue } = await import("./lib/registry-deed");
+    const queue = await getDeedLookupQueue(db, limit);
+    return c.json({ ok: true, count: queue.length, leads: queue });
+  } catch (err: any) {
+    console.error("[cron/deed-lookup-queue] failed:", err?.message ?? err);
+    return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  }
+});
+app.post("/api/cron/registry-deed-ingest", async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const leadId = Number(body?.leadId);
+  if (!Number.isFinite(leadId) || leadId <= 0) {
+    return c.json({ error: "leadId is required" }, 400);
+  }
+  const db = getDb();
+  try {
+    const { ingestDeedLookup } = await import("./lib/registry-deed");
+    const result = await ingestDeedLookup(db, leadId, body?.deeds);
+    return c.json(result);
+  } catch (err: any) {
+    console.error("[cron/registry-deed-ingest] failed:", err?.message ?? err);
+    return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // One-shot schema repair — secret-gated. The production DB never had migration
 // 0003 (tasks/activities/offers/buyers/follow-ups/attributions/duplicate_flags)
 // applied, so every activities/tasks query 500s and the lead-detail timeline
@@ -727,6 +780,8 @@ const MIGRATE_STATEMENTS: string[] = [
   `ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "sale_history" jsonb`,
   `CREATE TABLE IF NOT EXISTS "rentcast_usage" ("id" bigserial PRIMARY KEY, "endpoint" varchar(120) NOT NULL, "created_at" timestamp NOT NULL DEFAULT now())`,
   `CREATE INDEX IF NOT EXISTS "rentcast_usage_created_at_idx" ON "rentcast_usage" ("created_at" DESC)`,
+  // 0006 — registry deed lookup: when a lead's address was checked for deeds.
+  `ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "registry_deed_checked_at" timestamptz`,
 ];
 
 async function handleCronMigrate(c: any) {

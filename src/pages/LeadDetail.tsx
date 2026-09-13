@@ -307,14 +307,39 @@ export default function LeadDetail() {
         );
       })()}
 
-      {/* Public record — deed-derived sale history (county records via RentCast) */}
+      {/* Public record — last-purchase data from county records (RentCast
+          aggregation and/or the Hampden County Registry of Deeds) */}
       {(() => {
-        const hist: Array<{ date: string | null; price: number | null }> =
-          Array.isArray((lead as any).saleHistory) ? (lead as any).saleHistory : [];
+        const rawHist = (lead as any).saleHistory;
+        const hist: Array<{ date: string | null; price: number | null; source?: string | null }> =
+          Array.isArray(rawHist) ? rawHist : [];
         const hasRecord = lead.lastSaleDate || lead.lastSalePrice || hist.length > 0;
-        if (!hasRecord) return null;
+        // A completed lookup that found nothing still renders — hiding the card
+        // would look like the lookup never ran. saleHistory=[] (or a registry
+        // deed check) marks "attempted".
+        const attempted = rawHist != null || !!(lead as any).registryDeedCheckedAt;
+        if (!hasRecord && !attempted) return null;
+        const registrySourced = hist.some((h) => h.source === 'registry');
+        const sourceNote = registrySourced
+          ? 'Source: Hampden County Registry of Deeds (recorded deeds)'
+          : 'Source: public county records via RentCast';
         const fmtMoney = (v: any) => v != null && Number(v) > 0 ? `$${Number(v).toLocaleString()}` : '—';
         const fmtD = (d: any) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+        if (!hasRecord) {
+          return (
+            <NeoTile style={{ marginBottom: 12 }}>
+              <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>
+                Public record
+              </p>
+              <p style={{ fontSize: 13, color: C.muted, margin: '0 0 4px' }}>
+                No sale history found for this address.
+              </p>
+              <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', fontStyle: 'italic' }}>
+                {sourceNote}
+              </p>
+            </NeoTile>
+          );
+        }
         const prior = hist.slice(1, 4);
         return (
           <NeoTile style={{ marginBottom: 12 }}>
@@ -347,7 +372,7 @@ export default function LeadDetail() {
               </div>
             )}
             <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', fontStyle: 'italic' }}>
-              Source: public county records via RentCast
+              {sourceNote}
             </p>
           </NeoTile>
         );

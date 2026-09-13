@@ -1,0 +1,50 @@
+# Hampden County Registry of Deeds — per-address deed lookup.
+# RentCast property records have NO sale history for Hampden County, so
+# last-purchase dates come from the registry itself. This runs a real Playwright
+# Chromium (solves the Imperva JS challenge that blocks serverless fetch),
+# searches each hot lead's address on the registry's public address index, and
+# POSTs the recorded deeds to the Vercel /api/cron/registry-deed-ingest
+# endpoint, which sets lastSaleDate + the deed chain on the lead.
+#
+# The registry index carries NO sale price (consideration is only on the
+# scanned document image) — this fills dates, never prices.
+#
+# Required repo secrets: CRON_SECRET, PROXY_URL (optional but recommended)
+#
+# Manual dispatch only until the flow is verified on real addresses; a weekly
+# schedule gets added after the first clean runs.
+
+name: Registry Deed Lookup
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max hot-lead addresses to check per run"
+        required: false
+        default: "10"
+
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright
+        run: |
+          npm install playwright playwright-extra puppeteer-extra-plugin-stealth
+          npx playwright install chromium --with-deps
+
+      - name: Run registry deed lookup
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          PROXY_URL: ${{ secrets.PROXY_URL }}
+          DEED_LIMIT: ${{ inputs.limit || '10' }}
+        # Headed Chromium under xvfb + stealth plugin + residential proxy:
+        # the registry's bot management bounces headless/datacenter sessions.
+        run: xvfb-run -a node scripts/registry-deed-lookup.mjs

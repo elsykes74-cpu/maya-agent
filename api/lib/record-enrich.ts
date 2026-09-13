@@ -187,7 +187,8 @@ export async function enrichHotLeadRecords(
     where: and(
       or(isNull(leads.saleHistory), attempted),
       isNull(leads.lastSaleDate),
-      or(eq(leads.pipelineStage, "hot_routing" as any), eq(leads.motivationLevel, "hot" as any))
+      // Canonical Hot definition: pipelineStage = hot_routing (score 60+).
+      eq(leads.pipelineStage, "hot_routing" as any)
     ),
     orderBy: [desc(leads.leadScore)],
     limit: n,

@@ -244,7 +244,10 @@ export const leads = pgTable("leads", {
   // Deed-derived sale history from RentCast property records (public records /
   // tax assessor aggregation). lastSaleDate / lastSalePrice columns hold the
   // latest; this keeps the full chain for the UI timeline.
-  saleHistory: jsonb("sale_history").$type<Array<{ date: string | null; price: number | null; type?: string | null }>>(),
+  saleHistory: jsonb("sale_history").$type<Array<{ date: string | null; price: number | null; type?: string | null; source?: string | null; book?: string | null; page?: string | null }>>(),
+  // Hampden County Registry of Deeds per-address lookup (RentCast has no sale
+  // history for Hampden County). When the address was last checked for deeds.
+  registryDeedCheckedAt: timestamp("registry_deed_checked_at"),
 });
 
 export type Lead = typeof leads.$inferSelect;
