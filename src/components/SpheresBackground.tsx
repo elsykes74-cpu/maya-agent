@@ -1,3 +1,6 @@
+import { useState, useEffect } from 'react';
+import { THEME_EVENT, currentThemeIsDark } from '../hooks/useDarkMode';
+
 const SPHERES = [
   { id: 1, cx: 390, cy: 80,  r: 150, anim: 'sphere-float-a', dur: 20, delay: 0 },
   { id: 2, cx: 55,  cy: 315, r: 168, anim: 'sphere-float-b', dur: 26, delay: 3 },
@@ -21,6 +24,16 @@ const SPHERE_GRADIENT = [
 ].join(' ');
 
 export function SpheresBackground() {
+  // The dark wallpaper only makes sense in dark mode. In light mode it stays
+  // hidden so the body's light gradient shows through (otherwise white cards
+  // float on a dark backdrop).
+  const [isDark, setIsDark] = useState(currentThemeIsDark);
+  useEffect(() => {
+    const onTheme = (e: Event) => setIsDark((e as CustomEvent<boolean>).detail === true);
+    window.addEventListener(THEME_EVENT, onTheme);
+    return () => window.removeEventListener(THEME_EVENT, onTheme);
+  }, []);
+  if (!isDark) return null;
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: -1, background: '#131316', overflow: 'hidden', pointerEvents: 'none' }}>
       <div style={{
