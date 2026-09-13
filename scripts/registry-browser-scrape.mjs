@@ -69,18 +69,45 @@ const fromStr = alisDate(from);
 const toStr = alisDate(to);
 console.log(`date window: ${fromStr} → ${toStr}`);
 
-// Establish a normal session via the home page first (cold deep-links bounce).
+// Establish a normal session by CLICKING through the UI (direct deep-links
+// bounce). Home → "Search Registry Records" → "Entry Date" tab.
 await page.goto(HOME, { waitUntil: "domcontentloaded", timeout: 60000 });
 await sleep(3000);
 console.log("home title:", await page.title());
+
+async function clickThroughToEntryDate() {
+  // 1. Click "Search Registry Records" from the home page.
+  const searchLink = page.getByRole("link", { name: /search registry records/i });
+  if (await searchLink.count()) {
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {}),
+      searchLink.first().click(),
+    ]);
+    await sleep(2000);
+  }
+  console.log("after search click:", page.url(), "|", await page.title());
+  // 2. Click the "Entry Date" tab.
+  const tab = page.getByRole("link", { name: /entry date/i });
+  if (await tab.count()) {
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {}),
+      tab.first().click(),
+    ]);
+    await sleep(2000);
+  } else {
+    // Fallback: direct tab URL (worked for rendering the form).
+    await page.goto(ENTRY_DATE_TAB, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(2000);
+  }
+  console.log("entry date page:", page.url(), "|", await page.title());
+}
 
 let totalFound = 0;
 let totalAdded = 0;
 
 for (const docType of DOC_TYPES) {
   console.log(`\n── doc type ${docType} ──`);
-  await page.goto(ENTRY_DATE_TAB, { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(2000);
+  await clickThroughToEntryDate();
 
   const formPresent = await page.$('form[name="WW413R00"]');
   if (!formPresent) {
@@ -101,11 +128,21 @@ for (const docType of DOC_TYPES) {
   await page.selectOption('select[name="W9ABR"]', want);
   console.log(`W9ABR set to: ${want} (options seen: ${optionValues.length})`);
 
-  // Submit and wait for the results page (LR13AP) or a no-results message.
+  // Submit: click the submit button; if nothing navigates, fall back to a
+  // native form submit (the site's own rg413j() handler runs on submit).
+  const beforeUrl = page.url();
   await Promise.all([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => {}),
+    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {}),
     page.click('input[type="submit"], button[type="submit"]'),
   ]);
+  await sleep(3000);
+  if (page.url() === beforeUrl) {
+    console.log("click did not navigate — trying native form submit");
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 90000 }).catch(() => {}),
+      page.$eval('form[name="WW413R00"]', (f) => f.submit()),
+    ]);
+  }
   await sleep(4000);
 
   // Poll for results content (the form's spinner can delay rendering).
