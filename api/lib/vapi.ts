@@ -261,3 +261,88 @@ export async function scrubPhone(phone: string, scrubDnc: boolean, _scrubLitigan
 
   return result;
 }
+
+/**
+ * Manual test call via VAPI (no lead required). Uses the configured Maya
+ * assistant; the assistant's own voice/settings apply.
+ */
+export async function createVapiTestCall(
+  phone: string,
+  name = "",
+): Promise<{ id: string } | null> {
+  const config = await getCallingConfig();
+  if (!config || !config.apiKey) {
+    console.error("Vapi API key not configured");
+    return null;
+  }
+  const assistantId =
+    config.assistantId || process.env.VAPI_ASSISTANT_ID || DEFAULT_VAPI_ASSISTANT_ID;
+  const digits = phone.replace(/\D/g, "");
+  const e164 = digits.length === 10 ? `+1${digits}` : digits.startsWith("+") ? phone : `+${digits}`;
+
+  const body: VapiCallRequest = {
+    phoneNumberId: config.fromPhoneNumber || undefined,
+    customer: { number: e164, name: name || undefined },
+    maxDurationSeconds: 300,
+    assistantOverrides: {
+      variableValues: {
+        name: name || "there",
+        sellerName: name || "there",
+        agentName: "Erick",
+      },
+    },
+  };
+  if (assistantId) body.assistantId = assistantId;
+
+  const res = await fetch(resolveVapiCallEndpoint(config.apiEndpoint), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    console.error("Vapi test-call error:", await res.text());
+    return null;
+  }
+  const data = (await res.json()) as any;
+  return data?.id ? { id: data.id } : null;
+}
+
+export async function getVapiCallStatus(
+  callId: string,
+): Promise<{ status: string; transcript: string | null } | null> {
+  const config = await getCallingConfig();
+  if (!config || !config.apiKey) return null;
+  const res = await fetch(`https://api.vapi.ai/call/${callId}`, {
+    headers: { Authorization: `Bearer ${config.apiKey}` },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as any;
+  return { status: String(data?.status ?? "unknown"), transcript: data?.transcript ?? null };
+}
+
+/** Best-effort end of a VAPI call (DELETE cancels queued calls; live calls end via timeout). */
+export async function endVapiCall(callId: string): Promise<boolean> {
+  const config = await getCallingConfig();
+  if (!config || !config.apiKey) return false;
+  try {
+    const res = await fetch(`https://api.vapi.ai/call/${callId}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function isVapiConfigured(): Promise<boolean> {
+  try {
+    const config = await getCallingConfig();
+    return !!(config && config.apiKey);
+  } catch {
+    return false;
+  }
+}

@@ -15,15 +15,6 @@ type CallStage = 'idle' | 'connecting' | 'ringing' | 'in_progress' | 'completed'
 
 interface TranscriptTurn { speaker: 'maya' | 'user'; text: string; time: number; }
 
-const VOICES = [
-  { id: 'Google.en-US-Neural2-F', label: 'Aria', style: 'Most Natural' },
-  { id: 'Google.en-US-Neural2-H', label: 'Emma', style: 'Expressive' },
-  { id: 'Google.en-US-Neural2-C', label: 'Clara', style: 'Bright' },
-  { id: 'Polly.Ruth-Neural', label: 'Ruth', style: 'Conversational' },
-  { id: 'Polly.Joanna-Neural', label: 'Joanna', style: 'Warm' },
-  { id: 'Polly.Matthew-Neural', label: 'Matthew', style: 'Pro' },
-];
-
 export default function CallCenter() {
   const [exp, setExp] = useState<number | null>(null);
   const [batchMode, setBatchMode] = useState(false);
@@ -38,14 +29,13 @@ export default function CallCenter() {
   const [number, setNumber] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [timer, setTimer] = useState(0);
-  const [selectedVoice, setSelectedVoice] = useState('Google.en-US-Neural2-F');
+  const [selectedVoice] = useState('maya-default');
   const [transcript, setTranscript] = useState<TranscriptTurn[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   const placeCallMut = trpc.maya.placeCall.useMutation();
   const hangUpMut = trpc.maya.hangUp.useMutation();
-  const { data: voiceList } = trpc.maya.listVoices.useQuery();
   const { data: configData } = trpc.maya.checkConfig.useQuery(undefined, { refetchOnWindowFocus: false });
   const { data: transcriptData } = trpc.maya.getTranscript.useQuery(
     { sid: sid ?? undefined },
@@ -78,7 +68,7 @@ export default function CallCenter() {
 
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
-  const twilioMissing = configData ? !configData.twilioConfigured : false;
+  const vapiMissing = configData ? !configData.vapiConfigured : false;
 
   const placeCall = useCallback(async (phone: string, name = '', address = '') => {
     setError(null);
@@ -199,7 +189,7 @@ export default function CallCenter() {
         </NeoTile>
       )}
 
-      {twilioMissing && <TwilioSetupCard />}
+      {vapiMissing && <VapiSetupCard />}
 
       {/* Test Call with Maya */}
       <NeoTile style={{ marginBottom: 20 }}>
@@ -225,21 +215,10 @@ export default function CallCenter() {
           />
         </div>
 
-        {/* Voice selector */}
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto' }} className="hide-scrollbar">
-          {(voiceList?.voices ?? VOICES).map((v: any) => (
-            <button
-              key={v.id}
-              onClick={() => setSelectedVoice(v.id)}
-              className="press-sm"
-              aria-label={`Select voice ${v.label}`}
-              aria-pressed={selectedVoice === v.id}
-              style={{ padding: '8px 16px', borderRadius: 14, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', border: selectedVoice === v.id ? `1.5px solid ${C.purple}` : '1.5px solid transparent', background: selectedVoice === v.id ? C.purpleS : 'rgba(0,0,0,0.04)', color: selectedVoice === v.id ? C.purple : C.muted, cursor: 'pointer' }}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
+        {/* Maya calls through VAPI with her configured voice */}
+        <p style={{ fontSize: 12, color: C.muted, margin: '0 0 16px', fontWeight: 600 }}>
+          Test calls go out through VAPI as Maya, using her configured voice.
+        </p>
 
         {error && <CallError error={error} onDismiss={() => setError(null)} />}
 
@@ -316,11 +295,10 @@ export default function CallCenter() {
   );
 }
 
-const TWILIO_ENV_VARS = [
-  { name: 'TWILIO_ACCOUNT_SID', hint: 'Starts with AC… — found on your Twilio Console dashboard' },
-  { name: 'TWILIO_AUTH_TOKEN', hint: 'Found next to your Account SID on the Twilio Console' },
-  { name: 'TWILIO_FROM_NUMBER', hint: 'E.164 format, e.g. +14135551234 — your purchased Twilio number' },
-  { name: 'APP_URL', hint: 'Your Vercel deployment URL, e.g. https://maya-agent-xxx.vercel.app' },
+const VAPI_ENV_VARS = [
+  { name: 'VAPI_API_KEY', hint: 'Private API key from the VAPI dashboard (Org settings → API Keys)' },
+  { name: 'VAPI_ASSISTANT_ID', hint: 'Maya\u2019s assistant ID from the VAPI dashboard' },
+  { name: 'VAPI_PHONE_NUMBER_ID', hint: 'Phone number ID from VAPI → Phone Numbers (your +16208789172)' },
 ];
 
 function CopyButton({ text }: { text: string }) {
@@ -335,7 +313,7 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function TwilioSetupCard() {
+function VapiSetupCard() {
   return (
     <NeoTile style={{ marginBottom: 20, border: `1px solid ${C.orangeL}` }}>
       <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
@@ -343,12 +321,12 @@ function TwilioSetupCard() {
           <AlertTriangle size={18} color={C.orange} strokeWidth={2} />
         </NeoIcon>
         <div>
-          <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>Twilio Setup Required</p>
+          <p style={{ fontSize: 16, fontWeight: 700, color: C.text, margin: 0 }}>VAPI Setup Required</p>
           <p style={{ fontSize: 13, color: C.muted, margin: '2px 0 0' }}>Add these env vars in Vercel → Settings → Environment Variables</p>
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {TWILIO_ENV_VARS.map(v => (
+        {VAPI_ENV_VARS.map(v => (
           <div key={v.name} className="neo-pressed-sm" style={{ padding: '10px 12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 13, fontWeight: 700, color: C.text }}>{v.name}</span>
@@ -359,21 +337,20 @@ function TwilioSetupCard() {
         ))}
       </div>
       <a
-        href="https://console.twilio.com"
+        href="https://dashboard.vapi.ai"
         target="_blank"
         rel="noopener noreferrer"
         style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, padding: '10px 0', borderRadius: 14, background: C.orangeS, color: C.orange, fontSize: 14, fontWeight: 700, textDecoration: 'none' }}
       >
-        Open Twilio Console <ExternalLink size={14} />
+        Open VAPI Dashboard <ExternalLink size={14} />
       </a>
     </NeoTile>
   );
 }
 
 function CallError({ error, onDismiss }: { error: string; onDismiss: () => void }) {
-  const isSetup = error.toLowerCase().includes('missing env') || error.toLowerCase().includes('not configured');
-  const isTrialRestriction = error.toLowerCase().includes('not verified') || error.toLowerCase().includes('trial');
-  const isAuth = error.toLowerCase().includes('authentication failed') || error.toLowerCase().includes('twilio_auth');
+  const isSetup = error.toLowerCase().includes('missing env') || error.toLowerCase().includes('not configured') || error.toLowerCase().includes('vapi');
+  const isAuth = error.toLowerCase().includes('authentication failed');
 
   return (
     <div style={{ marginBottom: 14, borderRadius: 14, background: C.redS, border: `1px solid ${C.redL}`, overflow: 'hidden' }}>
@@ -384,12 +361,7 @@ function CallError({ error, onDismiss }: { error: string; onDismiss: () => void 
       </div>
       {(isSetup || isAuth) && (
         <div style={{ padding: '0 14px 12px', fontSize: 12, color: C.red, fontWeight: 500 }}>
-          Add <strong>TWILIO_ACCOUNT_SID</strong>, <strong>TWILIO_AUTH_TOKEN</strong>, and <strong>TWILIO_FROM_NUMBER</strong> in Vercel → Settings → Environment Variables, then redeploy.
-        </div>
-      )}
-      {isTrialRestriction && (
-        <div style={{ padding: '0 14px 12px', fontSize: 12, color: C.red, fontWeight: 500 }}>
-          Go to <strong>twilio.com/console</strong> → Verified Caller IDs to add this number, or upgrade from a trial account.
+          Check <strong>VAPI_API_KEY</strong>, <strong>VAPI_ASSISTANT_ID</strong>, and <strong>VAPI_PHONE_NUMBER_ID</strong> in Vercel → Settings → Environment Variables, then redeploy.
         </div>
       )}
     </div>

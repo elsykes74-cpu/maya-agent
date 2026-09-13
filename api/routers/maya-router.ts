@@ -1,46 +1,40 @@
 import { TRPCError } from "@trpc/server";
-import { Buffer } from "node:buffer";
 import { z } from "zod";
 import { createRouter, publicQuery } from "../middleware";
-import { placeTwilioOutboundCall } from "../lib/twilio";
-import { supabase } from "../lib/supabase";
-import { env } from "../lib/env";
+import {
+  createVapiTestCall,
+  endVapiCall,
+  getVapiCallStatus,
+  isVapiConfigured,
+} from "../lib/vapi";
 
+// Legacy voice list kept for API compatibility; VAPI test calls use Maya's
+// configured assistant voice, so the dashboard no longer offers a selector.
 const VOICES = [
-  { id: "Google.en-US-Neural2-F", label: "Aria", gender: "Female", style: "Most Natural (Recommended)" },
-  { id: "Google.en-US-Neural2-H", label: "Emma", gender: "Female", style: "Expressive & Warm" },
-  { id: "Google.en-US-Neural2-C", label: "Clara", gender: "Female", style: "Bright & Clear" },
-  { id: "Polly.Ruth-Neural", label: "Ruth", gender: "Female", style: "Natural & Conversational" },
-  { id: "Polly.Joanna-Neural", label: "Joanna", gender: "Female", style: "Warm & Polished" },
-  { id: "Polly.Matthew-Neural", label: "Matthew", gender: "Male", style: "Professional & Natural" },
+  { id: "maya-default", label: "Maya", gender: "Female", style: "Configured VAPI voice" },
 ];
 
 const activeCalls = new Map<string, { to: string; status: string; startedAt: Date }>();
 
-async function getTwilioConfig() {
-  const { data } = await supabase
-    .from("ai_config")
-    .select("twilio_account_sid, twilio_auth_token, twilio_from_number")
-    .order("id")
-    .limit(1)
-    .single();
-  const accountSid = data?.twilio_account_sid || process.env.TWILIO_ACCOUNT_SID || "";
-  const authToken = data?.twilio_auth_token || process.env.TWILIO_AUTH_TOKEN || "";
-  const fromNumber = data?.twilio_from_number || process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_PHONE_NUMBER || "";
-  return { accountSid, authToken, fromNumber };
+function mapVapiStatus(s: string): "idle" | "ringing" | "in_progress" | "completed" {
+  const v = s.toLowerCase();
+  if (v === "in-progress" || v === "forwarding") return "in_progress";
+  if (v === "ended") return "completed";
+  if (v === "queued" || v === "ringing") return "ringing";
+  return "idle";
 }
 
 export const mayaRouter = createRouter({
   listVoices: publicQuery.query(() => ({ voices: VOICES })),
 
   checkConfig: publicQuery.query(async () => {
-    const { accountSid, authToken, fromNumber } = await getTwilioConfig();
-    const missing = [
-      !accountSid && "TWILIO_ACCOUNT_SID",
-      !authToken && "TWILIO_AUTH_TOKEN",
-      !fromNumber && "TWILIO_FROM_NUMBER",
-    ].filter(Boolean) as string[];
-    return { twilioConfigured: missing.length === 0, missingVars: missing };
+    const vapiConfigured = await isVapiConfigured();
+    return {
+      vapiConfigured,
+      // Kept for older clients that read twilioConfigured.
+      twilioConfigured: vapiConfigured,
+      missingVars: vapiConfigured ? [] : ["VAPI_API_KEY"],
+    };
   }),
 
   placeCall: publicQuery
@@ -48,59 +42,30 @@ export const mayaRouter = createRouter({
       to: z.string(),
       name: z.string().default(""),
       address: z.string().default(""),
-      voice: z.string().default("Google.en-US-Neural2-F"),
+      voice: z.string().default("maya-default"),
     }))
-    .mutation(async ({ input, ctx }) => {
-      const { accountSid, authToken, fromNumber } = await getTwilioConfig();
-      if (!accountSid || !authToken || !fromNumber) {
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Twilio not configured — add Account SID, Auth Token, and From Number in AI Config.",
-        });
+    .mutation(async ({ input }) => {
+      const digits = input.to.replace(/\D/g, "");
+      if (digits.length < 10) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Enter a valid 10-digit phone number." });
       }
-      // Use the actual incoming request host so Twilio webhooks hit the right URL
-      const proto = ctx.req.headers.get("x-forwarded-proto") ?? "https";
-      const host = ctx.req.headers.get("x-forwarded-host") ?? ctx.req.headers.get("host") ?? "";
-      const appUrl = host ? `${proto}://${host}` : env.appUrl;
-      const result = await placeTwilioOutboundCall({
-        to: input.to,
-        name: input.name,
-        address: input.address,
-        appUrl,
-        voice: input.voice,
-        accountSid,
-        authToken,
-        fromNumber,
-      });
-
-      if (!result.sid) {
+      const call = await createVapiTestCall(input.to, input.name);
+      if (!call) {
         throw new TRPCError({
           code: "BAD_GATEWAY",
-          message: result.error ?? "Twilio call failed.",
+          message: "VAPI call failed — check the VAPI API key and assistant in calling config.",
         });
       }
-
-      activeCalls.set(result.sid, { to: input.to, status: "ringing", startedAt: new Date() });
-      return { sid: result.sid, status: "ringing" };
+      activeCalls.set(call.id, { to: input.to, status: "ringing", startedAt: new Date() });
+      return { sid: call.id, status: "ringing" };
     }),
 
   hangUp: publicQuery
     .input(z.object({ sid: z.string() }))
     .mutation(async ({ input }) => {
-      const { accountSid, authToken } = await getTwilioConfig();
-      if (!accountSid || !authToken) {
-        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Twilio not configured" });
-      }
-      const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Calls/${input.sid}.json`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString("base64")}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: "Status=completed",
-      });
-      if (!resp.ok) throw new TRPCError({ code: "BAD_GATEWAY", message: `Twilio hangup failed: ${resp.status}` });
+      // Best-effort: VAPI DELETE cancels queued calls; a live test call ends
+      // on its own via maxDurationSeconds if this misses.
+      await endVapiCall(input.sid).catch(() => false);
       activeCalls.delete(input.sid);
       return { success: true };
     }),
@@ -108,8 +73,13 @@ export const mayaRouter = createRouter({
   getTranscript: publicQuery
     .input(z.object({ sid: z.string().optional() }))
     .query(async ({ input }) => {
-      if (!input.sid) return { transcript: null, status: "idle" };
-      const call = activeCalls.get(input.sid);
-      return { transcript: null, status: call?.status ?? "completed" };
+      if (!input.sid) return { transcript: null, status: "idle" as const };
+      const live = await getVapiCallStatus(input.sid).catch(() => null);
+      if (!live) {
+        const call = activeCalls.get(input.sid);
+        return { transcript: null, status: call?.status ?? "idle" };
+      }
+      if (live.status.toLowerCase() === "ended") activeCalls.delete(input.sid);
+      return { transcript: live.transcript, status: mapVapiStatus(live.status) };
     }),
 });
