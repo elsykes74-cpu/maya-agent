@@ -119,6 +119,7 @@ export async function ingestDeedLookup(
       book: d?.book != null ? String(d.book) : null,
       page: d?.page != null ? String(d.page) : null,
       docType: d?.docType != null ? String(d.docType).slice(0, 60) : null,
+      docAmount: d?.docAmount != null ? String(d.docAmount).slice(0, 32) : null,
       grantor: d?.grantor != null ? String(d.grantor).slice(0, 255) : null,
       grantee: d?.grantee != null ? String(d.grantee).slice(0, 255) : null,
     }))
