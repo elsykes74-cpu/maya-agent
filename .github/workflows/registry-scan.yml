@@ -33,7 +33,7 @@ jobs:
 
       - name: Install Playwright
         run: |
-          npm install playwright
+          npm install playwright playwright-extra puppeteer-extra-plugin-stealth
           npx playwright install chromium --with-deps
 
       - name: Run registry browser scrape
@@ -42,4 +42,6 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
           LOOKBACK_DAYS: ${{ inputs.lookback_days || '9' }}
-        run: node scripts/registry-browser-scrape.mjs
+        # Headed Chromium under xvfb + stealth plugin + residential proxy:
+        # the registry's bot management bounces headless/datacenter sessions.
+        run: xvfb-run -a node scripts/registry-browser-scrape.mjs
