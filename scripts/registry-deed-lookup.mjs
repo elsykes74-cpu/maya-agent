@@ -277,7 +277,15 @@ const page = await context.newPage();
 
 // 1. Queue of hot-lead addresses to check.
 const queue = await authedGet(`${QUEUE_URL}?limit=${DEED_LIMIT}${DEED_RETRY ? "&retry=1" : ""}`);
-const leads = Array.isArray(queue?.leads) ? queue.leads : [];
+const onlyIds = new Set(
+  String(process.env.DEED_LEAD_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+const leads = (Array.isArray(queue?.leads) ? queue.leads : []).filter(
+  (l) => onlyIds.size === 0 || onlyIds.has(String(l.id))
+);
 console.log(`queue: ${queue?.count ?? leads.length} addresses${DEED_RETRY ? " (retry mode)" : ""}`);
 if (leads.length === 0) {
   await browser.close();
