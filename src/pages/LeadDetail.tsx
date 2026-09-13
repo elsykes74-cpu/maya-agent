@@ -307,6 +307,52 @@ export default function LeadDetail() {
         );
       })()}
 
+      {/* Public record — deed-derived sale history (county records via RentCast) */}
+      {(() => {
+        const hist: Array<{ date: string | null; price: number | null }> =
+          Array.isArray((lead as any).saleHistory) ? (lead as any).saleHistory : [];
+        const hasRecord = lead.lastSaleDate || lead.lastSalePrice || hist.length > 0;
+        if (!hasRecord) return null;
+        const fmtMoney = (v: any) => v != null && Number(v) > 0 ? `$${Number(v).toLocaleString()}` : '—';
+        const fmtD = (d: any) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+        const prior = hist.slice(1, 4);
+        return (
+          <NeoTile style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>
+              Public record
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: prior.length ? 8 : 0 }}>
+              <div style={{ background: C.bg, borderRadius: 10, padding: '8px 10px' }}>
+                <p style={{ fontSize: 10, color: C.muted, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 2px' }}>Last purchased</p>
+                <p style={{ fontSize: 14, color: C.text, fontWeight: 700, margin: 0 }}>{fmtD(lead.lastSaleDate ?? hist[0]?.date)}</p>
+              </div>
+              <div style={{ background: C.bg, borderRadius: 10, padding: '8px 10px' }}>
+                <p style={{ fontSize: 10, color: C.muted, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 2px' }}>Price</p>
+                <p style={{ fontSize: 14, color: C.text, fontWeight: 700, margin: 0 }}>{fmtMoney(lead.lastSalePrice ?? hist[0]?.price)}</p>
+              </div>
+              <div style={{ background: C.bg, borderRadius: 10, padding: '8px 10px' }}>
+                <p style={{ fontSize: 10, color: C.muted, fontWeight: 700, textTransform: 'uppercase', margin: '0 0 2px' }}>Owned</p>
+                <p style={{ fontSize: 14, color: C.text, fontWeight: 700, margin: 0 }}>
+                  {lead.ownershipYears != null ? `${lead.ownershipYears} yrs` : '—'}
+                </p>
+              </div>
+            </div>
+            {prior.length > 0 && (
+              <div style={{ marginBottom: 4 }}>
+                {prior.map((s, i) => (
+                  <p key={i} style={{ fontSize: 12, color: C.muted, margin: '0 0 2px', lineHeight: 1.5 }}>
+                    • {fmtD(s.date)} — {fmtMoney(s.price)}
+                  </p>
+                ))}
+              </div>
+            )}
+            <p style={{ fontSize: 11, color: C.muted, margin: '4px 0 0', fontStyle: 'italic' }}>
+              Source: public county records via RentCast
+            </p>
+          </NeoTile>
+        );
+      })()}
+
       {/* Craigslist posting — the actionable contact path for cl: leads */}
       {lead.externalId?.startsWith('cl:') && (() => {
         const { url, body } = clPosting(lead.notes);

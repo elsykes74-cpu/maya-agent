@@ -94,6 +94,9 @@ export const env = {
   registryZips: soft("REGISTRY_ZIPS"),
   // Max property records to request per ZIP (RentCast bills per request/record).
   registryLimitPerZip: soft("REGISTRY_LIMIT_PER_ZIP"),
+  // Monthly RentCast API call budget shared by the registry scan and record
+  // enrichment. Defaults to 45 (headroom under the 50-call free tier).
+  rentcastMonthlyCap: soft("RENTCAST_MONTHLY_CAP"),
   // Free web-search phone enrichment (Tavily, 1,000 searches/mo free).
   tavilyApiKey: soft("TAVILY_API_KEY"),
   ownerUnionId: soft("OWNER_UNION_ID"),

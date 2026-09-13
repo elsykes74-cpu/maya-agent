@@ -1,6 +1,7 @@
 import { leads, scrapeRuns } from "../../db/schema";
 import { env } from "./env";
 import { routeLead } from "./pipeline-engine";
+import { rentcastFetch } from "./rentcast";
 
 type Db = ReturnType<typeof import("../queries/connection").getDb>;
 
@@ -8,7 +9,10 @@ type Db = ReturnType<typeof import("../queries/connection").getDb>;
 // anti-bot challenge (unlike the Imperva-protected county registry portal).
 // Auth is a static X-Api-Key header. Target ZIPs / per-ZIP limit are env
 // configurable so coverage and API spend can be tuned without a code change.
-const RENTCAST_BASE = "https://api.rentcast.io/v1";
+//
+// All calls go through the quota-guarded rentcastFetch (monthly cap, default
+// 45 — headroom under the 50-call free tier). When the budget is exhausted the
+// scan stops quietly instead of firing billable overage requests.
 
 // Western MA (Hampden / Hampshire / Franklin / Berkshire) postal codes.
 const DEFAULT_ZIPS = [
@@ -54,14 +58,9 @@ function limitPerZip(): number {
   return Number.isFinite(n) && n > 0 && n <= 500 ? n : DEFAULT_LIMIT_PER_ZIP;
 }
 
-async function fetchZip(zip: string, limit: number): Promise<any[]> {
-  const url = `${RENTCAST_BASE}/properties?zipCode=${encodeURIComponent(zip)}&limit=${limit}`;
-  const res = await fetch(url, {
-    headers: { "X-Api-Key": env.rentcastApiKey, Accept: "application/json" },
-    signal: AbortSignal.timeout(20000),
-  });
-  if (!res.ok) throw new Error(`RentCast ${zip} → ${res.status}`);
-  const data: any = await res.json();
+async function fetchZip(db: Db, zip: string, limit: number): Promise<any[] | null> {
+  const data = await rentcastFetch(db, `/properties?zipCode=${encodeURIComponent(zip)}&limit=${limit}`);
+  if (data === null) return null; // monthly quota exhausted — stop quietly
   return Array.isArray(data) ? data : Array.isArray(data?.properties) ? data.properties : [];
 }
 
@@ -145,7 +144,12 @@ export async function runRegistryScrape(db: Db): Promise<RegistryResult> {
     const limit = limitPerZip();
 
     for (const zip of targetZips()) {
-      const props = await fetchZip(zip, limit);
+      const props = await fetchZip(db, zip, limit);
+      if (props === null) {
+        // Quota exhausted mid-scan: keep what we have, report it honestly.
+        error = "RentCast monthly quota exhausted — scan stopped early, resumes next month.";
+        break;
+      }
       found += props.length;
 
       for (const p of props) {

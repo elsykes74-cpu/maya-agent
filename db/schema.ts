@@ -238,6 +238,12 @@ export const leads = pgTable("leads", {
   // ── External dedup id (e.g. "cl:1234567890" for Craigslist posts) ──────────
   // Indexed + unique so concurrent scrape runs can't double-insert the same lead.
   externalId: varchar("external_id", { length: 64 }).unique(),
+
+  // ── Public-record enrichment ──────────────────────────────────────────────
+  // Deed-derived sale history from RentCast property records (public records /
+  // tax assessor aggregation). lastSaleDate / lastSalePrice columns hold the
+  // latest; this keeps the full chain for the UI timeline.
+  saleHistory: jsonb("sale_history").$type<Array<{ date: string | null; price: number | null; type?: string | null }>>(),
 });
 
 export type Lead = typeof leads.$inferSelect;
@@ -259,6 +265,16 @@ export const scrapeRuns = pgTable("scrape_runs", {
   finishedAt: timestamp("finished_at"),
 });
 export type ScrapeRun = typeof scrapeRuns.$inferSelect;
+
+// ── RentCast quota ledger ─────────────────────────────────────────────────────
+// One row per RentCast API call so a monthly cap can be enforced in code and
+// the free tier is never exceeded (registry scan + record enrichment share it).
+export const rentcastUsage = pgTable("rentcast_usage", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  endpoint: varchar("endpoint", { length: 120 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export type RentcastUsage = typeof rentcastUsage.$inferSelect;
 
 export const followUpMessages = pgTable("follow_up_messages", {
   id: bigserial("id", { mode: "number" }).primaryKey(),

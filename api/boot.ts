@@ -655,6 +655,35 @@ app.post("/api/cron/enrich", async (c: any) => {
 });
 
 // ---------------------------------------------------------------------------
+// Public-record enrichment backfill — secret-gated. Looks up hot leads'
+// addresses on RentCast property records (public county records / tax
+// assessor aggregation): last purchase date + price, full sale history,
+// ownership tenure, assessed value, structural details.
+//
+// Quota-guarded by design: every lookup counts against RENTCAST_MONTHLY_CAP
+// (default 45, shared with the weekly registry scan). ?limit=N caps records
+// per invocation (default 10); the run stops quietly when the budget is
+// exhausted and resumes next month. The free tier is never exceeded by code.
+// ---------------------------------------------------------------------------
+const handleCronEnrichRecords = async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const limit = Math.max(1, Math.min(100, parseInt(c.req.query("limit") || "10", 10) || 10));
+  const db = getDb();
+  try {
+    const { enrichHotLeadRecords } = await import("./lib/record-enrich");
+    const result = await enrichHotLeadRecords(db, limit);
+    return c.json(result);
+  } catch (err: any) {
+    console.error("[cron/enrich-records] failed:", err?.message ?? err);
+    return c.json({ ok: false, error: err?.message ?? String(err) }, 500);
+  }
+};
+app.get("/api/cron/enrich-records", handleCronEnrichRecords);
+app.post("/api/cron/enrich-records", handleCronEnrichRecords);
+
+// ---------------------------------------------------------------------------
 // One-shot schema repair — secret-gated. The production DB never had migration
 // 0003 (tasks/activities/offers/buyers/follow-ups/attributions/duplicate_flags)
 // applied, so every activities/tasks query 500s and the lead-detail timeline
@@ -693,6 +722,10 @@ const MIGRATE_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS "duplicate_flags" ("id" bigserial PRIMARY KEY, "lead_id" bigint NOT NULL, "duplicate_lead_id" bigint NOT NULL, "match_score" integer DEFAULT 0, "match_fields" text, "status" "duplicate_flag_status" NOT NULL DEFAULT 'pending', "resolved_by" bigint, "resolved_at" timestamp, "created_at" timestamp NOT NULL DEFAULT now())`,
   `CREATE INDEX IF NOT EXISTS "duplicate_flags_lead_id_idx" ON "duplicate_flags" ("lead_id")`,
   `CREATE UNIQUE INDEX IF NOT EXISTS "duplicate_flags_pair_idx" ON "duplicate_flags" (LEAST("lead_id", "duplicate_lead_id"), GREATEST("lead_id", "duplicate_lead_id"))`,
+  // 0005 — public-record enrichment: sale_history on leads + rentcast_usage ledger.
+  `ALTER TABLE "leads" ADD COLUMN IF NOT EXISTS "sale_history" jsonb`,
+  `CREATE TABLE IF NOT EXISTS "rentcast_usage" ("id" bigserial PRIMARY KEY, "endpoint" varchar(120) NOT NULL, "created_at" timestamp NOT NULL DEFAULT now())`,
+  `CREATE INDEX IF NOT EXISTS "rentcast_usage_created_at_idx" ON "rentcast_usage" ("created_at" DESC)`,
 ];
 
 async function handleCronMigrate(c: any) {
