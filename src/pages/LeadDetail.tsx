@@ -61,6 +61,40 @@ function clPosting(notes: string | null | undefined): { url: string | null; body
   return { url, body };
 }
 
+/** Zillow / Realtor.com deep links built from the property address. */
+function listingLinks(address: string): { zillow: string; realtor: string } {
+  const slug = address.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const realtorSlug = address.replace(/,\s*/g, '_').replace(/\s+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '');
+  return {
+    zillow: `https://www.zillow.com/homes/${slug}_rb/`,
+    realtor: `https://www.realtor.com/realestateandhomes-search/${realtorSlug}`,
+  };
+}
+
+/** Human-readable lead source from the external id prefix. */
+function sourceLabel(externalId: string | null | undefined): string {
+  if (!externalId) return 'Manual import';
+  if (externalId.startsWith('cl:')) return 'Craigslist';
+  if (externalId.startsWith('rc:')) return 'RentCast property data';
+  if (externalId.startsWith('registry')) return 'Hampden Registry filing';
+  return 'Import';
+}
+
+/** Scoring-model signals (mirrors computeLeadScore weights in api/lib/lead-scorer.ts). */
+const SCORE_SIGNALS: { key: string; label: string; points: number }[] = [
+  { key: 'isPreForeclosure', label: 'Pre-foreclosure', points: 25 },
+  { key: 'hasTaxDelinquency', label: 'Tax delinquent', points: 20 },
+  { key: 'isProbate', label: 'Probate / estate', points: 20 },
+  { key: 'isVacant', label: 'Vacant', points: 20 },
+  { key: 'isAbsentee', label: 'Absentee owner', points: 15 },
+  { key: 'hasCodeViolations', label: 'Code violations', points: 15 },
+  { key: 'isExpiredListing', label: 'Expired listing', points: 15 },
+  { key: 'isFsbo', label: 'For sale by owner', points: 10 },
+  { key: 'isOutOfState', label: 'Out-of-state owner', points: 10 },
+  { key: 'isMultifamilyLandlord', label: 'Landlord-owned', points: 10 },
+  { key: 'hasVisibleDistress', label: 'Visible distress', points: 10 },
+];
+
 export default function LeadDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -198,6 +232,80 @@ export default function LeadDetail() {
           )}
         </div>
       </NeoTile>
+
+      {/* View this home — Zillow / Realtor deep links */}
+      {lead.propertyAddress && (() => {
+        const links = listingLinks(lead.propertyAddress);
+        return (
+          <NeoTile style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>
+              View this home
+            </p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <a
+                href={links.zillow} target="_blank" rel="noreferrer"
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 40, borderRadius: 12, background: C.blueS, color: C.blue, fontSize: 14, fontWeight: 700, textDecoration: 'none' }}
+              >
+                <ExternalLink size={15} strokeWidth={2.5} /> Zillow
+              </a>
+              <a
+                href={links.realtor} target="_blank" rel="noreferrer"
+                style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 40, borderRadius: 12, background: C.purpleS, color: C.purple, fontSize: 14, fontWeight: 700, textDecoration: 'none' }}
+              >
+                <ExternalLink size={15} strokeWidth={2.5} /> Realtor.com
+              </a>
+            </div>
+          </NeoTile>
+        );
+      })()}
+
+      {/* Why this lead — source, motivation signals, routing reason */}
+      {(() => {
+        const signals = SCORE_SIGNALS.filter(s => (lead as any)[s.key]);
+        const facts: string[] = [];
+        if (lead.yearBuilt) facts.push(`Built ${lead.yearBuilt}`);
+        if (lead.assessedValue) facts.push(`Assessed $${Number(lead.assessedValue).toLocaleString()}`);
+        if (lead.ownerMailingAddress) facts.push(`Owner mailing: ${lead.ownerMailingAddress}`);
+        if (lead.keyPainPoints && !signals.length) facts.push(lead.keyPainPoints);
+        const routedHot = (lead.pipelineStage ?? '') === 'hot_routing';
+        return (
+          <NeoTile style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>
+              Why this lead
+            </p>
+            <p style={{ fontSize: 13, color: C.text, margin: '0 0 8px', lineHeight: 1.5 }}>
+              Found via <strong>{sourceLabel(lead.externalId)}</strong>
+              {lead.leadScore != null && (
+                <> · scored <strong>{lead.leadScore}/100</strong></>
+              )}
+              {routedHot && (
+                <> — auto-routed to <strong>Hot</strong> (scores 60+ go straight to the call queue)</>
+              )}
+            </p>
+            {signals.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {signals.map(s => (
+                  <span key={s.key} style={{ fontSize: 12, fontWeight: 700, color: C.orange, background: C.orangeS, borderRadius: 8, padding: '4px 8px' }}>
+                    {s.label} +{s.points}
+                  </span>
+                ))}
+              </div>
+            )}
+            {facts.length > 0 && (
+              <div style={{ marginBottom: lead.outreachAngle ? 8 : 0 }}>
+                {facts.map((f, i) => (
+                  <p key={i} style={{ fontSize: 12, color: C.muted, margin: '0 0 2px', lineHeight: 1.5 }}>• {f}</p>
+                ))}
+              </div>
+            )}
+            {lead.outreachAngle && (
+              <p style={{ fontSize: 13, color: C.text, margin: 0, lineHeight: 1.5, background: C.bg, borderRadius: 10, padding: '8px 10px' }}>
+                <strong>Approach:</strong> {lead.outreachAngle}
+              </p>
+            )}
+          </NeoTile>
+        );
+      })()}
 
       {/* Craigslist posting — the actionable contact path for cl: leads */}
       {lead.externalId?.startsWith('cl:') && (() => {
