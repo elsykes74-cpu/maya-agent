@@ -670,10 +670,11 @@ const handleCronEnrichRecords = async (c: any) => {
     return c.json({ error: "Unauthorized" }, 401);
   }
   const limit = Math.max(1, Math.min(100, parseInt(c.req.query("limit") || "10", 10) || 10));
+  const retryEmpty = c.req.query("retryEmpty") === "1";
   const db = getDb();
   try {
     const { enrichHotLeadRecords } = await import("./lib/record-enrich");
-    const result = await enrichHotLeadRecords(db, limit);
+    const result = await enrichHotLeadRecords(db, limit, retryEmpty);
     return c.json(result);
   } catch (err: any) {
     console.error("[cron/enrich-records] failed:", err?.message ?? err);

@@ -19,6 +19,9 @@ export interface EnrichResult {
   matched: boolean;
   quotaExhausted?: boolean;
   error?: string;
+  // Which public-record fields RentCast actually had for this property —
+  // coverage varies by county, so this tells us what the source can give us.
+  present?: { history: boolean; lastSale: boolean; tax: boolean; owner: boolean };
 }
 
 export interface EnrichBatchResult {
@@ -27,12 +30,21 @@ export interface EnrichBatchResult {
   enriched: number;
   quotaExhausted: boolean;
   budgetRemaining: number;
+  details?: Array<{ id: number; address: string | null; ok: boolean; error?: string; present?: EnrichResult["present"] }>;
   error?: string;
 }
 
 function fullAddress(l: any): string | null {
-  const parts = [l.propertyAddress, l.city, l.state, l.zipCode].filter(Boolean);
-  return parts.length >= 2 ? parts.join(", ") : null;
+  const street = (l.propertyAddress ?? "").trim();
+  if (!street) return null;
+  // Avoid duplicating parts already embedded in propertyAddress
+  // (e.g. "44 Greenacre Sq, Springfield, MA 01105" already has city/state/zip).
+  const lower = street.toLowerCase();
+  const extra = [l.city, l.state, l.zipCode]
+    .filter(Boolean)
+    .map((s: string) => String(s).trim())
+    .filter((s) => s && !lower.includes(s.toLowerCase()));
+  return [street, ...extra].join(", ");
 }
 
 function parseDate(v: any): Date | null {
@@ -100,13 +112,19 @@ export async function enrichLeadRecord(db: Db, leadId: number): Promise<EnrichRe
     // No public record found — mark attempted (empty array) so the address
     // isn't re-queried on every run.
     await db.update(leads).set({ saleHistory: [] }).where(eq(leads.id, leadId)).catch(() => {});
-    return { ok: false, matched: true, error: "no record found" };
+    return { ok: false, matched: true, error: "no record found", present: { history: false, lastSale: false, tax: false, owner: false } };
   }
 
   const history = normalizeHistory(p);
   const lastSaleDate = parseDate(p.lastSaleDate) ?? parseDate(history[0]?.date);
   const lastSalePrice = p.lastSalePrice != null ? Number(p.lastSalePrice) : history[0]?.price ?? null;
   const assessed = latestAssessed(p);
+  const present = {
+    history: history.length > 0,
+    lastSale: !!(p.lastSaleDate || p.lastSalePrice),
+    tax: assessed != null,
+    owner: Array.isArray(p?.owner?.names) && p.owner.names.length > 0,
+  };
   const ownerNames: string[] = Array.isArray(p?.owner?.names) ? p.owner.names : [];
   const mail = p?.owner?.mailingAddress;
   const mailStr = mail
@@ -142,23 +160,32 @@ export async function enrichLeadRecord(db: Db, leadId: number): Promise<EnrichRe
   if (typeof p?.ownerOccupied === "boolean") patch.isAbsentee = !p.ownerOccupied;
 
   await db.update(leads).set(patch).where(eq(leads.id, leadId));
-  return { ok: true, matched: true };
+  return { ok: true, matched: true, present };
 }
 
 /**
  * Enrich hot leads missing public-record data, highest score first.
  * Stops at `limit` or when the monthly RentCast budget runs out.
+ * `retryEmpty` re-processes leads whose earlier lookup found nothing
+ * (useful after address-matching fixes or coverage improvements).
  */
-export async function enrichHotLeadRecords(db: Db, limit: number): Promise<EnrichBatchResult> {
+export async function enrichHotLeadRecords(
+  db: Db,
+  limit: number,
+  retryEmpty = false
+): Promise<EnrichBatchResult> {
   const budget = await rentcastBudgetRemaining(db);
   if (budget <= 0) {
     return { ok: true, checked: 0, enriched: 0, quotaExhausted: true, budgetRemaining: 0 };
   }
   const n = Math.min(limit, budget);
 
+  const attempted = retryEmpty
+    ? sql`${leads.saleHistory} = '[]'::jsonb`
+    : sql`1 = 0`;
   const candidates = await db.query.leads.findMany({
     where: and(
-      isNull(leads.saleHistory),
+      or(isNull(leads.saleHistory), attempted),
       isNull(leads.lastSaleDate),
       or(eq(leads.pipelineStage, "hot_routing" as any), eq(leads.motivationLevel, "hot" as any))
     ),
@@ -166,10 +193,12 @@ export async function enrichHotLeadRecords(db: Db, limit: number): Promise<Enric
     limit: n,
   });
 
+  const details: EnrichBatchResult["details"] = [];
   let enriched = 0;
   let quotaExhausted = false;
   for (const c of candidates) {
     const r = await enrichLeadRecord(db, c.id);
+    details.push({ id: c.id, address: c.propertyAddress, ok: r.ok, error: r.error, present: r.present });
     if (r.quotaExhausted) {
       quotaExhausted = true;
       break;
@@ -183,5 +212,6 @@ export async function enrichHotLeadRecords(db: Db, limit: number): Promise<Enric
     enriched,
     quotaExhausted,
     budgetRemaining: await rentcastBudgetRemaining(db),
+    details,
   };
 }
