@@ -23,6 +23,10 @@ on:
         description: "Max hot-lead addresses to check per run"
         required: false
         default: "10"
+      retry:
+        description: "Re-check addresses already looked up (1=yes)"
+        required: false
+        default: "0"
 
 jobs:
   lookup:
@@ -45,6 +49,7 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
           DEED_LIMIT: ${{ inputs.limit || '10' }}
+          DEED_RETRY: ${{ inputs.retry || '0' }}
         # Headed Chromium under xvfb + stealth plugin + residential proxy:
         # the registry's bot management bounces headless/datacenter sessions.
         run: xvfb-run -a node scripts/registry-deed-lookup.mjs

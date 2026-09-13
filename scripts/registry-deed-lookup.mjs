@@ -11,21 +11,31 @@
 // The registry index carries NO consideration (sale price shows only on the
 // scanned document image), so this fills lastSaleDate + deed chain only.
 //
-// Discovered 2026-09-13 via live mapping:
-//   Address search: /ALIS/WW400R.HTM?WSIQTP=SY14D&WSKYCD=T  (form WW414R00)
-//   Results (GET):  W9PADR=<addr>&W9ABR=*ALL&W9TOWN=<code>&W9FDTA=&W9TDTA=
-//                   &WSHTNM=WW414R00&WSIQTP=SY14AP&WSKYCD=T&WSWVER=2
-//   - Results are DOCUMENTS (3/page, chronological oldest→newest), "Next"
-//     carries state in query params — follow the link, don't build page URLs.
-//   - Each row: "View Abstract" link, Bk-Pg, Recorded MM-DD-YYYY, Inst #,
-//     Type (Deed / Trustees Deed / Mortgage / ...), Desc, Town/Addr,
-//     Gtor/Gtee party names. Mortgages show "Doc$" (loan amount, NOT price).
-//   - Prefix matching on the address key: "37 SPRUCE ST" narrows to that
-//     property; bare "SPRUCE" also matches SPRUCELAND AVE etc.
+// Search strategy (verified 2026-09-13 against the live site):
+//   Phase 1 — number-keyed query, e.g. W9PADR="382 HANCOCK ST". The index key
+//     includes house numbers (rows show "Addr: 382 HANCOCK ST"; the Desc field
+//     is street-name-only, so match on Addr). Finds deeds recorded ~1990+.
+//   Phase 2 — fallback when phase 1 finds no deed: street-wide query
+//     (W9PADR="HANCOCK ST") in newest-first 10-year windows via W9FDTA/W9TDTA
+//     (MMDDYYYY). Older docs were indexed WITHOUT house numbers
+//     ("Addr: HANCOCK ST"), so each deed-type candidate's abstract is opened
+//     and checked for the house number ("Notes: 382 HANCOCK ST / ...").
+//     Stops at the first window yielding a verified deed (the most recent
+//     purchase). Bounded: 6 windows (60 yrs), 25 pages + 30 abstracts/window.
+//
+// Discovered URL shapes:
+//   Address search form: /ALIS/WW400R.HTM?WSIQTP=SY14D&WSKYCD=T (form WW414R00)
+//   Results (GET):  W9PADR=<addr>&W9ABR=*ALL&W9TOWN=<code>&W9FDTA=<mmddyyyy>
+//                   &W9TDTA=<mmddyyyy>&WSHTNM=WW414R00&WSIQTP=SY14AP&WSKYCD=T&WSWVER=2
+//   Direct navigation to the results URL works in a session that has already
+//   loaded the homepage (Imperva interstitial clears on its own, no CAPTCHA).
+//   Results are DOCUMENTS (3/page); "Next" carries state in query params —
+//   follow the resolved link href, don't construct page URLs.
 //
 // Env: DEED_QUEUE_URL (default production queue endpoint),
 //      DEED_INGEST_URL (default production ingest endpoint),
-//      CRON_SECRET, PROXY_URL (http://user:pass@host:port), DEED_LIMIT (default 10)
+//      CRON_SECRET, PROXY_URL (http://user:pass@host:port),
+//      DEED_LIMIT (default 10), DEED_RETRY (set "1" to re-check addresses)
 
 import { chromium } from "playwright-extra";
 import stealth from "puppeteer-extra-plugin-stealth";
@@ -40,6 +50,7 @@ const INGEST_URL = process.env.DEED_INGEST_URL || "https://maya-agent-rho.vercel
 const CRON_SECRET = process.env.CRON_SECRET;
 const PROXY_URL = process.env.PROXY_URL;
 const DEED_LIMIT = parseInt(process.env.DEED_LIMIT || "10", 10);
+const DEED_RETRY = process.env.DEED_RETRY === "1";
 
 if (!CRON_SECRET) {
   console.error("CRON_SECRET is required");
@@ -48,19 +59,28 @@ if (!CRON_SECRET) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Street suffixes to drop for the fallback (broader) query.
+// Street suffixes to drop for the street-wide fallback query.
 const SUFFIX_RE = /\s+(ST|STREET|AVE|AVENUE|RD|ROAD|LN|LANE|DR|DRIVE|CT|COURT|PL|PLACE|TER|TERRACE|SQ|SQUARE|BLVD|BOULEVARD|WAY|CIR|CIRCLE|PKWY|PARKWAY|EXT|EXTENSION)\.?$/i;
 
-function resultsUrl(padr, town) {
+function resultsUrl(padr, town, fdta = "", tdta = "") {
   return (
     `${BASE}/ALIS/WW400R.HTM?W9PADR=${encodeURIComponent(padr)}` +
-    `&W9ABR=*ALL&W9TOWN=${encodeURIComponent(town)}&W9FDTA=&W9TDTA=` +
+    `&W9ABR=*ALL&W9TOWN=${encodeURIComponent(town)}&W9FDTA=${fdta}&W9TDTA=${tdta}` +
     `&WSHTNM=WW414R00&WSIQTP=SY14AP&WSKYCD=T&WSWVER=2`
   );
 }
 
 function normTown(s) {
   return String(s || "").toUpperCase().replace(/[^A-Z]/g, "");
+}
+
+function splitStreet(street) {
+  // "382 HANCOCK ST" -> { number: "382", name: "HANCOCK", streetPart: "HANCOCK ST", full: "382 HANCOCK ST" }
+  const s = String(street || "").trim().toUpperCase();
+  const m = s.match(/^(\d+[A-Z]?)\s+(.+)$/);
+  if (!m) return { number: null, name: s, streetPart: s, full: s };
+  const rest = m[2].trim();
+  return { number: m[1], name: rest.replace(SUFFIX_RE, "").trim(), streetPart: rest, full: s };
 }
 
 async function authedGet(url) {
@@ -93,17 +113,13 @@ async function extractPage(page) {
         if (/Bk-Pg:/i.test(text) && /Recorded:/i.test(text)) break;
         el = el.parentElement;
       }
-      const href = a.getAttribute("href") || "";
-      rows.push({ text, href });
+      rows.push({ text, href: a.getAttribute("href") || "" });
     }
     const next = anchors.find((a) => /^\s*next\s*$/i.test(a.textContent || ""));
     return {
       rows,
-      // a.href is fully resolved by the DOM — the Next form carries its
-      // continuation state (WSGKEY/W9RRN/...) in the query string.
-      nextHref: next ? next.href : null,
+      nextHref: next ? next.href : null, // DOM-resolved: carries WSGKEY/W9RRN state
       title: document.title,
-      bodyStart: (document.body?.innerText || "").slice(0, 300),
     };
   });
 }
@@ -112,8 +128,7 @@ function parseRow(text) {
   const book = text.match(/Bk-Pg:\s*(\d+)\s*-\s*(\d+)/i);
   const rec = text.match(/Recorded:\s*(\d{2})-(\d{2})-(\d{4})/);
   const type = text.match(/^\s*Type:\s*([^\n\r]+)/im);
-  const desc = text.match(/^\s*Desc:\s*([^\n\r]+)/im);
-  const town = text.match(/^\s*Town:\s*([^\n\r]+)/im);
+  const addr = text.match(/Addr:\s*([^\n\r]+)/i);
   const gtor = text.match(/Gtor:\s*([^\n\r]{1,200})/i);
   const gtee = text.match(/Gtee:\s*([^\n\r]{1,200})/i);
   return {
@@ -121,11 +136,62 @@ function parseRow(text) {
     page: book ? book[2] : null,
     recordedDate: rec ? `${rec[3]}-${rec[1]}-${rec[2]}` : null,
     docType: type ? type[1].trim() : null,
-    desc: desc ? desc[1].trim() : null,
-    townAddr: town ? town[1].trim() : null,
+    addr: addr ? addr[1].trim().toUpperCase() : null,
     grantor: gtor ? gtor[1].trim() : null,
     grantee: gtee ? gtee[1].trim() : null,
   };
+}
+
+const isDeed = (d) => /deed/i.test(d.docType || "");
+
+// Walk all result pages for a query; returns parsed docs (deduped by book-page).
+async function searchAllPages(page, padr, town, fdta, tdta, maxPages, seenKeys) {
+  const docs = [];
+  await page.goto(resultsUrl(padr, town, fdta, tdta), { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(2500);
+  let pages = 0;
+  for (;;) {
+    const { rows, nextHref, title } = await extractPage(page);
+    const t = title || "";
+    if (/^\s*address search\s*$/i.test(t)) {
+      console.log(`  query "${padr}": bounced to form`);
+      break;
+    }
+    if (!/rec land address search results/i.test(t)) {
+      console.log(`  query "${padr}": unexpected page title="${t}"`);
+      break;
+    }
+    for (const r of rows) {
+      const d = parseRow(r.text);
+      if (!d.book || !d.page || !d.recordedDate) continue;
+      const key = `${d.book}-${d.page}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      d.abstractHref = r.href;
+      docs.push(d);
+    }
+    pages++;
+    if (!nextHref || pages >= maxPages) break;
+    await page.goto(nextHref, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(2000);
+  }
+  return { docs, pages };
+}
+
+// Open a deed candidate's abstract and verify the house number appears with
+// the street name (older docs are indexed street-name-only).
+async function abstractVerifies(page, doc, number, streetName) {
+  if (!doc.abstractHref) return false;
+  try {
+    const url = new URL(doc.abstractHref, page.url()).href;
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(1500);
+    const text = (await page.evaluate(() => document.body?.innerText || "")).toUpperCase();
+    return new RegExp(`\\b${number}\\b`).test(text) && text.includes(streetName);
+  } catch (e) {
+    console.log(`  abstract check failed for ${doc.book}-${doc.page}: ${e.message}`);
+    return false;
+  }
 }
 
 const launchOpts = {
@@ -153,9 +219,9 @@ const context = await browser.newContext({
 const page = await context.newPage();
 
 // 1. Queue of hot-lead addresses to check.
-const queue = await authedGet(`${QUEUE_URL}?limit=${DEED_LIMIT}`);
+const queue = await authedGet(`${QUEUE_URL}?limit=${DEED_LIMIT}${DEED_RETRY ? "&retry=1" : ""}`);
 const leads = Array.isArray(queue?.leads) ? queue.leads : [];
-console.log(`queue: ${queue?.count ?? leads.length} addresses`);
+console.log(`queue: ${queue?.count ?? leads.length} addresses${DEED_RETRY ? " (retry mode)" : ""}`);
 if (leads.length === 0) {
   await browser.close();
   console.log("done: nothing to check");
@@ -187,72 +253,59 @@ const townMap = await page.evaluate(() => {
 });
 console.log(`town options mapped: ${Object.keys(townMap).length}`);
 
+const nowYear = new Date().getFullYear();
 let done = 0;
 let withDeeds = 0;
 
 for (const lead of leads) {
-  const street = String(lead.street || "").toUpperCase().trim();
+  const { number, name, streetPart, full } = splitStreet(lead.street);
   const townCode = townMap[normTown(lead.city)] || "*ALL";
-  console.log(`\n── lead ${lead.id}: ${street} (${lead.city || "?"}) town=${townCode} ──`);
-  if (!street) {
+  console.log(`\n── lead ${lead.id}: ${full} (${lead.city || "?"}) town=${townCode} ──`);
+  if (!full) {
     console.log("no street — skipping");
     continue;
   }
-
-  // Try full street first, then with the suffix dropped (site hint).
-  const queries = [street];
-  const noSuffix = street.replace(SUFFIX_RE, "").trim();
-  if (noSuffix && noSuffix !== street) queries.push(noSuffix);
-
-  const docs = [];
   const seenKeys = new Set();
-  let searched = false;
+  let deeds = [];
 
-  for (const q of queries) {
-    await page.goto(resultsUrl(q, townCode), { waitUntil: "domcontentloaded", timeout: 60000 });
-    await sleep(2500);
-
-    let pages = 0;
-    let bounced = false;
-    for (;;) {
-      const { rows, nextHref, title, bodyStart } = await extractPage(page);
-      const t = title || "";
-      // Results page title is "Rec Land Address Search Results"; the bare
-      // search form is titled "Address Search". Don't confuse the two.
-      if (/^\s*address search\s*$/i.test(t)) {
-        console.log(`query "${q}": REALLY bounced to form (title="${t}")`);
-        bounced = true;
-        break;
-      }
-      if (!/rec land address search results/i.test(t)) {
-        console.log(`query "${q}": unexpected page (title="${t}") body=${JSON.stringify(bodyStart.slice(0, 160))}`);
-        bounced = true;
-        break;
-      }
-      for (const r of rows) {
-        const d = parseRow(r.text);
-        if (!d.book || !d.page || !d.recordedDate) continue;
-        const key = `${d.book}-${d.page}`;
-        if (seenKeys.has(key)) continue;
-        seenKeys.add(key);
-        docs.push(d);
-      }
-      pages++;
-      if (bounced || !nextHref || pages >= 40) break;
-      await page.goto(nextHref, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await sleep(2000);
-    }
-    searched = true;
-    console.log(`query "${q}": ${docs.length} docs over ${pages} page(s)`);
-    if (docs.length > 0) break; // full-street query hit; no need for the broader one
+  // Phase 1: number-keyed query (finds deeds indexed with house numbers).
+  {
+    const { docs, pages } = await searchAllPages(page, full, townCode, "", "", 40, seenKeys);
+    console.log(`phase 1 "${full}": ${docs.length} docs, ${pages} page(s)`);
+    deeds = docs.filter(isDeed).filter((d) => !number || (d.addr && new RegExp(`\\b${number}\\b`).test(d.addr)));
+    console.log(`phase 1 verified deeds: ${deeds.length}`);
   }
 
-  if (!searched) console.log("no search completed for this address");
+  // Phase 2: street-wide fallback in newest-first 10-year windows.
+  // Older docs are indexed without house numbers — verify via abstract.
+  if (deeds.length === 0 && number && name) {
+    const streetQuery = streetPart; // e.g. "HANCOCK ST" (suffix kept, number dropped)
+    console.log(`phase 2 street-wide "${streetQuery}" with abstract verification`);
+    let abstractsUsed = 0;
+    for (let w = 0; w < 6 && deeds.length === 0; w++) {
+      const endY = nowYear - w * 10;
+      const startY = endY - 10;
+      const fdta = `0101${startY}`;
+      const tdta = `1231${endY}`;
+      const { docs, pages } = await searchAllPages(page, streetQuery, townCode, fdta, tdta, 25, seenKeys);
+      const candidates = docs.filter(isDeed).sort((a, b) => b.recordedDate.localeCompare(a.recordedDate));
+      console.log(`  window ${startY}-${endY}: ${docs.length} docs, ${pages} pages, ${candidates.length} deed candidates`);
+      for (const c of candidates) {
+        if (abstractsUsed >= 30) break;
+        abstractsUsed++;
+        if (await abstractVerifies(page, c, number, name)) {
+          console.log(`  verified via abstract: ${c.recordedDate} Bk ${c.book}-${c.page}`);
+          deeds.push(c);
+          break; // newest verified deed in this window wins; stop entirely
+        }
+        await sleep(1000);
+      }
+      if (deeds.length === 0) await sleep(1500);
+    }
+    console.log(`phase 2 verified deeds: ${deeds.length} (${abstractsUsed} abstracts checked)`);
+  }
 
-  const deeds = docs
-    .filter((d) => /deed/i.test(d.docType || ""))
-    .sort((a, b) => b.recordedDate.localeCompare(a.recordedDate));
-  console.log(`deed-type docs: ${deeds.length}`);
+  deeds.sort((a, b) => b.recordedDate.localeCompare(a.recordedDate));
   if (deeds[0]) {
     console.log(
       `latest: ${deeds[0].recordedDate} ${deeds[0].docType} Bk ${deeds[0].book}-${deeds[0].page} ` +
