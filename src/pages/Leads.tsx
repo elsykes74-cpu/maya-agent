@@ -197,10 +197,10 @@ function LeadCard({ lead }: { lead: LeadItem }) {
   const navigate = useNavigate();
   const [callResult, setCallResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  const placeCall = trpc.maya.placeCall.useMutation({
+  const dial = trpc.calls.dial.useMutation({
     onSuccess: (data: any) => {
-      const sid = data?.sid ?? data?.result?.sid;
-      setCallResult({ ok: true, msg: sid ? 'Call placed — Maya is dialing now.' : 'Call placed.' });
+      const callId = data?.callId;
+      setCallResult({ ok: true, msg: callId ? 'Call placed — Maya is dialing now.' : 'Call placed.' });
     },
     onError: (e: any) => {
       setCallResult({ ok: false, msg: e.message || 'Call failed — check voice settings' });
@@ -227,9 +227,9 @@ function LeadCard({ lead }: { lead: LeadItem }) {
 
   const callWithMaya = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (placeCall.isPending || !hasPhone) return;
+    if (dial.isPending || !hasPhone) return;
     setCallResult(null);
-    placeCall.mutate({ to: digits, name: lead.sellerName ?? '', address: lead.propertyAddress ?? '' });
+    dial.mutate({ leadId: lead.id });
   };
 
   return (
@@ -274,12 +274,12 @@ function LeadCard({ lead }: { lead: LeadItem }) {
           <>
             <button
               onClick={callWithMaya}
-              disabled={placeCall.isPending}
+              disabled={dial.isPending}
               className="maya-tile press-sm"
               aria-label={`Call ${lead.sellerName} with Maya`}
-              style={{ flex: 1, height: 48, borderRadius: 14, background: placeCall.isPending ? C.orange : `linear-gradient(135deg, ${C.purple}, #7C3AED)`, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', padding: 0, opacity: placeCall.isPending ? 0.7 : 1 }}
+              style={{ flex: 1, height: 48, borderRadius: 14, background: dial.isPending ? C.orange : `linear-gradient(135deg, ${C.purple}, #7C3AED)`, color: '#fff', border: 'none', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, cursor: 'pointer', padding: 0, opacity: dial.isPending ? 0.7 : 1 }}
             >
-              {placeCall.isPending
+              {dial.isPending
                 ? <><Sparkles size={16} className="pulse-glow" /> Calling…</>
                 : <><Bot size={16} strokeWidth={2} /> Call with Maya</>}
             </button>
