@@ -3,13 +3,12 @@ import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Phone, PhoneCall, PhoneMissed, PhoneOff, Trash2,
   MessageSquare, Mail, MapPin, FileText, Calendar, DollarSign,
-  AlertCircle, CheckCircle2, Clock, Sparkles, Send,
+  AlertCircle, CheckCircle2, Clock, Sparkles, Send, ExternalLink,
 } from 'lucide-react';
 import { C, NeoTile, NeoTileSm, ConfirmSheet } from '@/components/Neo';
 import { trpc } from '@/providers/trpc';
 
-const ACTIVITY_ICON: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {
-  call: { icon: <Phone size={14} strokeWidth={2.5} />, color: C.teal, bg: C.tealS },
+const ACTIVITY_ICON: Record<string, { icon: React.ReactNode; color: string; bg: string }> = {  call: { icon: <Phone size={14} strokeWidth={2.5} />, color: C.teal, bg: C.tealS },
   sms: { icon: <MessageSquare size={14} strokeWidth={2.5} />, color: C.blue, bg: C.blueS },
   email: { icon: <Mail size={14} strokeWidth={2.5} />, color: C.purple, bg: C.purpleS },
   note: { icon: <FileText size={14} strokeWidth={2.5} />, color: C.muted, bg: C.bg },
@@ -50,6 +49,16 @@ function fmtDateShort(d: Date | string | null | undefined): string {
 function isDue(d: Date | string | null | undefined): boolean {
   if (!d) return false;
   return new Date(d) <= new Date();
+}
+
+/** Extract the Craigslist posting URL + body text from a cl: lead's notes. */
+function clPosting(notes: string | null | undefined): { url: string | null; body: string } {
+  const n = notes ?? '';
+  const url = n.match(/https?:\/\/[^\s)]+/)?.[0] ?? null;
+  const body = n.split('\n').map(l => l.trim())
+    .filter(l => l && !l.startsWith('[cl:') && !/^https?:\/\//.test(l))
+    .join('\n\n');
+  return { url, body };
 }
 
 export default function LeadDetail() {
@@ -189,6 +198,32 @@ export default function LeadDetail() {
           )}
         </div>
       </NeoTile>
+
+      {/* Craigslist posting — the actionable contact path for cl: leads */}
+      {lead.externalId?.startsWith('cl:') && (() => {
+        const { url, body } = clPosting(lead.notes);
+        if (!url && !body) return null;
+        return (
+          <NeoTile style={{ marginBottom: 12 }}>
+            <p style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 8px' }}>
+              Craigslist posting
+            </p>
+            {body && (
+              <p style={{ fontSize: 13, color: C.text, margin: '0 0 10px', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+                {body.length > 600 ? body.slice(0, 600) + '…' : body}
+              </p>
+            )}
+            {url && (
+              <a
+                href={url} target="_blank" rel="noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 40, padding: '0 16px', borderRadius: 12, background: C.tealS, color: C.teal, fontSize: 14, fontWeight: 700, textDecoration: 'none' }}
+              >
+                <ExternalLink size={15} strokeWidth={2.5} /> View original posting
+              </a>
+            )}
+          </NeoTile>
+        );
+      })()}
 
       {/* Pending Tasks */}
       {(tasksQ.isLoading || pendingTasks.length > 0) && (

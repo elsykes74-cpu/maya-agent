@@ -234,7 +234,7 @@ export async function runCraigslistScrape(
         motivationLevel: level,
         askingPrice: price,
         keyPainPoints: flags.length ? flags.join(", ") : null,
-        notes: `[cl:${item.id}] ${item.url}\n\n${description}`.slice(0, 2000),
+        notes: `${item.title}\n[cl:${item.id}] ${item.url}\n\n${description}`.slice(0, 2000),
         pipelineStage: "lead",
         leadType: "fsbo",
         isFsbo: true,

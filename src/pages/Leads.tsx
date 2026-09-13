@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { Search, Plus, Phone, PhoneCall, MapPin, Bot, Sparkles, RefreshCw } from 'lucide-react';
+import { Search, Plus, Phone, PhoneCall, MapPin, Bot, Sparkles, RefreshCw, ExternalLink } from 'lucide-react';
 import type { inferRouterOutputs } from '@trpc/server';
 import { C, NeoTile, NeoIcon, MotTag } from '@/components/Neo';
 import { trpc } from '@/providers/trpc';
@@ -298,6 +298,21 @@ function LeadCard({ lead }: { lead: LeadItem }) {
           </p>
         )}
       </div>
+
+      {lead.externalId?.startsWith('cl:') && (() => {
+        const url = (lead.notes ?? '').match(/https?:\/\/[^\s)]+/)?.[0];
+        if (!url) return null;
+        return (
+          <div style={{ marginTop: 10 }} onClick={e => e.stopPropagation()}>
+            <a
+              href={url} target="_blank" rel="noreferrer"
+              style={{ fontSize: 13, fontWeight: 700, color: C.teal, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+            >
+              View Craigslist posting <ExternalLink size={13} strokeWidth={2.5} />
+            </a>
+          </div>
+        );
+      })()}
 
       {callResult && (
         <div style={{ marginTop: 10, padding: '10px 14px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: callResult.ok ? C.greenS : C.redS, color: callResult.ok ? C.green : C.red, lineHeight: 1.5 }}>
