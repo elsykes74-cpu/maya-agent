@@ -56,6 +56,24 @@ export default function AIConfig() {
 
   const { isLoading, data, isError } = trpc.aiConfig.get.useQuery(undefined, { retry: 2 });
 
+  // VAPI calling credentials live in calling_config (same row the dialer reads)
+  const { data: vapiCfg } = trpc.callingConfig.get.useQuery(undefined, { retry: 2 });
+  const [vapiId, setVapiId] = useState<number | null>(null);
+  const [vapiFields, setVapiFields] = useState({ apiKey: '', assistantId: '', fromPhoneNumber: '' });
+
+  useEffect(() => {
+    if (vapiCfg && vapiId == null) {
+      setVapiId((vapiCfg as any).id ?? null);
+      setVapiFields({
+        apiKey: (vapiCfg as any).apiKey ?? '',
+        assistantId: (vapiCfg as any).assistantId ?? '',
+        fromPhoneNumber: (vapiCfg as any).fromPhoneNumber ?? '',
+      });
+    }
+  }, [vapiCfg, vapiId]);
+
+  const updateVapiMut = trpc.callingConfig.update.useMutation();
+
   useEffect(() => {
     if (data && !fields) {
       setConfigId((data as any).id);
@@ -77,16 +95,13 @@ export default function AIConfig() {
     }
   }, [data]);
 
-  const updateMut = trpc.aiConfig.update.useMutation({
-    onSuccess: () => {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    },
-  });
+  const updateMut = trpc.aiConfig.update.useMutation();
 
   const handleSave = () => {
-    if (!fields || configId == null) return;
-    updateMut.mutate({ id: configId, ...fields });
+    if (fields && configId != null) updateMut.mutate({ id: configId, ...fields });
+    if (vapiId != null) updateVapiMut.mutate({ id: vapiId, ...vapiFields });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
   };
 
   const setField = (key: keyof ConfigFields, val: string) => {
@@ -182,7 +197,41 @@ export default function AIConfig() {
         </div>
       </NeoTile>
 
-      {/* Twilio */}
+      {/* VAPI Calling — all voice calls go through VAPI */}
+      {(() => {
+        const vapiActive = !!(vapiFields.apiKey && vapiFields.assistantId);
+        return (
+          <NeoTile style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <NeoIcon bg={vapiActive ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.1)'} size={40} round={14}>
+                <Phone size={18} color={vapiActive ? C.green : C.red} strokeWidth={2} />
+              </NeoIcon>
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>VAPI Calling</p>
+                <p style={{ fontSize: 12, color: vapiActive ? C.green : C.red, margin: '2px 0 0', fontWeight: 600 }}>
+                  {vapiActive ? 'Active · Ready to call' : 'Not configured — calls will not work'}
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>API Key (private)</p>
+                <input value={vapiFields.apiKey} onChange={e => setVapiFields(f => ({ ...f, apiKey: e.target.value }))} placeholder="VAPI private API key" type="password" autoComplete="off" style={inputStyle} />
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>Assistant ID (Maya)</p>
+                <input value={vapiFields.assistantId} onChange={e => setVapiFields(f => ({ ...f, assistantId: e.target.value }))} placeholder="VAPI assistant ID" style={inputStyle} />
+              </div>
+              <div>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>Phone Number ID</p>
+                <input value={vapiFields.fromPhoneNumber} onChange={e => setVapiFields(f => ({ ...f, fromPhoneNumber: e.target.value }))} placeholder="VAPI phone number ID" style={inputStyle} />
+              </div>
+            </div>
+          </NeoTile>
+        );
+      })()}
+
+      {/* Twilio SMS (LadyJaye nurture) — voice calls use VAPI, not Twilio */}
       {(() => {
         const twActive = !!(fields.twilioAccountSid && fields.twilioAuthToken && fields.twilioFromNumber);
         return (
@@ -192,9 +241,9 @@ export default function AIConfig() {
                 <Phone size={18} color={twActive ? C.green : C.red} strokeWidth={2} />
               </NeoIcon>
               <div>
-                <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>Twilio Calling</p>
+                <p style={{ fontSize: 15, fontWeight: 700, color: C.text, margin: 0 }}>Twilio SMS</p>
                 <p style={{ fontSize: 12, color: twActive ? C.green : C.red, margin: '2px 0 0', fontWeight: 600 }}>
-                  {twActive ? 'Active · Ready to call' : 'Not configured — calls will not work'}
+                  {twActive ? 'Active · SMS nurture ready' : 'Not configured — SMS will not work (voice uses VAPI)'}
                 </p>
               </div>
             </div>
@@ -208,7 +257,7 @@ export default function AIConfig() {
                 <input value={fields.twilioAuthToken} onChange={e => setField('twilioAuthToken', e.target.value)} placeholder="Auth token" type="password" style={inputStyle} />
               </div>
               <div>
-                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>From Number (your Twilio number)</p>
+                <p style={{ fontSize: 12, color: C.muted, fontWeight: 600, margin: '0 0 4px' }}>From Number (SMS sender)</p>
                 <input value={fields.twilioFromNumber} onChange={e => setField('twilioFromNumber', e.target.value)} placeholder="+14135551234" style={inputStyle} />
               </div>
             </div>
