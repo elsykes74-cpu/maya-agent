@@ -34,13 +34,13 @@ import {
   runRegistryScrape,
   formatRegistryAlert,
   recordRegistryRun,
-  startRegistryScheduler,
 } from "./lib/registry-scraper";
 // RentCast registry source (licensed property data — no Imperva block).
 // Aliased: registry-scraper.ts owns the un-aliased Hampden-portal names.
 import {
   runRegistryScrape as runRentcastScrape,
   formatRegistryAlert as formatRentcastAlert,
+  startRentcastScheduler,
 } from "./lib/registry-source";
 import { createOAuthCallbackHandler } from "./kimi/auth";
 import { handleTelegramWebhook } from "./lib/telegram-webhook";
@@ -563,7 +563,6 @@ app.get("/api/cron/diag", async (c) => {
     out.push({ label: "bundle-api-hunt", error: String(e?.message ?? e) });
   }
   return c.json({ proxy_configured: !!px, out });
-  return c.json({ proxy_configured: !!process.env.CL_PROXY_URL, out });
 });
 
 app.get("/api/cron/registry", async (c) => {
@@ -843,8 +842,10 @@ if (env.isProduction && !process.env.VERCEL) {
       startCallWorker();
       // Craigslist lead scan every 30 min (results cached in scrape_runs for /findleads).
       startScrapeScheduler();
-      // Hampden County registry distressed-filing scan, weekly.
-      startRegistryScheduler();
+      // Registry distressed-owner scan via RentCast (licensed data, no Imperva
+      // block). Replaces the always-blocked Hampden direct-fetch scheduler; the
+      // Playwright browser path still runs via GitHub Actions → /registry-ingest.
+      startRentcastScheduler();
       // Auto-register Telegram webhooks so bots don't go silent after redeploys
       if (env.appUrl && !env.appUrl.includes("localhost")) {
         registerAllWebhooks(env.appUrl).catch((err) =>

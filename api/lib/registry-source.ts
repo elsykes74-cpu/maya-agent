@@ -1,6 +1,8 @@
 import { leads, scrapeRuns } from "../../db/schema";
 import { env } from "./env";
 import { routeLead } from "./pipeline-engine";
+import { getDb } from "../queries/connection";
+import { sendAlert } from "./telegram";
 
 type Db = ReturnType<typeof import("../queries/connection").getDb>;
 
@@ -277,4 +279,32 @@ export function formatRegistryAlert(result: RegistryResult): string {
   msg += `\nSkip-trace these owners, then use /leads to work them.`;
 
   return msg;
+}
+
+// ── Scheduler ────────────────────────────────────────────────────────────────
+// RentCast is the licensed replacement for the Imperva-blocked Hampden portal,
+// so it runs on the same in-process cadence as the other sources. Daily is
+// enough — registry/ownership data changes slowly and RentCast bills per call.
+const RENTCAST_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let rentcastSchedulerStarted = false;
+
+async function runScheduledRentcastScrape(): Promise<void> {
+  const db = getDb();
+  const result = await runRegistryScrape(db);
+  if (result.added > 0 || !result.ok) {
+    await sendAlert(formatRegistryAlert(result), "quickkick").catch(() => {});
+  }
+}
+
+export function startRentcastScheduler(): void {
+  if (rentcastSchedulerStarted) return;
+  if (!env.rentcastApiKey) {
+    console.log("[rentcast-scheduler] Skipped — RENTCAST_API_KEY not set");
+    return;
+  }
+  rentcastSchedulerStarted = true;
+  // First run a few minutes after boot, then daily.
+  setTimeout(() => runScheduledRentcastScrape().catch(() => {}), 3 * 60 * 1000);
+  setInterval(() => runScheduledRentcastScrape().catch(() => {}), RENTCAST_INTERVAL_MS);
+  console.log("[rentcast-scheduler] Started — RentCast registry scan daily");
 }
