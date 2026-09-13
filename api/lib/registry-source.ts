@@ -153,6 +153,11 @@ export async function runRegistryScrape(db: Db): Promise<RegistryResult> {
         const address = String(p?.formattedAddress ?? p?.addressLine1 ?? "").trim();
         if (!recordId || !address) continue;
 
+        // Skip individual apartment/condo units — RentCast returns one record
+        // per unit for large rental buildings (e.g. 70 Chestnut St). Those are
+        // renter-occupied, not seller prospects.
+        if (/\b(apt|apartment|unit|suite|ste)\b\.?\s*#?\s*[a-z0-9-]+/i.test(address)) continue;
+
         // Only surface motivated records — skip owner-occupied / no-signal
         // properties so the full tax roll doesn't land in leads.
         const { level, flags, leadType, ownerName, absentee } = scoreProperty(p);
