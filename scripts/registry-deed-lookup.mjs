@@ -48,6 +48,7 @@ const INGEST_URL = process.env.DEED_INGEST_URL || "https://maya-agent-rho.vercel
 const CRON_SECRET = process.env.CRON_SECRET;
 const PROXY_URL = process.env.PROXY_URL;
 const DEED_LIMIT = parseInt(process.env.DEED_LIMIT || "10", 10);
+const DEED_ABSTRACT_CAP = parseInt(process.env.DEED_ABSTRACT_CAP || "30", 10);
 const DEED_RETRY = process.env.DEED_RETRY === "1";
 
 if (!CRON_SECRET) {
@@ -145,7 +146,13 @@ async function readAbstractText(page, href) {
 function parseRow(text) {
   const book = text.match(/Bk-Pg:\s*(\d+)\s*-\s*(\d+)/i);
   const rec = text.match(/Recorded:\s*(\d{2})-(\d{2})-(\d{4})/);
-  const type = text.match(/^\s*Type:\s*([^\n\r]+)/im);
+  const typeRaw = (text.match(/^\s*Type:\s*([^\n\r]+)/im) || [])[1];
+  // The index sometimes renders "Type: Deed  Doc$: 67,100.00" on one line.
+  // Keep docType clean; capture the Doc$ figure separately. NOTE: on mortgage
+  // rows Doc$ is the LOAN amount; on deed rows its meaning (consideration?)
+  // is still being verified — never treat it as sale price yet.
+  const cleanType = typeRaw ? typeRaw.replace(/\s*Doc\$:\s*[\d,]+\.\d{2}/i, "").trim() : null;
+  const amt = text.match(/Doc\$:\s*([\d,]+\.\d{2})/i);
   const addr = text.match(/Addr:\s*([^\n\r]+)/i);
   const gtor = text.match(/Gtor:\s*([^\n\r]{1,200})/i);
   const gtee = text.match(/Gtee:\s*([^\n\r]{1,200})/i);
@@ -153,7 +160,8 @@ function parseRow(text) {
     book: book ? book[1] : null,
     page: book ? book[2] : null,
     recordedDate: rec ? `${rec[3]}-${rec[1]}-${rec[2]}` : null,
-    docType: type ? type[1].trim() : null,
+    docType: cleanType,
+    docAmount: amt ? amt[1] : null,
     addr: addr ? addr[1].trim().toUpperCase() : null,
     grantor: gtor ? gtor[1].trim() : null,
     grantee: gtee ? gtee[1].trim() : null,
@@ -221,7 +229,7 @@ async function findDeedForNumber(page, streetQuery, town, number, streetName, se
     const cands = docs.filter(isDeed).sort((a, b) => b.recordedDate.localeCompare(a.recordedDate));
     console.log(`  window ${startY}-${endY}: ${docs.length} docs, ${cands.length} deed candidates`);
     for (const c of cands) {
-      if (abstractsUsed >= 30) break;
+      if (abstractsUsed >= DEED_ABSTRACT_CAP) break;
       abstractsUsed++;
       let text = "";
       try {
@@ -236,7 +244,7 @@ async function findDeedForNumber(page, streetQuery, town, number, streetName, se
       }
       await sleep(1000);
     }
-    if (abstractsUsed >= 30) break;
+    if (abstractsUsed >= DEED_ABSTRACT_CAP) break;
     await sleep(1500);
   }
   return { deed: null, abstractsUsed, window: null };

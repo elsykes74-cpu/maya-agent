@@ -28,6 +28,9 @@ export interface RegistryDeed {
   book: string | null;
   page: string | null;
   docType: string | null;
+  /** Raw Doc$ figure from the index row, if present. Meaning varies by doc
+   *  type (loan amount on mortgages); never treat as sale price. */
+  docAmount?: string | null;
   grantor: string | null;
   grantee: string | null;
 }
@@ -135,11 +138,13 @@ export async function ingestDeedLookup(
   const nonRegistry = existing.filter((e) => e?.source !== "registry");
   const registryEntries = deduped.map((d) => ({
     date: d.recordedDate,
-    price: null,
+    price: null, // registry index carries no verified consideration — never infer
     type: d.docType,
     source: "registry",
     book: d.book,
     page: d.page,
+    // Raw Doc$ figure from the index row (meaning varies by doc type).
+    ...(d.docAmount ? { docAmount: d.docAmount } : {}),
   }));
   const merged = [...nonRegistry, ...registryEntries].sort((a, b) =>
     String(b.date ?? "").localeCompare(String(a.date ?? ""))
