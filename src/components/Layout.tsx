@@ -1,9 +1,9 @@
 import { Outlet, useLocation, useNavigate } from 'react-router'
-import { Home, Users, PhoneCall, Megaphone, LayoutGrid } from 'lucide-react'
+import { LayoutDashboard, Users, PhoneCall, Megaphone, LayoutGrid } from 'lucide-react'
 import { SpheresBackground } from './SpheresBackground'
 
 const TABS = [
-  { path: '/', label: 'Home', icon: Home },
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/leads', label: 'Leads', icon: Users },
   { path: '/calls', label: 'Calls', icon: PhoneCall },
   { path: '/campaigns', label: 'Campaigns', icon: Megaphone },
