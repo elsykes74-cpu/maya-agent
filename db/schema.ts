@@ -449,7 +449,7 @@ export const callingConfig = pgTable("calling_config", {
   apiKey: varchar("api_key", { length: 500 }),
   apiEndpoint: varchar("api_endpoint", { length: 500 }),
   assistantId: varchar("assistant_id", { length: 255 }),
-  fromPhoneNumber: varchar("from_phone_number", { length: 20 }),
+  fromPhoneNumber: varchar("from_phone_number", { length: 255 }),
   maxDailyCalls: integer("max_daily_calls").default(100),
   callWindowStart: varchar("call_window_start", { length: 10 }).default("09:00"),
   callWindowEnd: varchar("call_window_end", { length: 10 }).default("19:00"),

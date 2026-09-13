@@ -791,6 +791,7 @@ const MIGRATE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS "phone_validation_phone_idx" ON "phone_validation" ("phone")`,
   `CREATE TABLE IF NOT EXISTS "numverify_usage" ("id" bigserial PRIMARY KEY, "endpoint" varchar(120) NOT NULL, "created_at" timestamp NOT NULL DEFAULT now())`,
   `CREATE INDEX IF NOT EXISTS "numverify_usage_created_at_idx" ON "numverify_usage" ("created_at" DESC)`,
+  `ALTER TABLE "calling_config" ALTER COLUMN "from_phone_number" TYPE varchar(255)`,
 ];
 
 async function handleCronMigrate(c: any) {
