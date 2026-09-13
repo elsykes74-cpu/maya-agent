@@ -219,6 +219,10 @@ export async function runCraigslistScrape(
 
     const propertyAddress = location ?? item.location ?? item.title.slice(0, 80);
 
+    // Thin-lead gate: no street address + no phone + no price = unactionable.
+    // (The listing URL alone isn't enough for Maya's call/SMS pipeline.)
+    if (!/\d/.test(propertyAddress) && !phone && !price) continue;
+
     const lead: CraigslistLead = {
       clId: item.id,
       title: item.title,
