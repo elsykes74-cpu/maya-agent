@@ -2,10 +2,49 @@ import { z } from "zod";
 import { eq, desc, and, sql } from "drizzle-orm";
 import { createRouter, publicQuery } from "../middleware";
 import { getDb } from "../queries/connection";
-import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities, tasks } from "../../db/schema";
+import { webhookEvents, campaignLeads, callQueue, calls, leads, dncList, activities, tasks, appointments } from "../../db/schema";
 import { sendAlert } from "../lib/telegram";
 import { matchBuyersToLead, formatBuyerMatchAlert } from "../lib/buyer-matcher";
 import { cancelNurtureTasks, enrollInTrack } from "../lib/pipeline-engine";
+
+// Parse Maya's informal setAppointment args ("Thursday", "2pm") into a concrete
+// date + display time. A weekday resolves to its next occurrence; unparseable
+// input falls back to 2 days out so a real appointment row is always created.
+// scheduledTime keeps the raw phrase and is the human-facing source of truth;
+// scheduledDate's date component is what the dashboard/calendar keys off.
+function parseApptDateTime(day: string, time: string): { scheduledDate: Date; scheduledTime: string } {
+  const now = new Date();
+  const rawTime = (time || "").trim();
+  const rawDay = (day || "").trim().toLowerCase();
+
+  let hours = 10;
+  let minutes = 0;
+  const tm = rawTime.toLowerCase().match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (tm) {
+    hours = parseInt(tm[1], 10);
+    minutes = tm[2] ? parseInt(tm[2], 10) : 0;
+    if (tm[3] === "pm" && hours < 12) hours += 12;
+    if (tm[3] === "am" && hours === 12) hours = 0;
+    if (hours > 23 || hours < 0) hours = 10;
+  }
+
+  const dows = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  let daysAhead = 2;
+  if (rawDay.includes("today")) daysAhead = 0;
+  else if (rawDay.includes("tomorrow")) daysAhead = 1;
+  else {
+    const idx = dows.findIndex((d) => rawDay.includes(d) || rawDay.includes(d.slice(0, 3)));
+    if (idx >= 0) {
+      daysAhead = (idx - now.getDay() + 7) % 7;
+      if (daysAhead === 0) daysAhead = 7; // e.g. "Thursday" said on a Thursday → next week
+    }
+  }
+
+  const scheduledDate = new Date(now);
+  scheduledDate.setDate(now.getDate() + daysAhead);
+  scheduledDate.setHours(hours, minutes, 0, 0);
+  return { scheduledDate, scheduledTime: rawTime || `${hours}:${String(minutes).padStart(2, "0")}` };
+}
 
 export const webhooksRouter = createRouter({
   receive: publicQuery
@@ -99,7 +138,10 @@ async function handleVapiWebhook(payload: any, db: any) {
     
     // Extract appointment if set via function call
     const functionCalls = analysis.functionCalls || [];
-    const appointmentSet = functionCalls.some((f: any) => f.name === "setAppointment");
+    const apptCall = functionCalls.find((f: any) => f.name === "setAppointment");
+    const appointmentSet = !!apptCall;
+    const apptDay = apptCall?.parameters?.day ?? "";
+    const apptTime = apptCall?.parameters?.time ?? "";
     const painSignals = functionCalls
       .filter((f: any) => f.name === "logPainSignal")
       .map((f: any) => f.parameters?.signal)
@@ -236,12 +278,34 @@ async function handleVapiWebhook(payload: any, db: any) {
     // Notify via Telegram when appointment is set
     if (appointmentSet) {
       const apptLead = await db.query.leads.findFirst({ where: eq(leads.id, queueEntry.leadId) });
+
+      // Persist a real appointment record from Maya's captured day/time so it
+      // shows in the dashboard and can be marked confirmed — not just a flag.
+      // Best-effort: never let this break the outcome/alert flow.
+      let whenLabel = "";
+      try {
+        const { scheduledDate, scheduledTime } = parseApptDateTime(apptDay, apptTime);
+        await db.insert(appointments).values({
+          leadId: queueEntry.leadId,
+          scheduledDate,
+          scheduledTime,
+          appointmentType: "walkthrough",
+          status: "scheduled",
+          notes: `Set by Maya on VAPI call. Captured: "${apptDay} ${apptTime}".${painSignals ? ` Pain: ${painSignals}` : ""}`.slice(0, 1000),
+        } as any);
+        await db.update(leads).set({ appointmentDate: scheduledDate } as any).where(eq(leads.id, queueEntry.leadId));
+        whenLabel = `${apptDay} ${apptTime}`.trim();
+      } catch (err) {
+        console.error("[webhooks] appointment record creation failed:", err);
+      }
+
       const apptMsg =
         `🔥 <b>Appointment Set!</b>\n\n` +
         `<b>${apptLead?.sellerName ?? "Unknown"}</b>\n` +
         `📍 ${apptLead?.propertyAddress ?? ""}\n` +
-        `📞 ${apptLead?.phone ?? ""}\n\n` +
-        `Call outcome logged. Follow up to confirm time.`;
+        `📞 ${apptLead?.phone ?? ""}\n` +
+        (whenLabel ? `🗓 <b>${whenLabel}</b>\n` : "") +
+        `\nCall the seller to confirm, then mark it confirmed in the dashboard.`;
       await sendAlert(apptMsg, "quickkick");
       await sendAlert(apptMsg, "ladyjaye");
 
