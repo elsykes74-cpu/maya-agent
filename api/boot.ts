@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql, eq, isNull, or, and, desc, gte } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,8 +22,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
-import { leads, callQueue, callingConfig } from "../db/schema";
-import { scrubPhone } from "./lib/vapi";
+import { leads } from "../db/schema";
 import { notify, sendAlert } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
@@ -837,129 +836,6 @@ async function handleCronPipelineTick(c: any) {
 }
 app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
 app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
-
-// TEMPORARY diagnostic for hot-dial investigation — remove after root cause found.
-app.get("/api/cron/dial-debug", async (c: any) => {
-  if (!checkCronAuth(c)) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  const db = getDb();
-  try {
-    const byAppt: any = await db
-      .select({
-        appt: leads.appointmentSet,
-        count: sql<number>`count(*)`,
-      })
-      .from(leads)
-      .where(eq(leads.pipelineStage, "hot_routing"))
-      .groupBy(leads.appointmentSet);
-    const hotPhone = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(leads)
-      .where(
-        and(
-          eq(leads.pipelineStage, "hot_routing"),
-          or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
-          sql`${leads.phone} IS NOT NULL AND ${leads.phone} <> ''`,
-        ),
-      );
-    const candidates = await db.query.leads.findMany({
-      where: and(
-        eq(leads.pipelineStage, "hot_routing"),
-        or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
-      ),
-      orderBy: [desc(leads.leadScore)],
-      limit: 5,
-    });
-    const sample = candidates.map((l: any) => ({
-      id: l.id,
-      score: l.leadScore,
-      phone: l.phone ? `${String(l.phone).slice(0, 4)}…` : null,
-      appt: l.appointmentSet,
-    }));
-    // Per-candidate dry run of the processHotLeads loop (no calls placed).
-    const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
-    const perCandidate: any[] = [];
-    for (const l of candidates) {
-      const row: any = { id: l.id };
-      try {
-        if (!l.phone) {
-          row.skip = "no phone";
-          perCandidate.push(row);
-          continue;
-        }
-        const recent = await db.query.callQueue.findFirst({
-          where: and(eq(callQueue.leadId, l.id), gte(callQueue.createdAt, twoDaysAgo)),
-          orderBy: [desc(callQueue.createdAt)],
-        });
-        if (recent) {
-          row.skip = `called in last 48h (queue ${recent.id}, ${recent.status})`;
-          perCandidate.push(row);
-          continue;
-        }
-        const scrub = await scrubPhone(l.phone, true, true, l.id);
-        row.scrub = scrub;
-        if (!scrub.pass) {
-          row.skip = `scrub failed: ${scrub.reason}`;
-          perCandidate.push(row);
-          continue;
-        }
-        row.wouldDial = true;
-      } catch (e: any) {
-        const chain: string[] = [];
-        let cur: any = e;
-        while (cur && chain.length < 4) {
-          chain.push(String(cur?.message ?? cur).slice(0, 400));
-          cur = cur?.cause;
-        }
-        row.error = chain.join(" | CAUSE: ");
-      }
-      perCandidate.push(row);
-    }
-    let queueToday: any = null;
-    let vapiConfig: any = null;
-    try {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      queueToday = await db
-        .select({ status: callQueue.status, count: sql<number>`count(*)` })
-        .from(callQueue)
-        .where(sql`${callQueue.createdAt} >= ${todayStart}`)
-        .groupBy(callQueue.status);
-    } catch (e: any) {
-      queueToday = { error: String(e?.message ?? e) };
-    }
-    try {
-      const cfg = await db
-        .select({
-          hasApiKey: sql<boolean>`api_key IS NOT NULL AND api_key <> ''`,
-          hasAssistant: sql<boolean>`assistant_id IS NOT NULL AND assistant_id <> ''`,
-          hasPhoneId: sql<boolean>`from_phone_number IS NOT NULL AND from_phone_number <> ''`,
-          windowStart: callingConfig.callWindowStart,
-          windowEnd: callingConfig.callWindowEnd,
-          maxDaily: callingConfig.maxDailyCalls,
-        })
-        .from(callingConfig)
-        .limit(1);
-      vapiConfig = cfg[0] ?? null;
-    } catch (e: any) {
-      vapiConfig = { error: String(e?.message ?? e) };
-    }
-    return c.json({
-      ok: true,
-      byAppt,
-      hotPhoneCount: hotPhone[0]?.count,
-      candidateCount: candidates.length,
-      sample,
-      queueToday,
-      vapiConfig,
-      perCandidate,
-    });
-  } catch (err: any) {
-    console.error("[cron/dial-debug] failed:", err?.message ?? err);
-    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.

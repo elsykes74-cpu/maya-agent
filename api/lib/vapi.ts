@@ -125,10 +125,14 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
   const variables = buildAssistantVariables(lead, sellerName);
   const assistantId = config.assistantId || process.env.VAPI_ASSISTANT_ID || DEFAULT_VAPI_ASSISTANT_ID;
 
+  const digits = phone.replace(/\D/g, "");
+  // VAPI requires E.164 — lead phones are stored formatted like "(617) 555-1234".
+  const e164 = digits.length === 10 ? `+1${digits}` : `+${digits}`;
+
   const body: VapiCallRequest = {
     phoneNumberId: config.fromPhoneNumber || undefined,
     customer: {
-      number: phone,
+      number: e164,
       name: sellerName,
     },
     maxDurationSeconds: 300,

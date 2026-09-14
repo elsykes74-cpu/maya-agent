@@ -7,7 +7,7 @@
  *
  * Driven by runPipelineTick(), invoked every 15 min from telegram-scheduler.
  */
-import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import {
   activities,
@@ -308,9 +308,15 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   for (const lead of hot) {
     try {
       if (!lead.phone) continue;
-      // Don't hammer: skip if called in the last 48h
+      // Don't hammer: skip if called in the last 48h. A queue row that failed
+      // before the call reached VAPI (failed + no external call id) is not a
+      // call — it must not block retries.
       const recent = await db.query.callQueue.findFirst({
-        where: and(eq(callQueue.leadId, lead.id), gte(callQueue.createdAt, twoDaysAgo)),
+        where: and(
+          eq(callQueue.leadId, lead.id),
+          gte(callQueue.createdAt, twoDaysAgo),
+          or(ne(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`),
+        ),
         orderBy: [desc(callQueue.createdAt)],
       });
       if (recent) continue;
@@ -332,7 +338,10 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
 
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName || "Seller");
       if (!vapiCall) {
-        await db.update(callQueue).set({ status: "failed" } as any).where(eq(callQueue.id, queueRow.id));
+        await db
+          .update(callQueue)
+          .set({ status: "failed", errorMessage: "VAPI call request failed (see function logs)" } as any)
+          .where(eq(callQueue.id, queueRow.id));
         continue;
       }
 
