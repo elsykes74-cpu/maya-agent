@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql, eq, isNull, or, and, desc } from "drizzle-orm";
+import { sql, eq, isNull, or, and, desc, gte } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -889,7 +889,7 @@ app.get("/api/cron/dial-debug", async (c: any) => {
           continue;
         }
         const recent = await db.query.callQueue.findFirst({
-          where: and(eq(callQueue.leadId, l.id), sql`${callQueue.createdAt} >= ${twoDaysAgo}`),
+          where: and(eq(callQueue.leadId, l.id), gte(callQueue.createdAt, twoDaysAgo)),
           orderBy: [desc(callQueue.createdAt)],
         });
         if (recent) {
