@@ -82,6 +82,19 @@ function fmtDuration(sec: number | null): string {
   return `${Math.floor(sec / 60)}m ${sec % 60}s`;
 }
 
+/**
+ * A hung third-party API must never eat the tick's 30s maxDuration (Vercel
+ * kills the function and the tick dies with a dropped connection). Cap every
+ * external call made during reconciliation.
+ */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
 /** Concise accurate note of what happened on the call. */
 async function summarizeCall(
   detail: VapiCallDetail,
@@ -95,12 +108,16 @@ async function summarizeCall(
   const transcript = (detail.transcript ?? "").trim();
   if (transcript.length > 100) {
     try {
-      const note = await callClaudeConversation(
-        "You write short, factual call notes for a real estate investor's CRM. " +
-          "Summarize in 2-4 sentences: what the seller said about selling, their timeline, " +
-          "price expectations, property condition, and any agreed next step. " +
-          "No fluff, no greeting, just the facts.",
-        `Seller: ${sellerName}. Property: ${address}.\n\nCall transcript:\n${transcript.slice(0, 6000)}`,
+      const note = await withTimeout(
+        callClaudeConversation(
+          "You write short, factual call notes for a real estate investor's CRM. " +
+            "Summarize in 2-4 sentences: what the seller said about selling, their timeline, " +
+            "price expectations, property condition, and any agreed next step. " +
+            "No fluff, no greeting, just the facts.",
+          `Seller: ${sellerName}. Property: ${address}.\n\nCall transcript:\n${transcript.slice(0, 6000)}`,
+        ),
+        15000,
+        "claude-call-summary",
       );
       if (note && note.trim().length > 10) return note.trim();
     } catch {
@@ -218,7 +235,11 @@ export async function reconcileCallOutcomes(): Promise<number> {
   let reconciled = 0;
   for (const row of pending) {
     try {
-      const detail = await getVapiCallDetail(row.externalCallId as string);
+      const detail = await withTimeout(
+        getVapiCallDetail(row.externalCallId as string),
+        10000,
+        "vapi-call-detail",
+      ).catch(() => null);
       if (!detail || detail.status !== "ended") continue; // still on the phone
 
       const outcome = mapOutcome(detail);
