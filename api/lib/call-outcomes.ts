@@ -23,7 +23,7 @@ import {
   type VapiCallDetail,
 } from "./vapi";
 import { callClaudeConversation, generateFollowUpMessage } from "./message-generator";
-import { mapWithConcurrency } from "./concurrency";
+import { mapWithConcurrency, withKeyLock } from "./concurrency";
 
 const RECONCILE_DELAY_MS = 6 * 60 * 1000; // let the call finish (VAPI max 5 min)
 const RECONCILE_BATCH = 20;
@@ -238,6 +238,7 @@ export async function reconcileCallOutcomes(): Promise<number> {
   // to 10s + Claude summary up to 15s per call).
   const reconcileRow = async (row: (typeof pending)[number]): Promise<boolean> => {
     try {
+      // Slow network calls stay parallel across calls...
       const detail = await withTimeout(
         getVapiCallDetail(row.externalCallId as string),
         10000,
@@ -250,66 +251,72 @@ export async function reconcileCallOutcomes(): Promise<number> {
       const sellerName = lead?.sellerName || "Seller";
       const address = lead?.propertyAddress || "";
       const note = await summarizeCall(detail, outcome, sellerName, address);
-      const priorCalls = await countCallsForLead(row.leadId);
 
-      const [callRow] = await db.insert(calls).values({
-        leadId: row.leadId,
-        callType: (priorCalls === 0 ? "initial" : "follow_up") as any,
-        callOutcome: outcome as any,
-        duration: detail.durationSeconds,
-        notes: note,
-        callRecordingUrl: detail.recordingUrl,
-        appointmentSet: outcome === "appointment_set",
-      } as any).returning({ id: calls.id });
+      // ...but per-lead DB mutations serialize on the lead, so two queue rows
+      // for the same lead can't double-count calls or stack duplicate
+      // follow-up tasks.
+      return await withKeyLock(row.leadId, async () => {
+        const priorCalls = await countCallsForLead(row.leadId);
 
-      await db.update(callQueue)
-        .set({ status: "completed", callOutcome: outcome as any } as any)
-        .where(eq(callQueue.id, row.id));
-
-      await db.insert(activities).values({
-        leadId: row.leadId,
-        type: "call",
-        body: `📞 Maya call — ${OUTCOME_LABELS[outcome]} (${fmtDuration(detail.durationSeconds)}). ${note}`,
-        linkedTable: "calls",
-        linkedId: callRow.id,
-      } as any);
-
-      // Outcome-driven side effects
-      if (outcome === "dnc") {
-        const digits = (row.phone || "").replace(/\D/g, "");
-        if (digits) {
-          await db.insert(dncList).values({
-            phone: digits, name: sellerName, reason: "seller_request",
-            source: "maya-call", notes: `Asked on call ${callRow.id}`,
-          } as any).onConflictDoNothing();
-        }
-        await db.update(tasks).set({ status: "cancelled" } as any)
-          .where(and(eq(tasks.leadId, row.leadId), eq(tasks.status, "pending")));
-      } else if (outcome === "appointment_set") {
-        await db.insert(tasks).values({
+        const [callRow] = await db.insert(calls).values({
           leadId: row.leadId,
-          type: "follow_up",
-          title: `Confirm appointment — ${sellerName}`,
-          notes: `Maya booked an appointment on the call. Call notes: ${note}`,
-          dueAt: new Date(Date.now() + 24 * 3600 * 1000),
-          status: "pending",
-        } as any);
-      } else if (outcome === "not_interested") {
-        if (lead) {
-          await db.update(leads).set({ motivationLevel: "cold" } as any)
-            .where(eq(leads.id, row.leadId));
-        }
-      } else if (outcome === "wrong_number" || outcome === "disconnected") {
-        // dead number — no follow-up calls
-        await db.insert(activities).values({
-          leadId: row.leadId, type: "system",
-          body: `⏹ Number appears dead (${OUTCOME_LABELS[outcome]}). Follow-up calls stopped.`,
-        } as any);
-      } else if (lead && !lead.appointmentSet) {
-        await scheduleFollowUps(row.leadId, outcome, lead);
-      }
+          callType: (priorCalls === 0 ? "initial" : "follow_up") as any,
+          callOutcome: outcome as any,
+          duration: detail.durationSeconds,
+          notes: note,
+          callRecordingUrl: detail.recordingUrl,
+          appointmentSet: outcome === "appointment_set",
+        } as any).returning({ id: calls.id });
 
-      return true;
+        await db.update(callQueue)
+          .set({ status: "completed", callOutcome: outcome as any } as any)
+          .where(eq(callQueue.id, row.id));
+
+        await db.insert(activities).values({
+          leadId: row.leadId,
+          type: "call",
+          body: `📞 Maya call — ${OUTCOME_LABELS[outcome]} (${fmtDuration(detail.durationSeconds)}). ${note}`,
+          linkedTable: "calls",
+          linkedId: callRow.id,
+        } as any);
+
+        // Outcome-driven side effects
+        if (outcome === "dnc") {
+          const digits = (row.phone || "").replace(/\D/g, "");
+          if (digits) {
+            await db.insert(dncList).values({
+              phone: digits, name: sellerName, reason: "seller_request",
+              source: "maya-call", notes: `Asked on call ${callRow.id}`,
+            } as any).onConflictDoNothing();
+          }
+          await db.update(tasks).set({ status: "cancelled" } as any)
+            .where(and(eq(tasks.leadId, row.leadId), eq(tasks.status, "pending")));
+        } else if (outcome === "appointment_set") {
+          await db.insert(tasks).values({
+            leadId: row.leadId,
+            type: "follow_up",
+            title: `Confirm appointment — ${sellerName}`,
+            notes: `Maya booked an appointment on the call. Call notes: ${note}`,
+            dueAt: new Date(Date.now() + 24 * 3600 * 1000),
+            status: "pending",
+          } as any);
+        } else if (outcome === "not_interested") {
+          if (lead) {
+            await db.update(leads).set({ motivationLevel: "cold" } as any)
+              .where(eq(leads.id, row.leadId));
+          }
+        } else if (outcome === "wrong_number" || outcome === "disconnected") {
+          // dead number — no follow-up calls
+          await db.insert(activities).values({
+            leadId: row.leadId, type: "system",
+            body: `⏹ Number appears dead (${OUTCOME_LABELS[outcome]}). Follow-up calls stopped.`,
+          } as any);
+        } else if (lead && !lead.appointmentSet) {
+          await scheduleFollowUps(row.leadId, outcome, lead);
+        }
+
+        return true;
+      });
     } catch (err) {
       console.error(`[call-outcomes] reconcile error on queue #${row.id}:`, err);
       return false;

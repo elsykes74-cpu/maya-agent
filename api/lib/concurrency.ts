@@ -25,3 +25,27 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(workers);
   return results;
 }
+
+// ── Per-key async mutex ──────────────────────────────────────────────────────
+// Serializes check-then-act sequences (e.g. "don't stack duplicate follow-up
+// tasks") for the same key while letting different keys run in parallel.
+const keyLocks = new Map<string | number, Promise<void>>();
+
+export async function withKeyLock<T>(
+  key: string | number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = keyLocks.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const next = new Promise<void>((res) => {
+    release = res;
+  });
+  keyLocks.set(key, prev.then(() => next));
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (keyLocks.get(key) === next) keyLocks.delete(key);
+  }
+}
