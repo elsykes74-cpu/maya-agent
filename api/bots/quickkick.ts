@@ -1,4 +1,4 @@
-import { eq, and, isNull, lt, desc, lte, asc } from "drizzle-orm";
+import { eq, and, isNull, lt, desc, lte, asc, or } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { leads, callQueue, tasks, activities, offers, buyers } from "../../db/schema";
 import { sendMessage, escapeHtml } from "../lib/telegram";
@@ -285,7 +285,8 @@ export async function runLeadsAutomation(notifyChatId?: string, notifyToken?: st
   const candidates = await db.query.leads.findMany({
     where: and(
       isNull(leads.lastContactDate),
-      isNull(leads.appointmentSet),
+      // appointmentSet defaults to false (not NULL) — match both.
+      or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
     ),
     orderBy: [desc(leads.leadScore)],
     limit: 20,

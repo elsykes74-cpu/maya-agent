@@ -7,7 +7,7 @@
  *
  * Driven by runPipelineTick(), invoked every 15 min from telegram-scheduler.
  */
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import {
   activities,
@@ -293,7 +293,12 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   if (remaining <= 0) return { dialed: 0, reason: "daily cap reached" };
 
   const hot = await db.query.leads.findMany({
-    where: and(eq(leads.pipelineStage, "hot_routing"), isNull(leads.appointmentSet)),
+    // appointmentSet defaults to false (not NULL) on every lead row, so match
+    // both NULL and false — "not yet set" means the lead hasn't booked.
+    where: and(
+      eq(leads.pipelineStage, "hot_routing"),
+      or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
+    ),
     orderBy: [desc(leads.leadScore)],
     limit: Math.min(remaining, 5),
   });
