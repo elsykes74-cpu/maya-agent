@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql } from "drizzle-orm";
+import { sql, eq, isNull, or, and, desc } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -836,6 +836,58 @@ async function handleCronPipelineTick(c: any) {
 }
 app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
 app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
+
+// TEMPORARY diagnostic for hot-dial investigation — remove after root cause found.
+app.get("/api/cron/dial-debug", async (c: any) => {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  const db = getDb();
+  try {
+    const byAppt: any = await db
+      .select({
+        appt: leads.appointmentSet,
+        count: sql<number>`count(*)`,
+      })
+      .from(leads)
+      .where(eq(leads.pipelineStage, "hot_routing"))
+      .groupBy(leads.appointmentSet);
+    const hotPhone = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(leads)
+      .where(
+        and(
+          eq(leads.pipelineStage, "hot_routing"),
+          or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
+          sql`${leads.phone} IS NOT NULL AND ${leads.phone} <> ''`,
+        ),
+      );
+    const candidates = await db.query.leads.findMany({
+      where: and(
+        eq(leads.pipelineStage, "hot_routing"),
+        or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
+      ),
+      orderBy: [desc(leads.leadScore)],
+      limit: 5,
+    });
+    const sample = candidates.map((l: any) => ({
+      id: l.id,
+      score: l.leadScore,
+      phone: l.phone ? `${String(l.phone).slice(0, 4)}…` : null,
+      appt: l.appointmentSet,
+    }));
+    return c.json({
+      ok: true,
+      byAppt,
+      hotPhoneCount: hotPhone[0]?.count,
+      candidateCount: candidates.length,
+      sample,
+    });
+  } catch (err: any) {
+    console.error("[cron/dial-debug] failed:", err?.message ?? err);
+    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.
