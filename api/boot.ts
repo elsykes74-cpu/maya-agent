@@ -876,24 +876,35 @@ app.get("/api/cron/dial-debug", async (c: any) => {
       phone: l.phone ? `${String(l.phone).slice(0, 4)}…` : null,
       appt: l.appointmentSet,
     }));
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const queueToday = await db
-      .select({ status: callQueue.status, count: sql<number>`count(*)` })
-      .from(callQueue)
-      .where(sql`${callQueue.createdAt} >= ${todayStart}`)
-      .groupBy(callQueue.status);
-    const cfg = await db
-      .select({
-        hasApiKey: sql<boolean>`api_key IS NOT NULL AND api_key <> ''`,
-        hasAssistant: sql<boolean>`assistant_id IS NOT NULL AND assistant_id <> ''`,
-        hasPhoneId: sql<boolean>`from_phone_number IS NOT NULL AND from_phone_number <> ''`,
-        windowStart: callingConfig.callWindowStart,
-        windowEnd: callingConfig.callWindowEnd,
-        maxDaily: callingConfig.maxDailyCalls,
-      })
-      .from(callingConfig)
-      .limit(1);
+    let queueToday: any = null;
+    let vapiConfig: any = null;
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      queueToday = await db
+        .select({ status: callQueue.status, count: sql<number>`count(*)` })
+        .from(callQueue)
+        .where(sql`${callQueue.createdAt} >= ${todayStart}`)
+        .groupBy(callQueue.status);
+    } catch (e: any) {
+      queueToday = { error: String(e?.message ?? e) };
+    }
+    try {
+      const cfg = await db
+        .select({
+          hasApiKey: sql<boolean>`api_key IS NOT NULL AND api_key <> ''`,
+          hasAssistant: sql<boolean>`assistant_id IS NOT NULL AND assistant_id <> ''`,
+          hasPhoneId: sql<boolean>`from_phone_number IS NOT NULL AND from_phone_number <> ''`,
+          windowStart: callingConfig.callWindowStart,
+          windowEnd: callingConfig.callWindowEnd,
+          maxDaily: callingConfig.maxDailyCalls,
+        })
+        .from(callingConfig)
+        .limit(1);
+      vapiConfig = cfg[0] ?? null;
+    } catch (e: any) {
+      vapiConfig = { error: String(e?.message ?? e) };
+    }
     return c.json({
       ok: true,
       byAppt,
@@ -901,7 +912,7 @@ app.get("/api/cron/dial-debug", async (c: any) => {
       candidateCount: candidates.length,
       sample,
       queueToday,
-      vapiConfig: cfg[0] ?? null,
+      vapiConfig,
     });
   } catch (err: any) {
     console.error("[cron/dial-debug] failed:", err?.message ?? err);
