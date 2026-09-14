@@ -29,6 +29,7 @@ import { getDb } from "./queries/connection";
 import { telegramApp, registerAllWebhooks } from "./telegram-webhook";
 import { startDailyDigestScheduler } from "./lib/telegram-scheduler";
 import { startCallWorker } from "./lib/call-worker";
+import { runPipelineTick } from "./lib/pipeline-engine";
 import { runCraigslistScrape, formatScrapeAlert, recordScrapeRun, startScrapeScheduler, getLatestScrapeRun } from "./lib/craigslist-scraper";
 import {
   runRegistryScrape,
@@ -813,6 +814,28 @@ async function handleCronMigrate(c: any) {
 }
 app.get("/api/cron/migrate", handleCronMigrate);
 app.post("/api/cron/migrate", handleCronMigrate);
+
+// Pipeline tick — route new leads, auto-dial hot leads via Maya/VAPI, send due
+// LadyJaye nurture SMS. The in-process schedulers (telegram-scheduler's 15-min
+// tick, call-worker) only run on a persistent server; on Vercel serverless
+// they never start, so this endpoint is the production driver, hit every
+// 15 min by the scheduler. Same secret-gated cron pattern as /api/cron/scrape.
+// runPipelineTick enforces the call window (9 AM–7 PM ET), daily cap, 48h
+// redial guard, and DNC/litigant scrub before any dial.
+async function handleCronPipelineTick(c: any) {
+  if (!checkCronAuth(c)) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  try {
+    const summary = await runPipelineTick();
+    return c.json({ ok: true, summary });
+  } catch (err: any) {
+    console.error("[cron/pipeline-tick] failed:", err?.message ?? err);
+    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
+  }
+}
+app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
+app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
 
 // ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.
