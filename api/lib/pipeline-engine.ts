@@ -333,7 +333,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
 
       await db
         .update(callQueue)
-        .set({ status: "in_progress", externalCallId: (vapiCall as any).id } as any)
+        .set({ status: "dialing", startedAt: new Date(), externalCallId: (vapiCall as any).id } as any)
         .where(eq(callQueue.id, queueRow.id));
       await db.update(leads).set({ lastContactDate: new Date() } as any).where(eq(leads.id, lead.id));
       await db.insert(activities).values({
