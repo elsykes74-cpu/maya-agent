@@ -906,7 +906,13 @@ app.get("/api/cron/dial-debug", async (c: any) => {
         }
         row.wouldDial = true;
       } catch (e: any) {
-        row.error = String(e?.message ?? e);
+        const chain: string[] = [];
+        let cur: any = e;
+        while (cur && chain.length < 4) {
+          chain.push(String(cur?.message ?? cur).slice(0, 400));
+          cur = cur?.cause;
+        }
+        row.error = chain.join(" | CAUSE: ");
       }
       perCandidate.push(row);
     }
