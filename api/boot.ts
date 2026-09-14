@@ -23,6 +23,7 @@ import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
 import { leads, callQueue, callingConfig } from "../db/schema";
+import { scrubPhone } from "./lib/vapi";
 import { notify, sendAlert } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
@@ -876,6 +877,39 @@ app.get("/api/cron/dial-debug", async (c: any) => {
       phone: l.phone ? `${String(l.phone).slice(0, 4)}…` : null,
       appt: l.appointmentSet,
     }));
+    // Per-candidate dry run of the processHotLeads loop (no calls placed).
+    const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
+    const perCandidate: any[] = [];
+    for (const l of candidates) {
+      const row: any = { id: l.id };
+      try {
+        if (!l.phone) {
+          row.skip = "no phone";
+          perCandidate.push(row);
+          continue;
+        }
+        const recent = await db.query.callQueue.findFirst({
+          where: and(eq(callQueue.leadId, l.id), sql`${callQueue.createdAt} >= ${twoDaysAgo}`),
+          orderBy: [desc(callQueue.createdAt)],
+        });
+        if (recent) {
+          row.skip = `called in last 48h (queue ${recent.id}, ${recent.status})`;
+          perCandidate.push(row);
+          continue;
+        }
+        const scrub = await scrubPhone(l.phone, true, true, l.id);
+        row.scrub = scrub;
+        if (!scrub.pass) {
+          row.skip = `scrub failed: ${scrub.reason}`;
+          perCandidate.push(row);
+          continue;
+        }
+        row.wouldDial = true;
+      } catch (e: any) {
+        row.error = String(e?.message ?? e);
+      }
+      perCandidate.push(row);
+    }
     let queueToday: any = null;
     let vapiConfig: any = null;
     try {
@@ -913,6 +947,7 @@ app.get("/api/cron/dial-debug", async (c: any) => {
       sample,
       queueToday,
       vapiConfig,
+      perCandidate,
     });
   } catch (err: any) {
     console.error("[cron/dial-debug] failed:", err?.message ?? err);
