@@ -4,7 +4,7 @@ import { leads, tasks, callQueue, activities } from "../../db/schema";
 import { sendAlert, formatDailyDigest } from "./telegram";
 import { env } from "./env";
 import { runLeadsAutomation } from "../bots/quickkick";
-import { createVapiCall, scrubPhone, getCallingConfig } from "./vapi";
+import { processFollowUpTasks } from "./call-outcomes";
 import { runPipelineTick } from "./pipeline-engine";
 
 let lastDigestDate = "";
@@ -59,86 +59,6 @@ export async function sendDailyDigestNow(): Promise<void> {
   const digest = formatDailyDigest(stats, hotLeads, warmLeads);
   await sendAlert(digest, "quickkick");
   await sendAlert(digest, "ladyjaye");
-}
-
-// Process call_back tasks that are due — auto-dial the lead via VAPI
-async function processFollowUpTasks(): Promise<void> {
-  const db = getDb();
-  const config = await getCallingConfig();
-  if (!config?.apiKey) return;
-
-  const dueTasks = await db.query.tasks.findMany({
-    where: and(
-      eq(tasks.type, "call_back"),
-      eq(tasks.status, "pending"),
-      lte(tasks.dueAt, new Date()),
-    ),
-    limit: 20,
-  });
-
-  if (!dueTasks.length) return;
-  console.log(`[follow-up-processor] ${dueTasks.length} call_back tasks due`);
-
-  for (const task of dueTasks) {
-    try {
-      const lead = await db.query.leads.findFirst({ where: eq(leads.id, Number(task.leadId)) });
-      if (!lead?.phone) {
-        await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
-      }
-
-      // Skip leads that already have an appointment
-      if (lead.appointmentSet) {
-        await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
-      }
-
-      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
-      if (!scrub.pass) {
-        await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        await db.insert(activities).values({
-          leadId: lead.id,
-          type: "system",
-          body: `🚫 Follow-up call blocked: ${scrub.reason}`,
-          linkedTable: "tasks",
-          linkedId: task.id,
-        } as any);
-        continue;
-      }
-
-      // Mark in-progress before dialing
-      await db.update(tasks).set({ status: "in_progress" } as any).where(eq(tasks.id, task.id));
-
-      const [queueRow] = await db.insert(callQueue).values({
-        campaignId: 0,
-        campaignLeadId: 0,
-        leadId: lead.id,
-        phone: lead.phone,
-        status: "queued",
-      } as any).returning({ id: callQueue.id });
-
-      const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName);
-      if (!vapiCall) {
-        console.error(`[follow-up-processor] VAPI call failed for lead #${lead.id} — re-queueing task`);
-        await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
-        continue;
-      }
-
-      if (queueRow?.id) {
-        await db.update(callQueue)
-          .set({ externalCallId: vapiCall.id, status: "dialing" } as any)
-          .where(eq(callQueue.id, queueRow.id));
-      }
-
-      // Mark task complete — VAPI webhook will create next follow-up task if needed
-      await db.update(tasks).set({ status: "completed", completedAt: new Date() } as any).where(eq(tasks.id, task.id));
-
-      console.log(`[follow-up-processor] Dialed lead #${lead.id} (${lead.sellerName}) — VAPI ${vapiCall.id}`);
-    } catch (err) {
-      console.error(`[follow-up-processor] Error on task #${task.id}:`, err);
-      await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
-    }
-  }
 }
 
 export function startDailyDigestScheduler(): void {

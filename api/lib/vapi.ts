@@ -310,9 +310,25 @@ export async function createVapiTestCall(
   return data?.id ? { id: data.id } : null;
 }
 
+export interface VapiCallDetail {
+  status: string;
+  transcript: string | null;
+  endedReason: string | null;
+  durationSeconds: number | null;
+  recordingUrl: string | null;
+  summary: string | null;
+}
+
 export async function getVapiCallStatus(
   callId: string,
 ): Promise<{ status: string; transcript: string | null } | null> {
+  const detail = await getVapiCallDetail(callId);
+  if (!detail) return null;
+  return { status: detail.status, transcript: detail.transcript };
+}
+
+/** Full call detail for post-call notes: outcome, duration, transcript, summary. */
+export async function getVapiCallDetail(callId: string): Promise<VapiCallDetail | null> {
   const config = await getCallingConfig();
   if (!config || !config.apiKey) return null;
   const res = await fetch(`https://api.vapi.ai/call/${callId}`, {
@@ -320,7 +336,20 @@ export async function getVapiCallStatus(
   });
   if (!res.ok) return null;
   const data = (await res.json()) as any;
-  return { status: String(data?.status ?? "unknown"), transcript: data?.transcript ?? null };
+  const duration =
+    typeof data?.duration === "number"
+      ? data.duration
+      : typeof data?.durationSeconds === "number"
+        ? data.durationSeconds
+        : null;
+  return {
+    status: String(data?.status ?? "unknown"),
+    transcript: data?.transcript ?? null,
+    endedReason: data?.endedReason ?? null,
+    durationSeconds: duration,
+    recordingUrl: data?.recordingUrl ?? data?.stereoRecordingUrl ?? null,
+    summary: data?.analysis?.summary ?? null,
+  };
 }
 
 /** Best-effort end of a VAPI call (DELETE cancels queued calls; live calls end via timeout). */

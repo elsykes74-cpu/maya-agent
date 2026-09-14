@@ -20,6 +20,11 @@ import {
 import { computeLeadScore } from "./lead-scorer";
 import { sendTwilioSms } from "./twilio";
 import { createVapiCall, getCallingConfig, isWithinCallWindow, scrubPhone } from "./vapi";
+import {
+  reconcileCallOutcomes,
+  processFollowUpTasks,
+  processDueEmailTasks,
+} from "./call-outcomes";
 import { validatePhoneForDial } from "./phone-validate";
 import { sendAlert } from "./telegram";
 import { supabase } from "./supabase";
@@ -388,6 +393,30 @@ export async function runPipelineTick(): Promise<string> {
   } catch (err) {
     console.error("[pipeline] sms pass error:", err);
     parts.push("sms error");
+  }
+
+  try {
+    const noted = await reconcileCallOutcomes();
+    parts.push(`call notes ${noted}`);
+  } catch (err) {
+    console.error("[pipeline] call-outcome reconcile error:", err);
+    parts.push("call notes error");
+  }
+
+  try {
+    const redialed = await processFollowUpTasks();
+    parts.push(`follow-up calls ${redialed}`);
+  } catch (err) {
+    console.error("[pipeline] follow-up pass error:", err);
+    parts.push("follow-up error");
+  }
+
+  try {
+    const { sent, blocked } = await processDueEmailTasks();
+    parts.push(`emails ${sent}${blocked ? ` (${blocked} waiting on email setup)` : ""}`);
+  } catch (err) {
+    console.error("[pipeline] email pass error:", err);
+    parts.push("email error");
   }
 
   return parts.join(", ");
