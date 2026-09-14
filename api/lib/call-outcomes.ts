@@ -207,7 +207,7 @@ export async function reconcileCallOutcomes(): Promise<number> {
 
   const pending = await db.query.callQueue.findMany({
     where: and(
-      inArray(callQueue.status, ["dialing", "connected", "in_progress"] as any),
+      inArray(callQueue.status, ["dialing", "connected"] as any),
       sql`${callQueue.externalCallId} IS NOT NULL`,
       lt(callQueue.startedAt, cutoff),
     ),
@@ -239,7 +239,7 @@ export async function reconcileCallOutcomes(): Promise<number> {
       } as any).returning({ id: calls.id });
 
       await db.update(callQueue)
-        .set({ status: "completed", outcome: outcome as any } as any)
+        .set({ status: "completed", callOutcome: outcome as any } as any)
         .where(eq(callQueue.id, row.id));
 
       await db.insert(activities).values({
