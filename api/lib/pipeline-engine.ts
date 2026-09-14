@@ -28,6 +28,7 @@ import {
 import { validatePhoneForDial } from "./phone-validate";
 import { sendAlert } from "./telegram";
 import { supabase } from "./supabase";
+import { mapWithConcurrency } from "./concurrency";
 
 // ── Track definitions ────────────────────────────────────────────────────────
 // Each step references a row in sms_templates by day; delayDays is the wait
@@ -157,13 +158,14 @@ export async function processDueSmsTasks(): Promise<number> {
   });
   if (!due.length) return 0;
 
-  let sent = 0;
-  for (const task of due) {
+  // Per-task work is independent — run several in parallel so a batch of due
+  // SMS doesn't push the tick past the serverless timeout.
+  const sendTask = async (task: (typeof due)[number]): Promise<boolean> => {
     try {
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, Number(task.leadId)) });
       if (!lead?.phone || (lead as any).appointmentSet) {
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
 
       let meta: any = {};
@@ -172,7 +174,7 @@ export async function processDueSmsTasks(): Promise<number> {
       const step = steps?.[meta.stepIndex ?? 0];
       if (!step) {
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
 
       const template = await db.query.smsTemplates.findFirst({
@@ -180,13 +182,13 @@ export async function processDueSmsTasks(): Promise<number> {
       });
       if (!template) {
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
 
       const tw = await getTwilioSmsConfig();
       if (!tw.configured) {
         console.error("[pipeline] Twilio SMS not configured — leaving task pending");
-        continue;
+        return false;
       }
 
       // Line-type gate: never text landlines, voip, or invalid numbers.
@@ -200,7 +202,7 @@ export async function processDueSmsTasks(): Promise<number> {
           body: `📵 Nurture SMS skipped: ${lineCheck.reason}`,
         } as any);
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
 
       const body = personalize(template.content, lead, tw.fromNumber);
@@ -212,7 +214,7 @@ export async function processDueSmsTasks(): Promise<number> {
           type: "system",
           body: `⚠️ Nurture SMS failed: ${result.error}`,
         } as any);
-        continue; // leave pending for next tick
+        return false; // leave pending for next tick
       }
 
       await db.insert(smsLogs).values({
@@ -230,7 +232,6 @@ export async function processDueSmsTasks(): Promise<number> {
       } as any);
 
       await db.update(tasks).set({ status: "completed", completedAt: new Date() } as any).where(eq(tasks.id, task.id));
-      sent++;
 
       const next = steps[(meta.stepIndex ?? 0) + 1];
       if (next) {
@@ -249,11 +250,14 @@ export async function processDueSmsTasks(): Promise<number> {
           body: `✅ Nurture track ${meta.track} complete`,
         } as any);
       }
+      return true;
     } catch (err) {
       console.error("[pipeline] send_sms task error:", err);
+      return false;
     }
-  }
-  return sent;
+  };
+  const results = await mapWithConcurrency(due, 5, sendTask);
+  return results.filter(Boolean).length;
 }
 
 /** Cancel all pending outreach tasks for a lead (appointment, DNC, not interested). */
@@ -303,11 +307,13 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
     limit: Math.min(remaining, 5),
   });
 
-  let dialed = 0;
   const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
-  for (const lead of hot) {
+  // Per-lead work is independent (each lead touches only its own rows), so
+  // run a few in parallel — serial VAPI + scrub round-trips were pushing the
+  // tick past the serverless timeout, which dropped the HTTP response.
+  const dialLead = async (lead: (typeof hot)[number]): Promise<boolean> => {
     try {
-      if (!lead.phone) continue;
+      if (!lead.phone) return false;
       // Don't hammer: skip if called in the last 48h. A queue row that failed
       // before the call reached VAPI (failed + no external call id) is not a
       // call — it must not block retries.
@@ -319,7 +325,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
         ),
         orderBy: [desc(callQueue.createdAt)],
       });
-      if (recent) continue;
+      if (recent) return false;
 
       const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
       if (!scrub.pass) {
@@ -328,7 +334,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
           type: "system",
           body: `🚫 Pipeline dial blocked: ${scrub.reason}`,
         } as any);
-        continue;
+        return false;
       }
 
       const [queueRow] = await db
@@ -342,7 +348,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
           .update(callQueue)
           .set({ status: "failed", errorMessage: "VAPI call request failed (see function logs)" } as any)
           .where(eq(callQueue.id, queueRow.id));
-        continue;
+        return false;
       }
 
       await db
@@ -355,12 +361,14 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
         type: "call",
         body: `📞 Pipeline auto-dial via Maya — call ${(vapiCall as any).id}`,
       } as any);
-      dialed++;
+      return true;
     } catch (err) {
       console.error("[pipeline] hot dial error:", err);
+      return false;
     }
-  }
-  return { dialed };
+  };
+  const results = await mapWithConcurrency(hot, 4, dialLead);
+  return { dialed: results.filter(Boolean).length };
 }
 
 // ── 4. Tick ──────────────────────────────────────────────────────────────────

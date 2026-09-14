@@ -23,6 +23,7 @@ import {
   type VapiCallDetail,
 } from "./vapi";
 import { callClaudeConversation, generateFollowUpMessage } from "./message-generator";
+import { mapWithConcurrency } from "./concurrency";
 
 const RECONCILE_DELAY_MS = 6 * 60 * 1000; // let the call finish (VAPI max 5 min)
 const RECONCILE_BATCH = 20;
@@ -232,15 +233,17 @@ export async function reconcileCallOutcomes(): Promise<number> {
     limit: RECONCILE_BATCH,
   });
 
-  let reconciled = 0;
-  for (const row of pending) {
+  // Each call's detail fetch + LLM summary is independent — run a few in
+  // parallel. Serial, these were the slowest chain in the tick (VAPI detail up
+  // to 10s + Claude summary up to 15s per call).
+  const reconcileRow = async (row: (typeof pending)[number]): Promise<boolean> => {
     try {
       const detail = await withTimeout(
         getVapiCallDetail(row.externalCallId as string),
         10000,
         "vapi-call-detail",
       ).catch(() => null);
-      if (!detail || detail.status !== "ended") continue; // still on the phone
+      if (!detail || detail.status !== "ended") return false; // still on the phone
 
       const outcome = mapOutcome(detail);
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, row.leadId) });
@@ -306,12 +309,14 @@ export async function reconcileCallOutcomes(): Promise<number> {
         await scheduleFollowUps(row.leadId, outcome, lead);
       }
 
-      reconciled++;
+      return true;
     } catch (err) {
       console.error(`[call-outcomes] reconcile error on queue #${row.id}:`, err);
+      return false;
     }
-  }
-  return reconciled;
+  };
+  const results = await mapWithConcurrency(pending, 3, reconcileRow);
+  return results.filter(Boolean).length;
 }
 
 /**
@@ -342,17 +347,18 @@ export async function processFollowUpTasks(): Promise<number> {
     limit: Math.min(20, remaining),
   });
 
-  let dialed = 0;
-  for (const task of dueTasks) {
+  // Per-task dials are independent — run a few in parallel so a batch of due
+  // follow-ups doesn't push the tick past the serverless timeout.
+  const dialTask = async (task: (typeof dueTasks)[number]): Promise<boolean> => {
     try {
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, Number(task.leadId)) });
       if (!lead?.phone) {
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
       if (lead.appointmentSet) {
         await db.update(tasks).set({ status: "cancelled" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
       const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
       if (!scrub.pass) {
@@ -362,7 +368,7 @@ export async function processFollowUpTasks(): Promise<number> {
           body: `🚫 Follow-up call blocked: ${scrub.reason}`,
           linkedTable: "tasks", linkedId: task.id,
         } as any);
-        continue;
+        return false;
       }
 
       await db.update(tasks).set({ status: "in_progress" } as any).where(eq(tasks.id, task.id));
@@ -373,7 +379,7 @@ export async function processFollowUpTasks(): Promise<number> {
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName || "Seller");
       if (!vapiCall) {
         await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
-        continue;
+        return false;
       }
       if (queueRow?.id) {
         await db.update(callQueue)
@@ -386,14 +392,16 @@ export async function processFollowUpTasks(): Promise<number> {
         leadId: lead.id, type: "call",
         body: `📞 Maya follow-up call placed — VAPI ${vapiCall.id}`,
       } as any);
-      dialed++;
       console.log(`[follow-up] Dialed lead #${lead.id} (${lead.sellerName}) — VAPI ${vapiCall.id}`);
+      return true;
     } catch (err) {
       console.error(`[follow-up] Error on task #${task.id}:`, err);
       await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
+      return false;
     }
-  }
-  return dialed;
+  };
+  const results = await mapWithConcurrency(dueTasks, 4, dialTask);
+  return results.filter(Boolean).length;
 }
 
 /**
@@ -413,16 +421,16 @@ export async function processDueEmailTasks(): Promise<{ sent: number; blocked: n
     limit: 20,
   });
 
-  let sent = 0, blocked = 0;
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
 
-  for (const task of due) {
+  // Per-task work is independent — run several in parallel so a batch of due
+  // emails doesn't push the tick past the serverless timeout.
+  const sendTask = async (task: (typeof due)[number]): Promise<"sent" | "blocked"> => {
     try {
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, Number(task.leadId)) });
       if (!lead?.email || !apiKey || !from) {
-        blocked++;
-        continue; // stays pending until an email + sender exist
+        return "blocked"; // stays pending until an email + sender exist
       }
 
       const subject = `Following up on ${lead.propertyAddress || "your property"}`;
@@ -441,8 +449,7 @@ export async function processDueEmailTasks(): Promise<{ sent: number; blocked: n
       });
       if (!res.ok) {
         console.error(`[email-followup] Resend error for lead #${lead.id}:`, await res.text());
-        blocked++;
-        continue;
+        return "blocked";
       }
       await db.update(tasks).set({ status: "completed", completedAt: new Date() } as any)
         .where(eq(tasks.id, task.id));
@@ -451,11 +458,15 @@ export async function processDueEmailTasks(): Promise<{ sent: number; blocked: n
         body: `✉️ Follow-up email sent to ${lead.email}: "${subject}"`,
         linkedTable: "tasks", linkedId: task.id,
       } as any);
-      sent++;
+      return "sent";
     } catch (err) {
       console.error(`[email-followup] Error on task #${task.id}:`, err);
-      blocked++;
+      return "blocked";
     }
-  }
-  return { sent, blocked };
+  };
+  const results = await mapWithConcurrency(due, 5, sendTask);
+  return {
+    sent: results.filter((r) => r === "sent").length,
+    blocked: results.filter((r) => r === "blocked").length,
+  };
 }
