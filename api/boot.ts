@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
-import { leads } from "../db/schema";
+import { leads, callQueue, callingConfig } from "../db/schema";
 import { notify, sendAlert } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
@@ -876,12 +876,32 @@ app.get("/api/cron/dial-debug", async (c: any) => {
       phone: l.phone ? `${String(l.phone).slice(0, 4)}…` : null,
       appt: l.appointmentSet,
     }));
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const queueToday = await db
+      .select({ status: callQueue.status, count: sql<number>`count(*)` })
+      .from(callQueue)
+      .where(sql`${callQueue.createdAt} >= ${todayStart}`)
+      .groupBy(callQueue.status);
+    const cfg = await db
+      .select({
+        hasApiKey: sql<boolean>`api_key IS NOT NULL AND api_key <> ''`,
+        hasAssistant: sql<boolean>`assistant_id IS NOT NULL AND assistant_id <> ''`,
+        hasPhoneId: sql<boolean>`from_phone_number IS NOT NULL AND from_phone_number <> ''`,
+        windowStart: callingConfig.callWindowStart,
+        windowEnd: callingConfig.callWindowEnd,
+        maxDaily: callingConfig.maxDailyCalls,
+      })
+      .from(callingConfig)
+      .limit(1);
     return c.json({
       ok: true,
       byAppt,
       hotPhoneCount: hotPhone[0]?.count,
       candidateCount: candidates.length,
       sample,
+      queueToday,
+      vapiConfig: cfg[0] ?? null,
     });
   } catch (err: any) {
     console.error("[cron/dial-debug] failed:", err?.message ?? err);
