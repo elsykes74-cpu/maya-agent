@@ -296,7 +296,12 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   const remaining = (config.maxDailyCalls ?? 100) - Number(counted[0]?.count ?? 0);
   if (remaining <= 0) return { dialed: 0, reason: "daily cap reached" };
 
-  const hot = await db.query.leads.findMany({
+  const BATCH = Math.min(remaining, 5);
+  // Fetch enough candidates to fill the batch. The top-N by score are often
+  // undialable (48h redial guard / no phone), so a tight candidate limit of 5
+  // starved the dialer — every tick fetched the same 5 blocked leads and
+  // dialed nothing. Fixed 2026-09-15.
+  const candidates = await db.query.leads.findMany({
     // appointmentSet defaults to false (not NULL) on every lead row, so match
     // both NULL and false — "not yet set" means the lead hasn't booked.
     where: and(
@@ -304,38 +309,51 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
       or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
     ),
     orderBy: [desc(leads.leadScore)],
-    limit: Math.min(remaining, 5),
+    limit: Math.min(remaining, 50),
   });
 
   const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
+  // Phase 1 (read-only + scrub): collect up to BATCH dialable leads.
+  const eligible: (typeof candidates)[number][] = [];
+  await mapWithConcurrency(candidates, 4, async (lead) => {
+    if (eligible.length >= BATCH) return false;
+    if (!lead.phone) return false;
+    // Don't hammer: skip if called in the last 48h. A queue row that failed
+    // before the call reached VAPI (failed + no external call id) is not a
+    // call — it must not block retries.
+    const recent = await db.query.callQueue.findFirst({
+      where: and(
+        eq(callQueue.leadId, lead.id),
+        gte(callQueue.createdAt, twoDaysAgo),
+        or(ne(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`),
+      ),
+      orderBy: [desc(callQueue.createdAt)],
+    });
+    if (recent) return false;
+
+    const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
+    if (!scrub.pass) {
+      await db.insert(activities).values({
+        leadId: lead.id,
+        type: "system",
+        body: `🚫 Pipeline dial blocked: ${scrub.reason}`,
+      } as any);
+      return false;
+    }
+    if (eligible.length >= BATCH) return false;
+    eligible.push(lead);
+    return true;
+  });
+
+  // Phase 2: place the calls (at most BATCH).
+  const toDial = eligible.slice(0, BATCH);
   // Per-lead work is independent (each lead touches only its own rows), so
-  // run a few in parallel — serial VAPI + scrub round-trips were pushing the
+  // run a few in parallel — serial VAPI round-trips were pushing the
   // tick past the serverless timeout, which dropped the HTTP response.
-  const dialLead = async (lead: (typeof hot)[number]): Promise<boolean> => {
+  // (Eligibility was already decided in phase 1; this only dials.)
+  const dialLead = async (lead: (typeof toDial)[number]): Promise<boolean> => {
     try {
       if (!lead.phone) return false;
-      // Don't hammer: skip if called in the last 48h. A queue row that failed
-      // before the call reached VAPI (failed + no external call id) is not a
-      // call — it must not block retries.
-      const recent = await db.query.callQueue.findFirst({
-        where: and(
-          eq(callQueue.leadId, lead.id),
-          gte(callQueue.createdAt, twoDaysAgo),
-          or(ne(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`),
-        ),
-        orderBy: [desc(callQueue.createdAt)],
-      });
-      if (recent) return false;
-
-      const scrub = await scrubPhone(lead.phone, config.scrubDncBeforeCall ?? true, config.scrubLitigants ?? true, lead.id);
-      if (!scrub.pass) {
-        await db.insert(activities).values({
-          leadId: lead.id,
-          type: "system",
-          body: `🚫 Pipeline dial blocked: ${scrub.reason}`,
-        } as any);
-        return false;
-      }
 
       const [queueRow] = await db
         .insert(callQueue)
@@ -367,7 +385,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
       return false;
     }
   };
-  const results = await mapWithConcurrency(hot, 4, dialLead);
+  const results = await mapWithConcurrency(toDial, 4, dialLead);
   return { dialed: results.filter(Boolean).length };
 }
 
