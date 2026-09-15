@@ -68,6 +68,7 @@ export const callQueueStatusEnum = pgEnum("call_queue_status", [
 export const scrubResultEnum = pgEnum("scrub_result", ["pass", "dnc", "litigant", "invalid", "landline"]);
 export const callQueueOutcomeEnum = pgEnum("call_queue_outcome", [
   "answered", "voicemail", "no_answer", "busy", "appointment_set", "not_interested", "dnc", "failed",
+  "disconnected",
 ]);
 
 export const leadTypeEnum = pgEnum("lead_type", [

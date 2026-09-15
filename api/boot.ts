@@ -793,6 +793,12 @@ const MIGRATE_STATEMENTS: string[] = [
   `CREATE TABLE IF NOT EXISTS "numverify_usage" ("id" bigserial PRIMARY KEY, "endpoint" varchar(120) NOT NULL, "created_at" timestamp NOT NULL DEFAULT now())`,
   `CREATE INDEX IF NOT EXISTS "numverify_usage_created_at_idx" ON "numverify_usage" ("created_at" DESC)`,
   `ALTER TABLE "calling_config" ALTER COLUMN "from_phone_number" TYPE varchar(255)`,
+  // 0009 — reconcileCallOutcomes writes callOutcome='disconnected' to
+  // call_queue, but the call_queue_outcome enum lacked that value, so every
+  // such update threw, rows stuck 'dialing', and phantom 'disconnected' calls
+  // rows were minted on every tick. Fixed live 2026-09-15; kept here so fresh
+  // databases get the value too.
+  `ALTER TYPE "call_queue_outcome" ADD VALUE IF NOT EXISTS 'disconnected'`,
 ];
 
 async function handleCronMigrate(c: any) {
@@ -836,99 +842,6 @@ async function handleCronPipelineTick(c: any) {
 }
 app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
 app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
-
-// ---------------------------------------------------------------------------
-// TEMPORARY diagnostic: VAPI failure reasons (remove after 2026-09-15 debug).
-// Server-side only — VAPI is Cloudflare-blocking this VM's egress, so the
-// failure reasons must be read from Vercel's network. Returns endedReason +
-// status only, no customer PII. Unguessable path, no auth header needed.
-// ---------------------------------------------------------------------------
-app.get("/api/cron/vapi-debug-f95a3be51375b17121e5d04fda60a86d", async (c) => {
-  try {
-    const { getCallingConfig } = await import("./lib/vapi.js");
-    const config = await getCallingConfig();
-    if (!config?.apiKey) return c.json({ ok: false, error: "no api key" }, 500);
-    const res = await fetch("https://api.vapi.ai/call?limit=200", {
-      headers: { Authorization: `Bearer ${config.apiKey}` },
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      return c.json({ ok: false, vapiStatus: res.status, body: t.slice(0, 300) }, 502);
-    }
-    const calls = (await res.json()) as any[];
-    const { getDb } = await import("./queries/connection.js");
-    const db = getDb();
-    const { callQueue } = await import("../db/schema.js");
-    const { desc } = await import("drizzle-orm");
-    const queue = await db.select({
-      id: callQueue.id,
-      leadId: callQueue.leadId,
-      status: callQueue.status,
-      externalCallId: callQueue.externalCallId,
-      startedAt: callQueue.startedAt,
-    }).from(callQueue).orderBy(desc(callQueue.id)).limit(30);
-    const { sql: dsql } = await import("drizzle-orm");
-    // FIX 1: the reconcile writes callOutcome='disconnected' to call_queue, but
-    // the call_queue_outcome enum lacks that value -> every update threw,
-    // rows stuck 'dialing', phantom calls rows every tick. Add it.
-    let alterResult = "skipped";
-    try {
-      await db.execute(dsql.raw(`ALTER TYPE call_queue_outcome ADD VALUE IF NOT EXISTS 'disconnected'`));
-      alterResult = "added";
-    } catch (e: any) {
-      alterResult = "error: " + String(e?.message ?? e).slice(0, 120);
-    }
-    // FIX 2: close the two stuck rows so they stop phantoming.
-    const { eq: deq } = await import("drizzle-orm");
-    let closed = 0;
-    try {
-      const r: any = await db.execute(dsql.raw(
-        `UPDATE call_queue SET status='completed', call_outcome='disconnected', completed_at=NOW() WHERE status='dialing' AND id IN (5,6) RETURNING id`
-      ));
-      closed = r?.rowCount ?? r?.length ?? 0;
-    } catch (e: any) {
-      alterResult += " | close-error: " + String(e?.message ?? e).slice(0, 120);
-    }
-    // CLEANUP: phantom 'disconnected' calls rows. Only the earliest per lead
-    // is legitimate (first reconcile of a real VAPI error call); the rest were
-    // minted by the stuck-row bug. Report counts, then delete phantoms.
-    let phantomReport: any = null;
-    try {
-      const rows: any = await db.execute(dsql.raw(
-        `SELECT lead_id, COUNT(*) AS n, MIN(created_at) AS first_at, MAX(created_at) AS last_at
-         FROM calls WHERE call_outcome='disconnected' GROUP BY lead_id ORDER BY n DESC`
-      ));
-      phantomReport = rows?.rows ?? rows;
-      const del: any = await db.execute(dsql.raw(
-        `DELETE FROM calls WHERE call_outcome='disconnected' AND id NOT IN (
-           SELECT MIN(id) FROM calls WHERE call_outcome='disconnected' GROUP BY lead_id
-         ) RETURNING id`
-      ));
-      phantomReport = { perLead: phantomReport, deleted: del?.rowCount ?? del?.length ?? 0 };
-    } catch (e: any) {
-      phantomReport = { error: String(e?.message ?? e).slice(0, 150) };
-    }
-    return c.json({
-      ok: true,
-      vapiTotal: calls.length,
-      alterResult,
-      stuckRowsClosed: closed,
-      phantomReport,
-      calls: calls.map((x: any) => ({
-        id: x.id,
-        createdAt: x.createdAt,
-        status: x.status,
-        endedReason: x.endedReason,
-      })),
-      queue: queue.map((q: any) => ({
-        ...q,
-        startedAt: q.startedAt?.toISOString?.() ?? String(q.startedAt),
-      })),
-    });
-  } catch (err: any) {
-    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.
