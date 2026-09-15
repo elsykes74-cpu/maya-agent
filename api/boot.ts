@@ -848,7 +848,7 @@ app.get("/api/cron/vapi-debug-f95a3be51375b17121e5d04fda60a86d", async (c) => {
     const { getCallingConfig } = await import("./lib/vapi.js");
     const config = await getCallingConfig();
     if (!config?.apiKey) return c.json({ ok: false, error: "no api key" }, 500);
-    const res = await fetch("https://api.vapi.ai/call?limit=25", {
+    const res = await fetch("https://api.vapi.ai/call?limit=200", {
       headers: { Authorization: `Bearer ${config.apiKey}` },
     });
     if (!res.ok) {
@@ -856,13 +856,29 @@ app.get("/api/cron/vapi-debug-f95a3be51375b17121e5d04fda60a86d", async (c) => {
       return c.json({ ok: false, vapiStatus: res.status, body: t.slice(0, 300) }, 502);
     }
     const calls = (await res.json()) as any[];
+    const { getDb } = await import("./queries/connection.js");
+    const db = getDb();
+    const { callQueue } = await import("../db/schema.js");
+    const { desc } = await import("drizzle-orm");
+    const queue = await db.select({
+      id: callQueue.id,
+      leadId: callQueue.leadId,
+      status: callQueue.status,
+      externalCallId: callQueue.externalCallId,
+      startedAt: callQueue.startedAt,
+    }).from(callQueue).orderBy(desc(callQueue.id)).limit(30);
     return c.json({
       ok: true,
+      vapiTotal: calls.length,
       calls: calls.map((x: any) => ({
         id: x.id,
         createdAt: x.createdAt,
         status: x.status,
         endedReason: x.endedReason,
+      })),
+      queue: queue.map((q: any) => ({
+        ...q,
+        startedAt: q.startedAt?.toISOString?.() ?? String(q.startedAt),
       })),
     });
   } catch (err: any) {
