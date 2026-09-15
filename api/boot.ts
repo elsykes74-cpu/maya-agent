@@ -843,6 +843,40 @@ async function handleCronPipelineTick(c: any) {
 app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
 app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
 
+// TEMPORARY dry-run: why isn't processHotLeads dialing? (remove after debug)
+app.get("/api/cron/dial-dryrun-a3f1c9e2b4d5", async (c) => {
+  try {
+    const { getDb } = await import("./queries/connection.js");
+    const { leads, callQueue, dncList } = await import("../db/schema.js");
+    const { and, or, eq, isNull, gte, ne, desc, sql } = await import("drizzle-orm");
+    const { getCallingConfig, isWithinCallWindow } = await import("./lib/vapi.js");
+    const db = getDb();
+    const config = await getCallingConfig();
+    const tz = config.timezone || "America/New_York";
+    const inWindow = isWithinCallWindow(config.callWindowStart || "09:00", config.callWindowEnd || "19:00", tz);
+    const hot = await db.query.leads.findMany({
+      where: and(eq(leads.pipelineStage, "hot_routing"), or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false))),
+      orderBy: [desc(leads.leadScore)], limit: 5,
+    });
+    const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
+    const out = [];
+    for (const lead of hot) {
+      const recent: any = await db.query.callQueue.findFirst({
+        where: and(eq(callQueue.leadId, lead.id), gte(callQueue.createdAt, twoDaysAgo),
+          or(ne(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`)),
+        orderBy: [desc(callQueue.createdAt)],
+      });
+      const digits = (lead.phone || "").replace(/\D/g, "");
+      const dnc = digits ? await db.query.dncList.findFirst({ where: eq(dncList.phone, digits) }) : null;
+      out.push({ id: lead.id, name: lead.sellerName, score: lead.leadScore, phone: !!lead.phone,
+        blocked48h: !!recent, recentStatus: recent?.status ?? null, onDnc: !!dnc });
+    }
+    return c.json({ ok: true, inWindow, tz, nowET: new Date().toLocaleString("en-US", { timeZone: tz }), top5: out });
+  } catch (err: any) {
+    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.
 // Reports proxy config and the latest scrape run (no lead PII).
