@@ -889,11 +889,31 @@ app.get("/api/cron/vapi-debug-f95a3be51375b17121e5d04fda60a86d", async (c) => {
     } catch (e: any) {
       alterResult += " | close-error: " + String(e?.message ?? e).slice(0, 120);
     }
+    // CLEANUP: phantom 'disconnected' calls rows. Only the earliest per lead
+    // is legitimate (first reconcile of a real VAPI error call); the rest were
+    // minted by the stuck-row bug. Report counts, then delete phantoms.
+    let phantomReport: any = null;
+    try {
+      const rows: any = await db.execute(dsql.raw(
+        `SELECT lead_id, COUNT(*) AS n, MIN(created_at) AS first_at, MAX(created_at) AS last_at
+         FROM calls WHERE call_outcome='disconnected' GROUP BY lead_id ORDER BY n DESC`
+      ));
+      phantomReport = rows?.rows ?? rows;
+      const del: any = await db.execute(dsql.raw(
+        `DELETE FROM calls WHERE call_outcome='disconnected' AND id NOT IN (
+           SELECT MIN(id) FROM calls WHERE call_outcome='disconnected' GROUP BY lead_id
+         ) RETURNING id`
+      ));
+      phantomReport = { perLead: phantomReport, deleted: del?.rowCount ?? del?.length ?? 0 };
+    } catch (e: any) {
+      phantomReport = { error: String(e?.message ?? e).slice(0, 150) };
+    }
     return c.json({
       ok: true,
       vapiTotal: calls.length,
       alterResult,
       stuckRowsClosed: closed,
+      phantomReport,
       calls: calls.map((x: any) => ({
         id: x.id,
         createdAt: x.createdAt,
