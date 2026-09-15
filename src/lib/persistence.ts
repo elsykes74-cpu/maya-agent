@@ -23,7 +23,7 @@ export interface CallRecord {
   id: number;
   leadName: string;
   phone: string;
-  outcome: 'connected' | 'voicemail' | 'no_answer' | 'failed';
+  outcome: 'connected' | 'answered' | 'voicemail' | 'no_answer' | 'busy' | 'wrong_number' | 'disconnected' | 'callback_requested' | 'appointment_set' | 'not_interested' | 'dnc' | 'failed';
   duration: number;
   transcript: string | null;
   notes: string | null;

@@ -28,12 +28,28 @@ export const callsRouter = createRouter({
 
       const whereClause = filters.length > 0 ? and(...filters) : undefined;
 
-      const items = await db.query.calls.findMany({
-        where: whereClause,
-        orderBy: [desc(calls.createdAt)],
-        limit: input?.limit ?? 50,
-        offset: input?.offset ?? 0,
-      });
+      // Join the lead so the Calls tab can show real names/addresses without
+      // a second round-trip. Production pipeline calls live here — the tab
+      // must read from this table, not from phone-local storage.
+      const items = await db
+        .select({
+          id: calls.id,
+          leadId: calls.leadId,
+          callOutcome: calls.callOutcome,
+          duration: calls.duration,
+          notes: calls.notes,
+          appointmentSet: calls.appointmentSet,
+          createdAt: calls.createdAt,
+          sellerName: leads.sellerName,
+          propertyAddress: leads.propertyAddress,
+          phone: leads.phone,
+        })
+        .from(calls)
+        .leftJoin(leads, eq(calls.leadId, leads.id))
+        .where(whereClause)
+        .orderBy(desc(calls.createdAt))
+        .limit(input?.limit ?? 50)
+        .offset(input?.offset ?? 0);
 
       return { items };
     }),

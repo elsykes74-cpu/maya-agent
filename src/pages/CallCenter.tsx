@@ -22,7 +22,9 @@ export default function CallCenter() {
   const [callQueue, setCallQueue] = useState<CallJob[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [overallProgress, setOverallProgress] = useState(0);
-  const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
+  // Local records: manual test calls placed from this tab (leadless QA calls are
+  // not tracked in callQueue, so they live in phone-local storage only).
+  const [localCalls, setLocalCalls] = useState<CallRecord[]>([]);
 
   const [stage, setStage] = useState<CallStage>('idle');
   const [sid, setSid] = useState<string | null>(null);
@@ -42,7 +44,14 @@ export default function CallCenter() {
     { enabled: !!sid && stage === 'in_progress', refetchInterval: 2000 }
   );
 
-  useEffect(() => { setCallHistory(loadCalls()); }, []);
+  // Real production call history from the database (pipeline + reconciled
+  // outcomes). Refreshed every 30s so today's dials show up without reload.
+  const callsQuery = trpc.calls.list.useQuery(
+    { limit: 100 },
+    { refetchOnWindowFocus: false, refetchInterval: 30000 }
+  );
+
+  useEffect(() => { setLocalCalls(loadCalls()); }, []);
 
   useEffect(() => {
     if (transcriptData?.transcript && stage === 'in_progress') {
@@ -95,7 +104,7 @@ export default function CallCenter() {
     if (number) {
       const rec: CallRecord = { id: Date.now(), leadName: 'Test Call', phone: number, outcome: 'connected', duration, transcript: transcript.map(t => `${t.speaker}: ${t.text}`).join('\n') || null, notes: null, createdAt: new Date().toISOString() };
       const updated = addCallRecord(rec);
-      setCallHistory(updated);
+      setLocalCalls(updated);
     }
     setStage('completed');
     setSid(null);
@@ -126,15 +135,36 @@ export default function CallCenter() {
     setOverallProgress(Math.round(((idx + 1) / jobs.length) * 100));
     setCurrentIdx(idx + 1);
     addCallRecord({ id: Date.now(), leadName: job.leadName, phone: job.phone, outcome: outcome as any, duration, transcript: null, notes: null, createdAt: new Date().toISOString() });
-    setCallHistory(loadCalls());
+    setLocalCalls(loadCalls());
     if (!batchPaused) runBatch(jobs, idx + 1);
   };
 
+  // Merge production history (DB) with phone-local test-call records.
+  // DB 'answered' maps to the tab's 'connected' bucket.
+  const dbCalls: CallRecord[] = (callsQuery.data?.items ?? []).map((c: any) => ({
+    id: c.id,
+    leadName: c.sellerName || `Lead #${c.leadId}`,
+    phone: c.phone || '',
+    outcome: (c.callOutcome === 'answered' ? 'connected' : c.callOutcome || 'failed') as CallRecord['outcome'],
+    duration: c.duration ?? 0,
+    transcript: null,
+    notes: c.notes ?? null,
+    createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
+  }));
+  const callHistory: CallRecord[] = [...localCalls, ...dbCalls]
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+
+  // "Today" in the user's timezone — the stats tiles are today's production.
+  const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  const isToday = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayET;
+  const todays = callHistory.filter(c => isToday(c.createdAt));
+
   const stats = {
-    total: callHistory.length,
-    connected: callHistory.filter(c => c.outcome === 'connected').length,
-    voicemail: callHistory.filter(c => c.outcome === 'voicemail').length,
-    noAnswer: callHistory.filter(c => c.outcome === 'no_answer').length,
+    total: todays.length,
+    connected: todays.filter(c => c.outcome === 'connected' || c.outcome === 'answered').length,
+    voicemail: todays.filter(c => c.outcome === 'voicemail').length,
+    noAnswer: todays.filter(c => c.outcome === 'no_answer').length,
   };
 
   const isCallActive = ['connecting', 'ringing', 'in_progress'].includes(stage);
@@ -273,7 +303,7 @@ export default function CallCenter() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <SectionTitle>Call History</SectionTitle>
         {callHistory.length > 0 && (
-          <button onClick={() => { clearCalls(); setCallHistory([]); }} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.red, cursor: 'pointer', marginBottom: 14 }}>Clear All</button>
+          <button onClick={() => { clearCalls(); setLocalCalls([]); }} className="press-sm" style={{ background: 'none', border: 'none', fontSize: 13, fontWeight: 700, color: C.red, cursor: 'pointer', marginBottom: 14 }}>Clear All</button>
         )}
       </div>
 
@@ -369,9 +399,21 @@ function CallError({ error, onDismiss }: { error: string; onDismiss: () => void 
 }
 
 function CallHistoryCard({ call, expanded, onToggle }: { call: CallRecord; expanded: boolean; onToggle: () => void }) {
-  const outcomeColor = call.outcome === 'connected' ? C.green : call.outcome === 'voicemail' ? C.orange : C.red;
-  const outcomeBg = call.outcome === 'connected' ? C.greenS : call.outcome === 'voicemail' ? C.orangeS : C.redS;
-  const outcomeLabel = call.outcome === 'connected' ? 'Connected' : call.outcome === 'voicemail' ? 'Voicemail' : 'No Answer';
+  const outcomeColor = (call.outcome === 'connected' || call.outcome === 'answered' || call.outcome === 'appointment_set') ? C.green
+    : call.outcome === 'voicemail' ? C.orange : C.red;
+  const outcomeBg = (call.outcome === 'connected' || call.outcome === 'answered' || call.outcome === 'appointment_set') ? C.greenS
+    : call.outcome === 'voicemail' ? C.orangeS : C.redS;
+  const outcomeLabel = call.outcome === 'connected' || call.outcome === 'answered' ? 'Connected'
+    : call.outcome === 'voicemail' ? 'Voicemail'
+    : call.outcome === 'no_answer' ? 'No Answer'
+    : call.outcome === 'busy' ? 'Busy'
+    : call.outcome === 'wrong_number' ? 'Wrong Number'
+    : call.outcome === 'disconnected' ? 'Disconnected'
+    : call.outcome === 'callback_requested' ? 'Callback'
+    : call.outcome === 'appointment_set' ? 'Appointment'
+    : call.outcome === 'not_interested' ? 'Not Interested'
+    : call.outcome === 'dnc' ? 'DNC'
+    : 'Failed';
 
   return (
     <NeoTile style={{ marginBottom: 12, cursor: 'pointer' }} onClick={onToggle}>
