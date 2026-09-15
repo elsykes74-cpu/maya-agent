@@ -1,15 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, Play, Pause, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, Mic, Radio, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
+import { Bot, Square, CheckCircle, PhoneCall, FileText, Phone, Sparkles, AlertTriangle, ExternalLink, Copy, Check } from 'lucide-react';
 import { C, NeoTile, NeoIcon, SectionTitle, StatPill } from '@/components/Neo';
-import { loadLeads, loadCalls, addCallRecord, clearCalls } from '@/lib/persistence';
+import { loadCalls, addCallRecord, clearCalls } from '@/lib/persistence';
 import type { CallRecord } from '@/lib/persistence';
 import { trpc } from '@/providers/trpc';
-
-interface CallJob {
-  leadId: number; leadName: string; phone: string;
-  status: 'queued' | 'calling' | 'connected' | 'voicemail' | 'no_answer' | 'completed';
-  progress: number; duration: number;
-}
 
 type CallStage = 'idle' | 'connecting' | 'ringing' | 'in_progress' | 'completed' | 'failed';
 
@@ -17,11 +11,6 @@ interface TranscriptTurn { speaker: 'maya' | 'user'; text: string; time: number;
 
 export default function CallCenter() {
   const [exp, setExp] = useState<number | null>(null);
-  const [batchMode, setBatchMode] = useState(false);
-  const [batchPaused, setBatchPaused] = useState(false);
-  const [callQueue, setCallQueue] = useState<CallJob[]>([]);
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [overallProgress, setOverallProgress] = useState(0);
   // Local records: manual test calls placed from this tab (leadless QA calls are
   // not tracked in callQueue, so they live in phone-local storage only).
   const [localCalls, setLocalCalls] = useState<CallRecord[]>([]);
@@ -111,33 +100,9 @@ export default function CallCenter() {
     setTimeout(() => setStage('idle'), 2000);
   }, [sid, timer, number, transcript, hangUpMut]);
 
-  // Batch calling
-  const startBatch = () => {
-    const leads = loadLeads().filter(l => l.phone);
-    const jobs: CallJob[] = leads.map(l => ({ leadId: l.id, leadName: l.sellerName, phone: l.phone, status: 'queued', progress: 0, duration: 0 }));
-    setCallQueue(jobs);
-    setCurrentIdx(0);
-    setOverallProgress(0);
-    setBatchMode(true);
-    setBatchPaused(false);
-    runBatch(jobs, 0);
-  };
-
-  const runBatch = async (jobs: CallJob[], idx: number) => {
-    if (idx >= jobs.length) { setBatchMode(false); return; }
-    const job = jobs[idx];
-    setCallQueue(q => q.map((j, i) => i === idx ? { ...j, status: 'calling' } : j));
-    const outcomes: CallJob['status'][] = ['connected', 'voicemail', 'no_answer'];
-    await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
-    const outcome = outcomes[Math.floor(Math.random() * outcomes.length)];
-    const duration = outcome === 'connected' ? 60 + Math.floor(Math.random() * 180) : 0;
-    setCallQueue(q => q.map((j, i) => i === idx ? { ...j, status: 'completed', progress: 100, duration } : j));
-    setOverallProgress(Math.round(((idx + 1) / jobs.length) * 100));
-    setCurrentIdx(idx + 1);
-    addCallRecord({ id: Date.now(), leadName: job.leadName, phone: job.phone, outcome: outcome as any, duration, transcript: null, notes: null, createdAt: new Date().toISOString() });
-    setLocalCalls(loadCalls());
-    if (!batchPaused) runBatch(jobs, idx + 1);
-  };
+  // NOTE: the old "Call All Leads" batch simulator was removed 2026-09-15.
+  // It fabricated random call outcomes into local history — phantom data.
+  // Real dialing runs through the 15-min pipeline tick (processHotLeads).
 
   // Merge production history (DB) with phone-local test-call records.
   // DB 'answered' maps to the tab's 'connected' bucket.
@@ -181,43 +146,6 @@ export default function CallCenter() {
           <span style={{ fontSize: 12, fontWeight: 700, color: C.green }}>Backend AI Active</span>
         </div>
       </div>
-
-      {/* Call All Leads batch button */}
-      <button
-        onClick={batchMode ? () => setBatchPaused(p => !p) : startBatch}
-        className="maya-tile press-sm"
-        style={{ width: '100%', height: 64, borderRadius: 22, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 20, background: batchMode ? (batchPaused ? `linear-gradient(135deg, ${C.orange}, #E08900)` : `linear-gradient(135deg, ${C.red}, #C72020)`) : `linear-gradient(135deg, ${C.teal}, ${C.green})`, color: '#fff', padding: 0 }}
-      >
-        {batchMode ? (
-          batchPaused ? <><Play size={22} fill="white" strokeWidth={0} /><span style={{ fontSize: 17, fontWeight: 700 }}>Resume Calling ({currentIdx}/{callQueue.length})</span></>
-            : <><Pause size={22} strokeWidth={2.5} /><span style={{ fontSize: 17, fontWeight: 700 }}>Pause · {currentIdx}/{callQueue.length} ({overallProgress}%)</span></>
-        ) : (
-          <><Radio size={22} strokeWidth={2} /><span style={{ fontSize: 17, fontWeight: 700 }}>Call All Leads with Maya</span></>
-        )}
-      </button>
-
-      {batchMode && (
-        <NeoTile style={{ marginBottom: 20, padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Batch Progress</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: C.teal }}>{overallProgress}%</span>
-          </div>
-          <div className="maya-progress-track">
-            <div className="maya-progress-fill" style={{ width: `${overallProgress}%` }} />
-          </div>
-          <div style={{ marginTop: 12, maxHeight: 160, overflowY: 'auto' }} className="hide-scrollbar">
-            {callQueue.slice(0, currentIdx + 3).map((job, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
-                <NeoIcon bg={job.status === 'completed' ? C.greenS : job.status === 'calling' ? C.tealS : C.blueS} size={32}>
-                  {job.status === 'completed' ? <CheckCircle size={14} color={C.green} /> : job.status === 'calling' ? <Mic size={14} color={C.teal} /> : <Phone size={14} color={C.blue} />}
-                </NeoIcon>
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: C.text }}>{job.leadName}</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: job.status === 'completed' ? C.green : job.status === 'calling' ? C.teal : C.muted, textTransform: 'uppercase' }}>{job.status}</span>
-              </div>
-            ))}
-          </div>
-        </NeoTile>
-      )}
 
       {vapiMissing && <VapiSetupCard />}
 
