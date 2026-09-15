@@ -867,9 +867,33 @@ app.get("/api/cron/vapi-debug-f95a3be51375b17121e5d04fda60a86d", async (c) => {
       externalCallId: callQueue.externalCallId,
       startedAt: callQueue.startedAt,
     }).from(callQueue).orderBy(desc(callQueue.id)).limit(30);
+    const { sql: dsql } = await import("drizzle-orm");
+    // FIX 1: the reconcile writes callOutcome='disconnected' to call_queue, but
+    // the call_queue_outcome enum lacks that value -> every update threw,
+    // rows stuck 'dialing', phantom calls rows every tick. Add it.
+    let alterResult = "skipped";
+    try {
+      await db.execute(dsql.raw(`ALTER TYPE call_queue_outcome ADD VALUE IF NOT EXISTS 'disconnected'`));
+      alterResult = "added";
+    } catch (e: any) {
+      alterResult = "error: " + String(e?.message ?? e).slice(0, 120);
+    }
+    // FIX 2: close the two stuck rows so they stop phantoming.
+    const { eq: deq } = await import("drizzle-orm");
+    let closed = 0;
+    try {
+      const r: any = await db.execute(dsql.raw(
+        `UPDATE call_queue SET status='completed', call_outcome='disconnected', completed_at=NOW() WHERE status='dialing' AND id IN (5,6) RETURNING id`
+      ));
+      closed = r?.rowCount ?? r?.length ?? 0;
+    } catch (e: any) {
+      alterResult += " | close-error: " + String(e?.message ?? e).slice(0, 120);
+    }
     return c.json({
       ok: true,
       vapiTotal: calls.length,
+      alterResult,
+      stuckRowsClosed: closed,
       calls: calls.map((x: any) => ({
         id: x.id,
         createdAt: x.createdAt,
