@@ -838,6 +838,39 @@ app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
 app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
 
 // ---------------------------------------------------------------------------
+// TEMPORARY diagnostic: VAPI failure reasons (remove after 2026-09-15 debug).
+// Server-side only — VAPI is Cloudflare-blocking this VM's egress, so the
+// failure reasons must be read from Vercel's network. Returns endedReason +
+// status only, no customer PII. Unguessable path, no auth header needed.
+// ---------------------------------------------------------------------------
+app.get("/api/cron/vapi-debug-f95a3be51375b17121e5d04fda60a86d", async (c) => {
+  try {
+    const { getCallingConfig } = await import("./lib/vapi.js");
+    const config = await getCallingConfig();
+    if (!config?.apiKey) return c.json({ ok: false, error: "no api key" }, 500);
+    const res = await fetch("https://api.vapi.ai/call?limit=25", {
+      headers: { Authorization: `Bearer ${config.apiKey}` },
+    });
+    if (!res.ok) {
+      const t = await res.text().catch(() => "");
+      return c.json({ ok: false, vapiStatus: res.status, body: t.slice(0, 300) }, 502);
+    }
+    const calls = (await res.json()) as any[];
+    return c.json({
+      ok: true,
+      calls: calls.map((x: any) => ({
+        id: x.id,
+        createdAt: x.createdAt,
+        status: x.status,
+        endedReason: x.endedReason,
+      })),
+    });
+  } catch (err: any) {
+    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.
 // Reports proxy config and the latest scrape run (no lead PII).
 // ---------------------------------------------------------------------------
