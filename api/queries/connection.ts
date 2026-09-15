@@ -33,8 +33,25 @@ function assertDatabaseUrl(value: string): string {
 
 export function getDb() {
   if (!instance) {
-    // prepare: false required for Supabase transaction-mode pooler
-    const client = postgres(assertDatabaseUrl(env.databaseUrl), { prepare: false });
+    const client = postgres(assertDatabaseUrl(env.databaseUrl), {
+      // prepare: false is required for Supabase's transaction-mode pooler
+      // (statement caching breaks when the pooler multiplexes connections).
+      prepare: false,
+      // Bounded pool — keep the app's connection count well under the
+      // Supabase pooler ceiling. Raise deliberately if concurrency grows.
+      max: Number(process.env.PG_POOL_MAX ?? 10),
+      // Release idle server connections so the pooler can reclaim them.
+      idle_timeout: Number(process.env.PG_IDLE_TIMEOUT ?? 20),
+      // Fail fast instead of hanging a request when the DB is unreachable.
+      connect_timeout: Number(process.env.PG_CONNECT_TIMEOUT ?? 10),
+      // Surface connection-level errors to logs (observability) without
+      // crashing the process; the driver reconnects on the next query.
+      onnotice: () => {},
+      connection: { application_name: "maya-agent" },
+    });
+    client`select 1`.catch((err) =>
+      console.error("[db] initial connectivity check failed:", err?.message ?? err),
+    );
     instance = drizzle(client, { schema: fullSchema });
   }
   return instance;
