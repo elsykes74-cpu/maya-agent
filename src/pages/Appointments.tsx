@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router';
 import { Clock, MapPin, User } from 'lucide-react';
 import { C, NeoTile, BackBtn } from '@/components/Neo';
 import { loadAppointments, saveAppointments, type Appointment } from '@/lib/persistence';
-import { APPOINTMENTS as INITIAL_APPOINTMENTS } from '@/data';
+
+// Fingerprints of the old hardcoded demo appointments (removed Sep 2026).
+// Any stored record matching one of these is demo data, not a real booking.
+const DEMO_APPT_KEYS = new Set([
+  'Property Walkthrough|Sarah Johnson|142 Maple St, Springfield',
+  'Contract Signing|Mike Chen|Title Office, Downtown Springfield',
+]);
 
 export default function Appointments() {
   const navigate = useNavigate();
@@ -11,13 +17,14 @@ export default function Appointments() {
 
   useEffect(() => {
     const stored = loadAppointments();
-    if (stored.length === 0 && INITIAL_APPOINTMENTS.length > 0) {
-      const seeded = INITIAL_APPOINTMENTS as Appointment[];
-      saveAppointments(seeded);
-      setAppointments(seeded);
-    } else {
-      setAppointments(stored);
+    const cleaned = stored.filter(
+      a => !DEMO_APPT_KEYS.has(`${a.title}|${a.leadName}|${a.location}`)
+    );
+    if (cleaned.length !== stored.length) {
+      // Drop the demo records from this device's storage so they never show again.
+      saveAppointments(cleaned);
     }
+    setAppointments(cleaned);
   }, []);
 
   return (
