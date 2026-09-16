@@ -1,4 +1,4 @@
-import { eq, and, isNull, lt, desc, lte, asc } from "drizzle-orm";
+import { eq, and, isNull, lt, desc, lte, asc, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import { leads, callQueue, tasks, activities, offers, buyers } from "../../db/schema";
 import { sendMessage, escapeHtml } from "../lib/telegram";
@@ -284,8 +284,13 @@ export async function runLeadsAutomation(notifyChatId?: string, notifyToken?: st
 
   const candidates = await db.query.leads.findMany({
     where: and(
+      // Never-contacted leads genuinely have NULL last_contact_date, so isNull
+      // is correct here.
       isNull(leads.lastContactDate),
-      isNull(leads.appointmentSet),
+      // "no appointment yet" = NULL or false. appointment_set is a boolean with
+      // DEFAULT false that the scrapers never set, so it lands as false (never
+      // NULL); isNull() alone matched 0 rows. `IS NOT TRUE` covers false OR NULL.
+      sql`${leads.appointmentSet} is not true`,
     ),
     orderBy: [desc(leads.leadScore)],
     limit: 20,

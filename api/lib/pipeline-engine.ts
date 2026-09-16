@@ -7,7 +7,7 @@
  *
  * Driven by runPipelineTick(), invoked every 15 min from telegram-scheduler.
  */
-import { and, desc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import {
   activities,
@@ -273,7 +273,12 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   if (remaining <= 0) return { dialed: 0, reason: "daily cap reached" };
 
   const hot = await db.query.leads.findMany({
-    where: and(eq(leads.pipelineStage, "hot_routing"), isNull(leads.appointmentSet)),
+    // "no appointment yet" = NULL or false. appointment_set is a boolean with
+    // DEFAULT false and the scrapers never set it, so it lands as false, never
+    // NULL — isNull() alone matched 0 rows and stranded every hot lead. The
+    // webhook only flips it to true when Maya books, so `IS NOT TRUE` (false OR
+    // NULL) is the correct, durable predicate.
+    where: and(eq(leads.pipelineStage, "hot_routing"), sql`${leads.appointmentSet} is not true`),
     orderBy: [desc(leads.leadScore)],
     limit: Math.min(remaining, 5),
   });
