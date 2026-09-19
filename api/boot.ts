@@ -952,6 +952,57 @@ async function handleCronPipelineTick(c: any) {
 app.get("/api/cron/pipeline-tick", handleCronPipelineTick);
 app.post("/api/cron/pipeline-tick", handleCronPipelineTick);
 
+// TEMPORARY read-only dial-funnel diagnostic (remove after debug)
+app.get("/api/cron/dial-funnel-a3f1c9e2b4d5", async (c) => {
+  try {
+    const { getDb } = await import("./queries/connection.js");
+    const { leads, callQueue, tasks } = await import("../db/schema.js");
+    const { and, or, eq, isNull, gte, lte, ne, desc, sql } = await import("drizzle-orm");
+    const { getCallingConfig, isWithinCallWindow, scrubPhone } = await import("./lib/vapi.js");
+    const db = getDb();
+    const config = await getCallingConfig();
+    const tz = config.timezone || "America/New_York";
+    const inWindow = isWithinCallWindow(config.callWindowStart || "09:00", config.callWindowEnd || "19:00", tz);
+
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const counted = await db.select({ count: sql<number>`count(*)` }).from(callQueue).where(gte(callQueue.createdAt, todayStart));
+    const remaining = (config.maxDailyCalls ?? 100) - Number(counted[0]?.count ?? 0);
+
+    const candidates = await db.query.leads.findMany({
+      where: and(eq(leads.pipelineStage, "hot_routing"), or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false))),
+      orderBy: [desc(leads.leadScore)], limit: 50,
+    });
+    const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
+    let noPhone = 0, blocked48h = 0, scrubFail = 0; const scrubFails: any[] = []; let eligible = 0;
+    for (const lead of candidates.slice(0, 50)) {
+      if (!lead.phone) { noPhone++; continue; }
+      const recent: any = await db.query.callQueue.findFirst({
+        where: and(eq(callQueue.leadId, lead.id), gte(callQueue.createdAt, twoDaysAgo),
+          or(ne(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`)),
+        orderBy: [desc(callQueue.createdAt)],
+      });
+      if (recent) { blocked48h++; continue; }
+      const scrub = await scrubPhone(lead.phone, true, true, lead.id);
+      if (!scrub.pass) { scrubFail++; if (scrubFails.length < 5) scrubFails.push({ id: lead.id, reason: scrub.reason }); continue; }
+      eligible++;
+    }
+
+    const dueTasks = await db.select({ count: sql<number>`count(*)` }).from(tasks)
+      .where(and(eq(tasks.type, "call_back"), eq(tasks.status, "pending"), lte(tasks.dueAt, new Date())));
+    const pendingTasks = await db.select({ count: sql<number>`count(*)` }).from(tasks)
+      .where(and(eq(tasks.type, "call_back"), eq(tasks.status, "pending")));
+    const recentQueue: any = await db.select({ id: callQueue.id, leadId: callQueue.leadId, status: callQueue.status, createdAt: callQueue.createdAt })
+      .from(callQueue).orderBy(desc(callQueue.createdAt)).limit(8);
+
+    return c.json({ ok: true, inWindow, remaining, candidates: candidates.length,
+      funnel: { noPhone, blocked48h, scrubFail, eligible }, scrubFailSample: scrubFails,
+      dueCallBackTasks: Number(dueTasks[0]?.count ?? 0), pendingCallBackTasks: Number(pendingTasks[0]?.count ?? 0),
+      recentQueue: recentQueue.map((r: any) => ({ ...r, createdAt: r.createdAt?.toISOString?.() ?? String(r.createdAt) })) });
+  } catch (err: any) {
+    return c.json({ ok: false, error: String(err?.message ?? err) }, 500);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Craigslist health — Bearer-gated status for monitors/dashboards.
 // Reports proxy config and the latest scrape run (no lead PII).
