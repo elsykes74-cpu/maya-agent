@@ -289,10 +289,17 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
+  // Daily cap counts actual dial attempts only — "queued" rows that never
+  // reached VAPI and "failed" rows are not calls and must not burn the cap.
   const counted = await db
     .select({ count: sql<number>`count(*)` })
     .from(callQueue)
-    .where(gte(callQueue.createdAt, todayStart));
+    .where(
+      and(
+        gte(callQueue.createdAt, todayStart),
+        inArray(callQueue.status, ["dialing", "connected", "completed"] as any),
+      ),
+    );
   const remaining = (config.maxDailyCalls ?? 100) - Number(counted[0]?.count ?? 0);
   if (remaining <= 0) return { dialed: 0, reason: "daily cap reached" };
 
@@ -314,18 +321,23 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
 
   const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
   // Phase 1 (read-only + scrub): collect up to BATCH dialable leads.
+  // The 48h guard counts only real dial attempts — "queued" rows that never
+  // reached VAPI are not calls and must not block redials.
   const eligible: (typeof candidates)[number][] = [];
   await mapWithConcurrency(candidates, 4, async (lead) => {
     if (eligible.length >= BATCH) return false;
     if (!lead.phone) return false;
     // Don't hammer: skip if called in the last 48h. A queue row that failed
-    // before the call reached VAPI (failed + no external call id) is not a
-    // call — it must not block retries.
+    // before the call reached VAPI (failed + no external call id, or stuck
+    // "queued") is not a call — it must not block retries.
     const recent = await db.query.callQueue.findFirst({
       where: and(
         eq(callQueue.leadId, lead.id),
         gte(callQueue.createdAt, twoDaysAgo),
-        or(ne(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`),
+        or(
+          inArray(callQueue.status, ["dialing", "connected", "completed"] as any),
+          and(eq(callQueue.status, "failed"), sql`${callQueue.externalCallId} IS NOT NULL`),
+        ),
       ),
       orderBy: [desc(callQueue.createdAt)],
     });
@@ -352,6 +364,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   // tick past the serverless timeout, which dropped the HTTP response.
   // (Eligibility was already decided in phase 1; this only dials.)
   const dialLead = async (lead: (typeof toDial)[number]): Promise<boolean> => {
+    let queueRowId: number | null = null;
     try {
       if (!lead.phone) return false;
 
@@ -359,6 +372,7 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
         .insert(callQueue)
         .values({ campaignId: 0, campaignLeadId: 0, leadId: lead.id, phone: lead.phone, status: "queued" } as any)
         .returning({ id: callQueue.id });
+      queueRowId = queueRow.id;
 
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName || "Seller");
       if (!vapiCall) {
@@ -382,6 +396,15 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
       return true;
     } catch (err) {
       console.error("[pipeline] hot dial error:", err);
+      // Never leave a "queued" row behind — a stuck row blocks the 48h guard
+      // and burns the daily cap without ever placing a call.
+      if (queueRowId) {
+        try {
+          await db.update(callQueue)
+            .set({ status: "failed", errorMessage: String((err as any)?.message ?? err).slice(0, 500) } as any)
+            .where(eq(callQueue.id, queueRowId));
+        } catch { /* best effort */ }
+      }
       return false;
     }
   };

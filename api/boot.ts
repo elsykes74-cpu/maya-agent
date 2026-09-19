@@ -957,9 +957,22 @@ app.get("/api/cron/dial-funnel-a3f1c9e2b4d5", async (c) => {
   try {
     const { getDb } = await import("./queries/connection.js");
     const { leads, callQueue, tasks } = await import("../db/schema.js");
-    const { and, or, eq, isNull, gte, lte, ne, desc, sql } = await import("drizzle-orm");
+    const { and, or, eq, isNull, gte, lte, lt, ne, desc, sql } = await import("drizzle-orm");
     const { getCallingConfig, isWithinCallWindow, scrubPhone } = await import("./lib/vapi.js");
     const db = getDb();
+
+    // One-time cleanup: mark "queued" rows older than 30 min as failed.
+    // They never reached VAPI; leaving them "queued" blocks the 48h guard.
+    if (c.req.query("cleanup") === "1") {
+      const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+      const stuck: any = await db.select({ id: callQueue.id }).from(callQueue)
+        .where(and(eq(callQueue.status, "queued"), lt(callQueue.createdAt, cutoff)));
+      for (const r of stuck) {
+        await db.update(callQueue).set({ status: "failed", errorMessage: "Stuck queued row cleaned up 2026-09-19" } as any)
+          .where(eq(callQueue.id, r.id));
+      }
+      return c.json({ ok: true, cleaned: stuck.length });
+    }
     const config = await getCallingConfig();
     const tz = config.timezone || "America/New_York";
     const inWindow = isWithinCallWindow(config.callWindowStart || "09:00", config.callWindowEnd || "19:00", tz);

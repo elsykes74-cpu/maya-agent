@@ -161,6 +161,7 @@ async function countCallsForLead(leadId: number): Promise<number> {
 /**
  * Schedule the next follow-up touch after a call outcome.
  * Sequence: +2d call → +5d call (+email if we have one) → +9d call (+email) → +14d final call.
+ * Unanswered numbers (no_answer / voicemail / busy) retry faster: +1d → +3d → +7d → +14d.
  */
 async function scheduleFollowUps(leadId: number, outcome: CallOutcome, lead: any): Promise<void> {
   const db = getDb();
@@ -184,7 +185,10 @@ async function scheduleFollowUps(leadId: number, outcome: CallOutcome, lead: any
   if (pending) return;
 
   const step = attempts; // 1 = first follow-up after initial call
-  const callDelays: Record<number, number> = { 1: 2, 2: 5, 3: 9, 4: 14 };
+  const unanswered = outcome === "no_answer" || outcome === "voicemail" || outcome === "busy";
+  const callDelays: Record<number, number> = unanswered
+    ? { 1: 1, 2: 3, 3: 7, 4: 14 }
+    : { 1: 2, 2: 5, 3: 9, 4: 14 };
   const delayDays = callDelays[step] ?? 14;
   const dueAt = new Date(Date.now() + delayDays * 24 * 3600 * 1000);
 
@@ -357,6 +361,7 @@ export async function processFollowUpTasks(): Promise<number> {
   // Per-task dials are independent — run a few in parallel so a batch of due
   // follow-ups doesn't push the tick past the serverless timeout.
   const dialTask = async (task: (typeof dueTasks)[number]): Promise<boolean> => {
+    let queueRowId: number | null = null;
     try {
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, Number(task.leadId)) });
       if (!lead?.phone) {
@@ -382,15 +387,20 @@ export async function processFollowUpTasks(): Promise<number> {
       const [queueRow] = await db.insert(callQueue).values({
         campaignId: 0, campaignLeadId: 0, leadId: lead.id, phone: lead.phone, status: "queued",
       } as any).returning({ id: callQueue.id });
+      queueRowId = queueRow?.id ?? null;
 
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName || "Seller");
       if (!vapiCall) {
         await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
+        if (queueRow?.id) {
+          await db.update(callQueue).set({ status: "failed", errorMessage: "VAPI call request failed" } as any)
+            .where(eq(callQueue.id, queueRow.id));
+        }
         return false;
       }
       if (queueRow?.id) {
         await db.update(callQueue)
-          .set({ externalCallId: vapiCall.id, status: "dialing" } as any)
+          .set({ externalCallId: vapiCall.id, status: "dialing", startedAt: new Date() } as any)
           .where(eq(callQueue.id, queueRow.id));
       }
       await db.update(tasks).set({ status: "completed", completedAt: new Date() } as any)
@@ -404,6 +414,15 @@ export async function processFollowUpTasks(): Promise<number> {
     } catch (err) {
       console.error(`[follow-up] Error on task #${task.id}:`, err);
       await db.update(tasks).set({ status: "pending" } as any).where(eq(tasks.id, task.id));
+      // Never leave a "queued" row behind — it blocks the 48h guard and burns
+      // the daily cap without ever placing a call.
+      if (queueRowId) {
+        try {
+          await db.update(callQueue)
+            .set({ status: "failed", errorMessage: String((err as any)?.message ?? err).slice(0, 500) } as any)
+            .where(eq(callQueue.id, queueRowId));
+        } catch { /* best effort */ }
+      }
       return false;
     }
   };
