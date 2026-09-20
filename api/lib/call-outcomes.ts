@@ -272,9 +272,19 @@ export async function reconcileCallOutcomes(): Promise<number> {
           appointmentSet: outcome === "appointment_set",
         } as any).returning({ id: calls.id });
 
-        await db.update(callQueue)
-          .set({ status: "completed", callOutcome: outcome as any } as any)
-          .where(eq(callQueue.id, row.id));
+        // Close the queue row. If the outcome value isn't in the
+        // call_queue_outcome enum (e.g. a value added to call_outcome but not
+        // to call_queue_outcome), still mark it completed — a stuck 'dialing'
+        // row mints a duplicate calls row on every tick.
+        try {
+          await db.update(callQueue)
+            .set({ status: "completed", callOutcome: outcome as any } as any)
+            .where(eq(callQueue.id, row.id));
+        } catch {
+          await db.update(callQueue)
+            .set({ status: "completed" } as any)
+            .where(eq(callQueue.id, row.id));
+        }
 
         await db.insert(activities).values({
           leadId: row.leadId,
