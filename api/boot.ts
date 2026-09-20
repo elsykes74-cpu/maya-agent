@@ -799,6 +799,12 @@ const MIGRATE_STATEMENTS: string[] = [
   // rows were minted on every tick. Fixed live 2026-09-15; kept here so fresh
   // databases get the value too.
   `ALTER TYPE "call_queue_outcome" ADD VALUE IF NOT EXISTS 'disconnected'`,
+  // 0011 — same class as 0009: call_queue_outcome also lacked
+  // 'callback_requested' and 'wrong_number', so any reconcile with those
+  // outcomes threw on the queue update, the row stuck 'dialing', and a
+  // duplicate calls row was minted every tick (lead 471, 2026-09-15→20).
+  `ALTER TYPE "call_queue_outcome" ADD VALUE IF NOT EXISTS 'callback_requested'`,
+  `ALTER TYPE "call_queue_outcome" ADD VALUE IF NOT EXISTS 'wrong_number'`,
   // 0010 — Supabase security advisor (rls_disabled_in_public): enable Row
   // Level Security on every app table and add an explicit service_role
   // policy. No anon/public policies: PostgREST access is denied while
