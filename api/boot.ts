@@ -920,6 +920,24 @@ async function handleCronMigrate(c: any) {
   if (!checkCronAuth(c)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
+  // TEMPORARY targeted enum fix (remove after 2026-09-20): the full migrate
+  // loop hangs, so run just the two ALTER TYPE statements directly.
+  if (c.req.query("targeted") === "enum11") {
+    const db = getDb();
+    const out: string[] = [];
+    for (const stmt of [
+      `ALTER TYPE "call_queue_outcome" ADD VALUE IF NOT EXISTS 'callback_requested'`,
+      `ALTER TYPE "call_queue_outcome" ADD VALUE IF NOT EXISTS 'wrong_number'`,
+    ]) {
+      try {
+        await db.execute(sql.raw(stmt));
+        out.push("ok: " + stmt.slice(0, 50));
+      } catch (e: any) {
+        out.push("FAIL: " + stmt.slice(0, 50) + " :: " + String(e?.message ?? e).slice(0, 200));
+      }
+    }
+    return c.json({ targeted: out });
+  }
   const db = getDb();
   const applied: string[] = [];
   const failed: { statement: string; error: string }[] = [];
