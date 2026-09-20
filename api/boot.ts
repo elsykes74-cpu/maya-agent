@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql, inArray, eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
-import { leads, calls } from "../db/schema";
+import { leads } from "../db/schema";
 import { notify, sendAlert } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
@@ -935,49 +935,6 @@ async function handleCronMigrate(c: any) {
 }
 app.get("/api/cron/migrate", handleCronMigrate);
 app.post("/api/cron/migrate", handleCronMigrate);
-
-// TEMPORARY 2026-09-20 — delete confirmed lead-471 phantom calls rows
-// (minted by the pre-b815e6e stuck-reconcile bug). Secret-gated like the
-// other cron endpoints. Remove this route before the next routine deploy.
-app.post("/api/cron/cleanup-phantoms", async (c: any) => {
-  if (!checkCronAuth(c)) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  let body: any = {};
-  try {
-    body = await c.req.json();
-  } catch {
-    /* no body */
-  }
-  const ids: number[] = Array.isArray(body.ids)
-    ? body.ids.filter((x: any) => Number.isInteger(x) && x > 0)
-    : [];
-  if (!ids.length) return c.json({ ok: false, error: "no ids" }, 400);
-  const db = getDb();
-  // Safety: only rows belonging to lead 471 may be deleted.
-  const existing = await db
-    .select({ id: calls.id, leadId: calls.leadId })
-    .from(calls)
-    .where(inArray(calls.id, ids));
-  const foreign = existing.filter((r: any) => r.leadId !== 471);
-  if (foreign.length) {
-    return c.json(
-      { ok: false, error: "refusing: ids outside lead 471", foreign },
-      400
-    );
-  }
-  const safeIds = existing.map((r: any) => r.id);
-  if (safeIds.length) {
-    await db.delete(calls).where(inArray(calls.id, safeIds));
-  }
-  return c.json({
-    ok: true,
-    requested: ids.length,
-    found: existing.length,
-    deleted: safeIds.length,
-    missing: ids.length - existing.length,
-  });
-});
 
 // Pipeline tick — route new leads, auto-dial hot leads via Maya/VAPI, send due
 // LadyJaye nurture SMS. The in-process schedulers (telegram-scheduler's 15-min
