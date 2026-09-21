@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql, eq, and, or, gte, inArray, desc, isNull } from "drizzle-orm";
+import { sql, eq, and, or, gte, inArray, desc, asc, isNull } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
