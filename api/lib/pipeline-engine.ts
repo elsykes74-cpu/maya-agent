@@ -7,7 +7,7 @@
  *
  * Driven by runPipelineTick(), invoked every 15 min from telegram-scheduler.
  */
-import { and, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import {
   activities,
@@ -304,10 +304,11 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   if (remaining <= 0) return { dialed: 0, reason: "daily cap reached" };
 
   const BATCH = Math.min(remaining, 5);
-  // Fetch enough candidates to fill the batch. The top-N by score are often
-  // undialable (48h redial guard / no phone), so a tight candidate limit of 5
-  // starved the dialer — every tick fetched the same 5 blocked leads and
-  // dialed nothing. Fixed 2026-09-15.
+  // Fetch enough candidates to fill the batch. The hot pool (108+ leads) is
+  // much larger than the old limit of 50, and every lead scores 70, so the
+  // same arbitrary top-50 — mostly phoneless or guard-blocked — starved the
+  // dialer while 30+ never-contacted phone leads sat below the cutoff,
+  // invisible. Fixed 2026-09-21: scan up to 200, never-contacted first.
   const candidates = await db.query.leads.findMany({
     // appointmentSet defaults to false (not NULL) on every lead row, so match
     // both NULL and false — "not yet set" means the lead hasn't booked.
@@ -315,8 +316,10 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
       eq(leads.pipelineStage, "hot_routing"),
       or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
     ),
-    orderBy: [desc(leads.leadScore)],
-    limit: Math.min(remaining, 50),
+    // Never-contacted leads first (NULLS FIRST is Postgres ASC default),
+    // then highest score — every fresh number gets its first dial ASAP.
+    orderBy: [asc(leads.lastContactDate), desc(leads.leadScore)],
+    limit: Math.min(remaining, 200),
   });
 
   const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);

@@ -969,8 +969,9 @@ app.post("/api/cron/diag-dial", async (c: any) => {
       eq(leads.pipelineStage, "hot_routing"),
       or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false))
     ),
-    orderBy: [desc(leads.leadScore)],
-    limit: 50,
+    // Mirror processHotLeads (2026-09-21): never-contacted first, then score.
+    orderBy: [asc(leads.lastContactDate), desc(leads.leadScore)],
+    limit: 200,
   });
   const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
   const verdicts: any[] = [];
