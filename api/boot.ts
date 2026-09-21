@@ -13,7 +13,7 @@ import { rateLimiter } from "hono-rate-limiter";
 import type { HttpBindings } from "@hono/node-server";
 import { serve } from "@hono/node-server";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { sql, eq, and, or, gte, inArray, desc, asc, isNull } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,8 +22,7 @@ import { fileURLToPath } from "node:url";
 import { appRouter } from "./router";
 import { createContext } from "./context";
 import { env, validateEnv } from "./lib/env";
-import { leads, callQueue, dncList, phoneValidation } from "../db/schema";
-import { getCallingConfig, isWithinCallWindow } from "./lib/vapi";
+import { leads } from "../db/schema";
 import { notify, sendAlert } from "./lib/telegram";
 import { createMayaWebhookRouter } from "./routers/maya-webhook";
 import { getDb } from "./queries/connection";
@@ -937,114 +936,7 @@ async function handleCronMigrate(c: any) {
 app.get("/api/cron/migrate", handleCronMigrate);
 app.post("/api/cron/migrate", handleCronMigrate);
 
-// TEMPORARY 2026-09-21 — READ-ONLY dial eligibility diagnostic (no dials, no
-// writes, no Numverify API spend — cache reads only). Remove after use.
-app.post("/api/cron/diag-dial", async (c: any) => {
-  if (!checkCronAuth(c)) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
-  const db = getDb();
-  const config = await getCallingConfig();
-  const tz = config?.timezone || "America/New_York";
-  const inWindow = isWithinCallWindow(
-    config?.callWindowStart || "09:00",
-    config?.callWindowEnd || "19:00",
-    tz
-  );
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const counted = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(callQueue)
-    .where(
-      and(
-        gte(callQueue.createdAt, todayStart),
-        inArray(callQueue.status, ["dialing", "connected", "completed"] as any)
-      )
-    );
-  const countedToday = Number(counted[0]?.count ?? 0);
-  const remaining = (config?.maxDailyCalls ?? 100) - countedToday;
-  const candidates = await db.query.leads.findMany({
-    where: and(
-      eq(leads.pipelineStage, "hot_routing"),
-      or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false))
-    ),
-    // Mirror processHotLeads (2026-09-21): never-contacted first, then score.
-    orderBy: [asc(leads.lastContactDate), desc(leads.leadScore)],
-    limit: 200,
-  });
-  const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
-  const verdicts: any[] = [];
-  for (const lead of candidates) {
-    const v: any = { id: lead.id, lastContact: lead.lastContactDate };
-    if (!lead.phone) {
-      v.decision = "no_phone";
-      verdicts.push(v);
-      continue;
-    }
-    const digits = String(lead.phone).replace(/\D/g, "");
-    if (digits.length < 10) {
-      v.decision = "invalid_phone";
-      verdicts.push(v);
-      continue;
-    }
-    const recent = await db.query.callQueue.findFirst({
-      where: and(
-        eq(callQueue.leadId, lead.id),
-        gte(callQueue.createdAt, twoDaysAgo),
-        or(
-          inArray(callQueue.status, ["dialing", "connected", "completed"] as any),
-          and(
-            eq(callQueue.status, "failed"),
-            sql`${callQueue.externalCallId} IS NOT NULL`
-          )
-        )
-      ),
-      orderBy: [desc(callQueue.createdAt)],
-    });
-    if (recent) {
-      v.decision = "guard_48h";
-      v.recentStatus = recent.status;
-      v.recentAt = recent.createdAt;
-      verdicts.push(v);
-      continue;
-    }
-    const dnc = await db.query.dncList.findFirst({
-      where: eq(dncList.phone, digits),
-    });
-    if (dnc) {
-      v.decision = "dnc";
-      v.reason = (dnc as any).reason;
-      verdicts.push(v);
-      continue;
-    }
-    const pv = await db.query.phoneValidation.findFirst({
-      where: eq(phoneValidation.phone, digits),
-    });
-    if (pv && (pv.status === "invalid" || pv.status === "disconnected")) {
-      v.decision = "line_" + pv.status;
-      v.lineType = pv.lineType;
-      verdicts.push(v);
-      continue;
-    }
-    v.decision = "eligible";
-    v.cachedValidation = pv ? { status: pv.status, lineType: pv.lineType } : null;
-    verdicts.push(v);
-  }
-  const byDecision: Record<string, number> = {};
-  for (const v of verdicts) byDecision[v.decision] = (byDecision[v.decision] || 0) + 1;
-  return c.json({
-    ok: true,
-    serverNow: new Date().toISOString(),
-    inWindow,
-    maxDailyCalls: config?.maxDailyCalls,
-    window: `${config?.callWindowStart}-${config?.callWindowEnd} ${tz}`,
-    countedToday,
-    remaining,
-    candidates: candidates.length,
-    byDecision,
-    blocked: verdicts.filter((v) => v.decision !== "eligible"),
-  });
+
 });
 
 // Pipeline tick — route new leads, auto-dial hot leads via Maya/VAPI, send due
