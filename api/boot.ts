@@ -936,9 +936,6 @@ async function handleCronMigrate(c: any) {
 app.get("/api/cron/migrate", handleCronMigrate);
 app.post("/api/cron/migrate", handleCronMigrate);
 
-
-});
-
 // Pipeline tick — route new leads, auto-dial hot leads via Maya/VAPI, send due
 // LadyJaye nurture SMS. The in-process schedulers (telegram-scheduler's 15-min
 // tick, call-worker) only run on a persistent server; on Vercel serverless
