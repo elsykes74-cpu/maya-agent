@@ -9,6 +9,7 @@ export interface VapiCallRequest {
   assistantId?: string;
   assistantOverrides?: {
     variableValues?: Record<string, string | number | boolean | null>;
+    firstMessage?: string;
   };
   assistant?: {
     name?: string;
@@ -140,8 +141,18 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
 
   if (assistantId) {
     body.assistantId = assistantId;
+    // Opener B (Erick approved 2026-09-24): property-specific, under 20s,
+    // easy-out close. Injected per call so the real address is spoken.
+    const openerName = sellerName?.trim() ? sellerName : "there";
+    const openerCity = String(variables.city || "").trim() || "Springfield";
+    const propertyRef = variables.propertyAddress || `your property in ${openerCity}`;
+    const opener =
+      `Hi ${openerName}, it's Maya with Meridian Home Group. Quick one — ` +
+      `I'm looking at ${propertyRef} and we're buying in ${openerCity} right now. ` +
+      `Would you ever consider a cash offer on it, or is it definitely not for sale?`;
     body.assistantOverrides = {
       variableValues: variables,
+      firstMessage: opener,
     };
   } else {
     const ai = await getAIConfigForCall();
