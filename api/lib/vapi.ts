@@ -10,6 +10,7 @@ export interface VapiCallRequest {
   assistantOverrides?: {
     variableValues?: Record<string, string | number | boolean | null>;
     firstMessage?: string;
+    voicemailMessage?: string;
   };
   assistant?: {
     name?: string;
@@ -150,9 +151,16 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
       `Hi ${openerName}, it's Maya with Meridian Home Group. Quick one — ` +
       `I'm looking at ${propertyRef} and we're buying in ${openerCity} right now. ` +
       `Would you ever consider a cash offer on it, or is it definitely not for sale?`;
+    // Voicemail drop (Erick approved 2026-09-25): spoken when voicemail
+    // detection triggers. Property-specific, callback number included.
+    const voicemailMessage =
+      `Hi ${openerName}, it's Maya with Meridian Home Group — I was calling about ${propertyRef}. ` +
+      `We're buying a few houses in ${openerCity} this month and I'd love to make you a cash offer. ` +
+      `Call me back at 620-878-9172 whenever's good.`;
     body.assistantOverrides = {
       variableValues: variables,
       firstMessage: opener,
+      voicemailMessage,
     };
   } else {
     const ai = await getAIConfigForCall();
