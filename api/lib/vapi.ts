@@ -113,8 +113,15 @@ function personalize(text: string, variables: ReturnType<typeof buildAssistantVa
     .replace(/\[Agent Name\]/g, "Erick");
 }
 
+/** Last VAPI call-creation failure, for queue-row diagnostics. Reset per call. */
+let lastVapiError: string | null = null;
+/** Returns the most recent VAPI call-creation error detail (null if none). */
+export function getLastVapiError(): string | null {
+  return lastVapiError;
+}
+
 export async function createVapiCall(leadId: number, phone: string, sellerName: string): Promise<VapiCallResponse | null> {
-  const config = await getCallingConfig();
+  lastVapiError = null;  const config = await getCallingConfig();
   if (!config || !config.apiKey) {
     console.error("Vapi API key not configured");
     return null;
@@ -238,6 +245,9 @@ export async function createVapiCall(leadId: number, phone: string, sellerName: 
   if (!res.ok) {
     const err = await res.text();
     console.error("Vapi API error:", err);
+    // Surface the real failure in the queue row (diagnostic 2026-10-13):
+    // callers record getLastVapiError() instead of a generic message.
+    lastVapiError = `HTTP ${res.status}: ${err.slice(0, 300)}`;
     return null;
   }
 

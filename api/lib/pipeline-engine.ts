@@ -20,7 +20,7 @@ import {
 } from "../../db/schema";
 import { computeLeadScore } from "./lead-scorer";
 import { sendTwilioSms } from "./twilio";
-import { createVapiCall, getCallingConfig, isWithinCallWindow, scrubPhone } from "./vapi";
+import { createVapiCall, getCallingConfig, getLastVapiError, isWithinCallWindow, scrubPhone } from "./vapi";
 import {
   reconcileCallOutcomes,
   processFollowUpTasks,
@@ -405,9 +405,10 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
 
       const vapiCall = await createVapiCall(lead.id, lead.phone, lead.sellerName || "Seller");
       if (!vapiCall) {
+        const detail = getLastVapiError();
         await db
           .update(callQueue)
-          .set({ status: "failed", errorMessage: "VAPI call request failed (see function logs)" } as any)
+          .set({ status: "failed", errorMessage: `VAPI call request failed${detail ? ` — ${detail}` : " (see function logs)"}` } as any)
           .where(eq(callQueue.id, queueRow.id));
         return false;
       }
