@@ -57,19 +57,59 @@ function transcriptHas(transcript: string, phrases: string[]): boolean {
   return phrases.some((p) => t.includes(p));
 }
 
+/** Phrases that mark an automated phone menu (IVR) rather than a human. */
+const IVR_PHRASES = [
+  "press 1", "press one", "press 2", "press two", "press 3", "press three",
+  "for english", "para español",
+  "main menu", "if you know your party's extension", "if you know the extension",
+  "your call is very important", "please hold",
+];
+
+/** Voicemail-greeting markers: a machine answered and asked for a message. */
+const VM_GREETING_PHRASES = [
+  "after the tone", "after the beep", "to leave a message", "leave a detailed message",
+  "please leave your name", "not available to take your call",
+];
+
+/** VAPI transcripts mark turns as "AI:" / "User:". Return only the human's turns. */
+function humanTurns(transcript: string): string {
+  const lines = transcript.split(/\r?\n/);
+  const human = lines.filter((l) =>
+    /^(user|human|customer|caller)\s*:/i.test(l.trim()),
+  );
+  // No speaker markers (plain concatenated text) — fall back to the whole thing.
+  return human.length > 0 ? human.join("\n") : transcript;
+}
+
 /** Map a finished VAPI call to a CRM outcome, preferring what was actually said. */
 function mapOutcome(detail: VapiCallDetail): CallOutcome {
   const t = (detail.transcript ?? "").toLowerCase();
   const reason = (detail.endedReason ?? "").toLowerCase();
 
-  if (transcriptHas(t, DNC_PHRASES)) return "dnc";
-  if (transcriptHas(t, APPOINTMENT_PHRASES)) return "appointment_set";
-  if (transcriptHas(t, CALLBACK_PHRASES)) return "callback_requested";
-  if (transcriptHas(t, NOT_INTERESTED_PHRASES)) return "not_interested";
-
+  // Machine-side outcomes win over transcript phrases: an IVR menu or a
+  // voicemail greeting can say "call me back" / "call back later" — trusting
+  // the transcript first mislabeled menus as "answered" and voicemails as
+  // "callback requested".
   if (reason.includes("voicemail")) return "voicemail";
   if (reason.includes("no-answer") || reason.includes("no_answer")) return "no_answer";
   if (reason.includes("busy")) return "busy";
+
+  // Machine-answered calls: the greeting text makes a long transcript, but no
+  // human was ever reached. Voicemail greetings first (they often contain
+  // "call me back" / "call back later"), then IVR menus. no_answer keeps the
+  // fast retry cadence.
+  if (transcriptHas(t, VM_GREETING_PHRASES)) return "voicemail";
+  if (transcriptHas(t, IVR_PHRASES)) return "no_answer";
+
+  // Speaker-aware: only what the HUMAN said classifies the call. The
+  // assistant's own script ("would you like to schedule a walkthrough?",
+  // "I'll call you back later") must not set the outcome.
+  const human = humanTurns(t);
+  if (transcriptHas(human, DNC_PHRASES)) return "dnc";
+  if (transcriptHas(human, APPOINTMENT_PHRASES)) return "appointment_set";
+  if (transcriptHas(human, CALLBACK_PHRASES)) return "callback_requested";
+  if (transcriptHas(human, NOT_INTERESTED_PHRASES)) return "not_interested";
+
   if (reason.includes("failed") || reason.includes("error")) {
     return t.length > 200 ? "answered" : "disconnected";
   }

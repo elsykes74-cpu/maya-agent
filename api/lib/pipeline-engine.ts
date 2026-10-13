@@ -7,11 +7,12 @@
  *
  * Driven by runPipelineTick(), invoked every 15 min from telegram-scheduler.
  */
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "../queries/connection";
 import {
   activities,
   callQueue,
+  calls,
   leads,
   smsLogs,
   smsTemplates,
@@ -304,11 +305,10 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   if (remaining <= 0) return { dialed: 0, reason: "daily cap reached" };
 
   const BATCH = Math.min(remaining, 5);
-  // Fetch enough candidates to fill the batch. The hot pool (108+ leads) is
-  // much larger than the old limit of 50, and every lead scores 70, so the
-  // same arbitrary top-50 — mostly phoneless or guard-blocked — starved the
-  // dialer while 30+ never-contacted phone leads sat below the cutoff,
-  // invisible. Fixed 2026-09-21: scan up to 200, never-contacted first.
+  // Fetch enough candidates to fill the batch. The hot pool (100+ leads) is
+  // much larger than the batch, and guard-blocked or phoneless leads at the
+  // top of a shallow scan starve the dialer while never-contacted phone
+  // leads sit below the cutoff, invisible.
   const candidates = await db.query.leads.findMany({
     // appointmentSet defaults to false (not NULL) on every lead row, so match
     // both NULL and false — "not yet set" means the lead hasn't booked.
@@ -316,10 +316,20 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
       eq(leads.pipelineStage, "hot_routing"),
       or(isNull(leads.appointmentSet), eq(leads.appointmentSet, false)),
     ),
-    // Never-contacted leads first (NULLS FIRST is Postgres ASC default),
-    // then highest score — every fresh number gets its first dial ASAP.
-    orderBy: [asc(leads.lastContactDate), desc(leads.leadScore)],
-    limit: Math.min(remaining, 200),
+    // Never-contacted leads first — every fresh number gets its first dial
+    // ASAP. NOTE: this MUST be explicit. Plain asc() does NOT put NULLs
+    // first: Postgres sorts NULLS LAST on ASC by default, so the 2026-09-21
+    // "never-contacted first" fix silently did nothing — never-contacted
+    // leads (NULL lastContactDate) sorted dead last, the scan only ever saw
+    // the same contacted top-N, and the dialer stalled once that pool was
+    // exhausted (2026-10-10). Fixed 2026-10-13: explicit NULLS FIRST.
+    orderBy: [sql`${leads.lastContactDate} ASC NULLS FIRST`, desc(leads.leadScore)],
+    // Scan the whole hot pool every tick. The old limit of
+    // Math.min(remaining, 200) scanned only ~20 rows under the 20/day cap, so
+    // the same guard-blocked top-20 starved the dialer while 48 never-dialed
+    // phone leads sat below the cutoff. Actual dials stay bounded by BATCH.
+    // Fixed 2026-10-13: scan depth decoupled from the daily cap.
+    limit: 200,
   });
 
   const twoDaysAgo = new Date(Date.now() - 48 * 3600 * 1000);
@@ -330,6 +340,22 @@ export async function processHotLeads(): Promise<{ dialed: number; reason?: stri
   await mapWithConcurrency(candidates, 4, async (lead) => {
     if (eligible.length >= BATCH) return false;
     if (!lead.phone) return false;
+    // Dead number / hard no: a lead whose most recent call outcome was
+    // disconnected, wrong_number, or not_interested is never dialed again.
+    // Without this, the hot loop re-arms 48h after the dial and redials the
+    // dead number (or a seller who said "not interested") forever.
+    const lastCall = await db.query.calls.findFirst({
+      where: eq(calls.leadId, lead.id),
+      orderBy: [desc(calls.createdAt)],
+    });
+    if (
+      lastCall &&
+      (lastCall.callOutcome === "disconnected" ||
+        lastCall.callOutcome === "wrong_number" ||
+        lastCall.callOutcome === "not_interested")
+    ) {
+      return false;
+    }
     // Don't hammer: skip if called in the last 48h. A queue row that failed
     // before the call reached VAPI (failed + no external call id, or stuck
     // "queued") is not a call — it must not block retries.
